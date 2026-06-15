@@ -75,7 +75,9 @@ export function initAutoUpdater(): void {
       console.warn('[updater] skipping incomplete release:', err.message)
       return
     }
-    const msg = err.message.replace(/\s*\(.*?\)\s*/g, '').trim()
+    // Pass the raw message — the renderer normalizeUpdaterMessage() will
+    // translate network errors to a user-friendly Arabic string.
+    const msg = err.message.trim()
     send('updater:error', { message: msg })
   })
 
@@ -86,7 +88,7 @@ export function initAutoUpdater(): void {
       const result = await autoUpdater.checkForUpdates()
       console.log('[updater] check result:', result)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = e instanceof Error ? e.message.trim() : String(e)
       console.error('[updater] check-now error:', msg)
       send('updater:error', { message: msg })
     }

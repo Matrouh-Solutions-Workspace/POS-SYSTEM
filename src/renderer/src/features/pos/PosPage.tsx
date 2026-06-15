@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { DiningTable, DiscountType, MenuCategory, MenuItem, MenuItemSizeOption, Order, OrderType } from '@shared/types'
+import type {
+  DiningTable,
+  DiscountType,
+  MenuCategory,
+  MenuItem,
+  MenuItemAttachment,
+  MenuItemSizeOption,
+  Order,
+  OrderType
+} from '@shared/types'
 import { getIngredientStocks } from '@renderer/features/inventory/inventory-service'
 import { listCategories, listMenuItems, getRecipeByMenuItem } from '@renderer/features/menu/menu-service'
 import {
@@ -33,6 +42,14 @@ import { FloorMapPicker } from './FloorMapPicker'
 interface LocalCartLine extends CartLine {
   key: string
   parentKey?: string
+}
+
+interface PendingCartSelection {
+  item: MenuItem
+  quantity: number
+  unitPrice: number
+  size?: MenuItemSizeOption
+  anchor: DOMRect
 }
 
 // ── Floating popup wrapper ────────────────────────────────────────────────
@@ -174,6 +191,76 @@ function SizePopup({
             <span>{size.price.toFixed(2)}</span>
           </button>
         ))}
+      </div>
+    </FloatingPopup>
+  )
+}
+
+function AddonPopup({
+  item,
+  anchor,
+  onConfirm,
+  onClose
+}: {
+  item: MenuItem
+  anchor: DOMRect
+  onConfirm: (selected: MenuItemAttachment[]) => void
+  onClose: () => void
+}): React.ReactElement {
+  const attachments = item.attachments ?? []
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+
+  function toggle(id: string): void {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id])
+  }
+
+  return (
+    <FloatingPopup anchor={anchor} onClose={onClose}>
+      <div className="weight-popup__header">
+        <span>{item.nameAr}</span>
+        <span className="weight-popup__price">اختيار المرفقات</span>
+      </div>
+      <div style={{ display: 'grid', gap: 8 }}>
+        {attachments.map((attachment) => (
+          <label
+            key={attachment.id}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              padding: '8px 10px',
+              borderRadius: 10,
+              background: 'rgba(255,255,255,0.04)',
+              cursor: 'pointer'
+            }}
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(attachment.id)}
+                onChange={() => toggle(attachment.id)}
+              />
+              <span>{attachment.nameAr}</span>
+            </span>
+            <span>{attachment.price.toFixed(2)}</span>
+          </label>
+        ))}
+      </div>
+      <div className="modal-actions" style={{ marginTop: 12 }}>
+        <button
+          type="button"
+          className="btn btn--primary btn--sm"
+          onClick={() => {
+            onConfirm(attachments.filter((attachment) => selectedIds.includes(attachment.id)))
+            onClose()
+          }}
+        >
+          إضافة
+        </button>
+        <button type="button" className="btn btn--secondary btn--sm" onClick={onClose}>
+          إلغاء
+        </button>
       </div>
     </FloatingPopup>
   )
@@ -374,6 +461,7 @@ export function PosPage(): React.ReactElement {
   // Item popups
   const [weightPopup, setWeightPopup] = useState<{ item: MenuItem; rect: DOMRect } | null>(null)
   const [sizePopup, setSizePopup] = useState<{ item: MenuItem; rect: DOMRect } | null>(null)
+  const [addonPopup, setAddonPopup] = useState<PendingCartSelection | null>(null)
 
   // UI state
   const [loading, setLoading] = useState(false)
@@ -489,8 +577,24 @@ export function PosPage(): React.ReactElement {
 
     const unavailable = new Map<string, string>()
     const lowItems = new Set<string>()
+    const stockByIngredientId = new Map(stocks.map((stock) => [stock.ingredientId, stock]))
     await Promise.all(
       menu.map(async (item) => {
+        if (item.linkedIngredientId) {
+          const linkedStock = stockByIngredientId.get(item.linkedIngredientId)
+          if (linkedStock) {
+            if (linkedStock.quantity <= 0) {
+              unavailable.set(item.id, linkedStock.nameAr)
+              return
+            }
+            if (
+              linkedStock.lowStockThreshold != null &&
+              linkedStock.quantity <= linkedStock.lowStockThreshold
+            ) {
+              lowItems.add(item.id)
+            }
+          }
+        }
         const recipe = await getRecipeByMenuItem(item.id)
         if (!recipe) return
         for (const line of recipe.lines) {
@@ -575,14 +679,41 @@ export function PosPage(): React.ReactElement {
   // ── Cart helpers ──────────────────────────────────────────────────────
 
   function cartKey(item: MenuItem, quantity: number, unitPrice: number, size?: MenuItemSizeOption): string {
-    if (item.isWeighted) return `${item.id}:w:${quantity.toFixed(3)}:${unitPrice.toFixed(4)}`
-    if (size) return `${item.id}:s:${size.id}`
+    return cartKeyWithAttachments(item, quantity, unitPrice, size)
+  }
+
+  function cartKeyWithAttachments(
+    item: MenuItem,
+    quantity: number,
+    unitPrice: number,
+    size?: MenuItemSizeOption,
+    attachments: MenuItemAttachment[] = []
+  ): string {
+    const suffix = attachments.length > 0
+      ? `:a:${attachments.map((attachment) => attachment.id).sort().join(',')}`
+      : ''
+    if (item.isWeighted) return `${item.id}:w:${quantity.toFixed(3)}:${unitPrice.toFixed(4)}${suffix}`
+    if (size) return `${item.id}:s:${size.id}${suffix}`
     return item.id
   }
 
-  function addToCart(item: MenuItem, quantity = 1, unitPrice = item.price, size?: MenuItemSizeOption): void {
+  function openAddonsOrAddToCart(selection: PendingCartSelection): void {
+    if ((selection.item.attachments?.length ?? 0) > 0) {
+      setAddonPopup(selection)
+      return
+    }
+    addToCart(selection.item, selection.quantity, selection.unitPrice, selection.size)
+  }
+
+  function addToCart(
+    item: MenuItem,
+    quantity = 1,
+    unitPrice = item.price,
+    size?: MenuItemSizeOption,
+    selectedAttachments: MenuItemAttachment[] = []
+  ): void {
     if (unavailableItems.has(item.id)) return
-    const key = cartKey(item, quantity, unitPrice, size)
+    const key = cartKeyWithAttachments(item, quantity, unitPrice, size, selectedAttachments)
     const mainLine: LocalCartLine = {
       key,
       menuItemId: item.id,
@@ -593,7 +724,7 @@ export function PosPage(): React.ReactElement {
       unitLabel: item.isWeighted ? 'كجم' : undefined,
       weightGrams: item.isWeighted ? Math.round(quantity * 1000) : undefined
     }
-    const attachmentLines: LocalCartLine[] = (item.attachments ?? []).map((att) => ({
+    const attachmentLines: LocalCartLine[] = selectedAttachments.map((att) => ({
       key: `${key}:att:${att.id}`,
       parentKey: key,
       menuItemId: `${item.id}:attachment:${att.id}`,
@@ -1005,7 +1136,7 @@ export function PosPage(): React.ReactElement {
                     const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect()
                     if (item.isWeighted) setWeightPopup({ item, rect })
                     else if (hasSizes) setSizePopup({ item, rect })
-                    else addToCart(item)
+                    else openAddonsOrAddToCart({ item, quantity: 1, unitPrice: item.price, anchor: rect })
                   }}
                 >
                   {item.nameAr}
@@ -1028,7 +1159,12 @@ export function PosPage(): React.ReactElement {
         <WeightPopup
           item={weightPopup.item}
           anchor={weightPopup.rect}
-          onSelect={(kg, unitPrice) => addToCart(weightPopup.item, kg, unitPrice)}
+          onSelect={(kg, unitPrice) => openAddonsOrAddToCart({
+            item: weightPopup.item,
+            quantity: kg,
+            unitPrice,
+            anchor: weightPopup.rect
+          })}
           onClose={() => setWeightPopup(null)}
         />
       )}
@@ -1036,8 +1172,31 @@ export function PosPage(): React.ReactElement {
         <SizePopup
           item={sizePopup.item}
           anchor={sizePopup.rect}
-          onSelect={(size) => addToCart(sizePopup.item, 1, size.price, size)}
+          onSelect={(size) => openAddonsOrAddToCart({
+            item: sizePopup.item,
+            quantity: 1,
+            unitPrice: size.price,
+            size,
+            anchor: sizePopup.rect
+          })}
           onClose={() => setSizePopup(null)}
+        />
+      )}
+      {addonPopup && (
+        <AddonPopup
+          item={addonPopup.item}
+          anchor={addonPopup.anchor}
+          onConfirm={(selectedAttachments) => {
+            addToCart(
+              addonPopup.item,
+              addonPopup.quantity,
+              addonPopup.unitPrice,
+              addonPopup.size,
+              selectedAttachments
+            )
+            setAddonPopup(null)
+          }}
+          onClose={() => setAddonPopup(null)}
         />
       )}
 

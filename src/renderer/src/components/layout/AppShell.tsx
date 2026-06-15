@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { logoutUser } from '@renderer/features/auth/auth-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
@@ -20,7 +20,8 @@ import { useGlobalKeyboardShortcuts } from '@renderer/features/keyboard/use-keyb
 import { useTabShortcuts } from '@renderer/features/keyboard/use-tab-shortcuts'
 import { useKeyboardStore } from '@renderer/features/keyboard/keyboard-store'
 
-const SIDEBAR_PINNED_KEY = 'abdokofta.sidebarPinnedOpen'
+const SIDEBAR_COLLAPSE_PREF_KEY = 'abdokofta.sidebarCollapsePreference'
+type SidebarCollapsePreference = 'expanded' | 'collapsed'
 
 interface AppShellProps {
   nav: NavItem[]
@@ -56,41 +57,32 @@ export function AppShell({ nav, children }: AppShellProps): React.ReactElement {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Sidebar collapse in split mode ───────────────────────────────────────
+  // ── Sidebar collapse ──────────────────────────────────────────────────────
   const isSplitActive = panes.length >= 2
 
-  // User can manually pin the sidebar open even in split mode.
-  // We store this preference in localStorage so it survives tab-changes.
-  const [pinnedOpen, setPinnedOpen] = useState<boolean>(() => {
-    try { return localStorage.getItem(SIDEBAR_PINNED_KEY) === '1' } catch { return false }
+  const [sidebarCollapsePreference, setSidebarCollapsePreference] = useState<SidebarCollapsePreference | null>(() => {
+    try {
+      const stored = localStorage.getItem(SIDEBAR_COLLAPSE_PREF_KEY)
+      return stored === 'expanded' || stored === 'collapsed' ? stored : null
+    } catch {
+      return null
+    }
   })
 
-  // When split mode activates, auto-collapse unless the user previously pinned it open.
-  // When split mode deactivates, always restore full sidebar.
-  const prevSplitRef = useRef(isSplitActive)
-  useEffect(() => {
-    const wasActive = prevSplitRef.current
-    prevSplitRef.current = isSplitActive
-    if (!wasActive && isSplitActive) {
-      // Just entered split mode — collapse unless pinned
-      if (!pinnedOpen) {
-        // nothing to do — isCollapsed is derived below
-      }
-    }
-    if (wasActive && !isSplitActive) {
-      // Exited split mode — clear any manual pin state
-      setPinnedOpen(false)
-      try { localStorage.removeItem(SIDEBAR_PINNED_KEY) } catch { /* ignore */ }
-    }
-  }, [isSplitActive, pinnedOpen])
+  // Default behavior is still the same in split mode:
+  // if no explicit preference is saved, split view starts collapsed.
+  const sidebarCollapsed =
+    sidebarCollapsePreference === 'collapsed' ||
+    (sidebarCollapsePreference !== 'expanded' && isSplitActive)
 
-  // Sidebar is collapsed when: split is active AND user hasn't pinned it open
-  const sidebarCollapsed = isSplitActive && !pinnedOpen
-
-  function toggleSidebarPin(): void {
-    const next = !pinnedOpen
-    setPinnedOpen(next)
-    try { localStorage.setItem(SIDEBAR_PINNED_KEY, next ? '1' : '0') } catch { /* ignore */ }
+  function toggleSidebarCollapse(): void {
+    const nextPreference: SidebarCollapsePreference = sidebarCollapsed ? 'expanded' : 'collapsed'
+    setSidebarCollapsePreference(nextPreference)
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSE_PREF_KEY, nextPreference)
+    } catch {
+      /* ignore */
+    }
   }
 
   // Build a flat map of path → nav item for tab sync
@@ -221,18 +213,16 @@ export function AppShell({ nav, children }: AppShellProps): React.ReactElement {
           {!sidebarCollapsed && (
             <span className="app-sidebar__brand-text">{brandName}</span>
           )}
-          {isSplitActive && (
-            <button
-              type="button"
-              className="app-sidebar__toggle"
-              onClick={toggleSidebarPin}
-              title={sidebarCollapsed ? 'توسيع الشريط الجانبي' : 'طي الشريط الجانبي'}
-              aria-label={sidebarCollapsed ? 'توسيع' : 'طي'}
-            >
-              {/* In RTL: chevron-right = expand (points inward), chevron-left = collapse */}
-              {sidebarCollapsed ? <MdChevronLeft /> : <MdChevronRight />}
-            </button>
-          )}
+          <button
+            type="button"
+            className="app-sidebar__toggle"
+            onClick={toggleSidebarCollapse}
+            title={sidebarCollapsed ? 'توسيع الشريط الجانبي' : 'طي الشريط الجانبي'}
+            aria-label={sidebarCollapsed ? 'توسيع' : 'طي'}
+          >
+            {/* In RTL: chevron-right = expand (points inward), chevron-left = collapse */}
+            {sidebarCollapsed ? <MdChevronLeft /> : <MdChevronRight />}
+          </button>
         </div>
 
         <nav className="app-sidebar__nav">
@@ -352,14 +342,37 @@ export function AppShell({ nav, children }: AppShellProps): React.ReactElement {
                     <span className="version-popup__label">أحدث إصدار</span>
                     <span className="version-popup__value">
                       {updateState.phase === 'checking' && <span className="version-popup__checking">جارٍ التحقق…</span>}
-                      {updateState.phase === 'error'    && <span className="version-popup__error">تعذّر الاتصال</span>}
+                      {updateState.phase === 'error'    && <span className="version-popup__error">تعذّر التحقق</span>}
                       {latestVersion && <span className={updateState.phase === 'uptodate' ? 'version-popup__same' : 'version-popup__newer'}>v{latestVersion}</span>}
                       {updateState.phase === 'idle'     && <span className="version-popup__checking">جارٍ التحقق…</span>}
                     </span>
                   </div>
                   {updateState.phase === 'uptodate' && <div className="version-popup__status version-popup__status--ok">✓ التطبيق محدّث</div>}
                   {(updateState.phase === 'available' || updateState.phase === 'downloading' || updateState.phase === 'ready') && <div className="version-popup__status version-popup__status--new">↑ يتوفر تحديث جديد</div>}
-                  {updateState.phase === 'error' && <div className="version-popup__status version-popup__status--err">{updateState.message}</div>}
+                  {updateState.phase === 'error' && (
+                    <div className="version-popup__status version-popup__status--err">
+                      {typeof navigator !== 'undefined' && !navigator.onLine
+                        ? '📶 لا يوجد اتصال بالإنترنت — تعذّر التحقق من التحديثات'
+                        : (updateState.message.includes('getaddrinfo')
+                            || updateState.message.includes('ENOTFOUND')
+                            || updateState.message.includes('ENETUNREACH')
+                            || updateState.message.includes('internet disconnected')
+                            ? '📶 لا يوجد اتصال بالإنترنت — تعذّر التحقق من التحديثات'
+                            : updateState.message || 'تعذّر التحقق من التحديثات'
+                          )
+                      }
+                    </div>
+                  )}
+                  {updateState.phase === 'error' && (
+                    <button
+                      type="button"
+                      className="btn btn--secondary btn--sm"
+                      style={{ marginTop: 6, width: '100%' }}
+                      onClick={handleCheckUpdate}
+                    >
+                      إعادة المحاولة
+                    </button>
+                  )}
                 </div>
               )}
             </div>

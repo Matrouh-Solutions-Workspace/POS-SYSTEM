@@ -132,6 +132,66 @@ interface FreeChair {
 
 type ToolMode = 'select' | 'draw_wall'
 
+interface MarqueeRect {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+interface DragTableSnapshot {
+  id: string
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+interface DragChairSnapshot {
+  id: string
+  tableId: string
+  x: number
+  y: number
+}
+
+interface DragWallSnapshot {
+  id: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}
+
+interface SelectionDragSnapshot {
+  tables: DragTableSnapshot[]
+  chairs: DragChairSnapshot[]
+  walls: DragWallSnapshot[]
+}
+
+function normalizeRect(x1: number, y1: number, x2: number, y2: number): MarqueeRect {
+  return {
+    left: Math.min(x1, x2),
+    top: Math.min(y1, y2),
+    right: Math.max(x1, x2),
+    bottom: Math.max(y1, y2),
+  }
+}
+
+function rectsIntersect(a: MarqueeRect, b: MarqueeRect): boolean {
+  return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top
+}
+
+function wallIntersectsRect(wall: WallSegment, rect: MarqueeRect): boolean {
+  const pad = Math.max((wall.thickness ?? WALL_W) / 2, 8)
+  const wallRect: MarqueeRect = {
+    left: Math.min(wall.x1, wall.x2) - pad,
+    top: Math.min(wall.y1, wall.y2) - pad,
+    right: Math.max(wall.x1, wall.x2) + pad,
+    bottom: Math.max(wall.y1, wall.y2) + pad,
+  }
+  return rectsIntersect(rect, wallRect)
+}
+
 // ── WallLayer SVG ──────────────────────────────────────────────────────────
 
 function WallLayer({
@@ -142,6 +202,7 @@ function WallLayer({
   onSelectWall,
   drawingWall,
   onWallPointerDown,
+  onWallClick,
   tool,
 }: {
   walls: WallSegment[]
@@ -151,6 +212,7 @@ function WallLayer({
   onSelectWall: (id: string | null) => void
   drawingWall: WallSegment | null
   onWallPointerDown?: (e: React.PointerEvent<SVGLineElement>, id: string) => void
+  onWallClick?: (id: string) => void
   tool: ToolMode
 }): React.ReactElement {
   return (
@@ -170,7 +232,11 @@ function WallLayer({
             strokeLinecap="round"
             style={{ pointerEvents: 'visibleStroke', cursor: tool === 'select' ? 'grab' : 'crosshair' }}
             onPointerDown={onWallPointerDown ? (e) => onWallPointerDown(e, w.id) : undefined}
-            onClick={(e) => { e.stopPropagation(); onSelectWall(selectedWallId === w.id ? null : w.id) }}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (onWallClick) onWallClick(w.id)
+              else onSelectWall(w.id)
+            }}
           />
           {/* Visible stroke — pointer events off so the hit area handles everything */}
           <line
@@ -210,11 +276,13 @@ interface ChairNodeProps {
   isSelected: boolean
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>, id: string) => void
   onClick: (id: string) => void
+  nodeRef?: (node: HTMLDivElement | null) => void
 }
 
-function ChairNode({ chair, color, isSelected, onPointerDown, onClick }: ChairNodeProps): React.ReactElement {
+function ChairNode({ chair, color, isSelected, onPointerDown, onClick, nodeRef }: ChairNodeProps): React.ReactElement {
   return (
     <div
+      ref={nodeRef}
       className={`fp-chair${isSelected ? ' fp-chair--selected' : ''}`}
       style={{
         position: 'absolute',
@@ -244,9 +312,10 @@ interface TableNodeProps {
   isSelected: boolean
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>, id: string) => void
   onClick: (id: string) => void
+  nodeRef?: (node: HTMLDivElement | null) => void
 }
 
-function TableNode({ table, isSelected, onPointerDown, onClick }: TableNodeProps): React.ReactElement {
+function TableNode({ table, isSelected, onPointerDown, onClick, nodeRef }: TableNodeProps): React.ReactElement {
   const x = table.x ?? 0
   const y = table.y ?? 0
   const w = table.w ?? DEFAULT_W
@@ -257,6 +326,7 @@ function TableNode({ table, isSelected, onPointerDown, onClick }: TableNodeProps
 
   return (
     <div
+      ref={nodeRef}
       className={`fp-table${isSelected ? ' fp-table--selected' : ''}`}
       style={{
         position: 'absolute',
@@ -463,9 +533,10 @@ export function FloorPlanPage(): React.ReactElement {
   const [walls, setWalls]           = useState<WallSegment[]>([])
 
   // selection
-  const [selectedTableId, setSelectedTableId]   = useState<string | null>(null)
-  const [selectedChairId, setSelectedChairId]   = useState<string | null>(null)
-  const [selectedWallId, setSelectedWallId]     = useState<string | null>(null)
+  const [selectedTableIds, setSelectedTableIds] = useState<string[]>([])
+  const [selectedChairIds, setSelectedChairIds] = useState<string[]>([])
+  const [selectedWallIds, setSelectedWallIds]   = useState<string[]>([])
+  const [selectionBox, setSelectionBox]         = useState<MarqueeRect | null>(null)
 
   // UI
   const [tool, setTool]             = useState<ToolMode>('select')
@@ -483,13 +554,16 @@ export function FloorPlanPage(): React.ReactElement {
   const [editingFloor, setEditingFloor]   = useState<Floor | null>(null)
 
   // ── Drag refs — no state, zero re-renders during drag ──────────────────
-  type DragKind = 'table' | 'chair' | 'wall'
-  const dragging    = useRef<{ kind: DragKind; id: string } | null>(null)
+  type DragState = { kind: 'selection' } | { kind: 'chair'; id: string }
+  const dragging    = useRef<DragState | null>(null)
+  const dragStartPoint = useRef({ x: 0, y: 0 })
   const dragOffset  = useRef({ x: 0, y: 0 })
-  /** For wall drag: stores start-of-drag original endpoints */
-  const wallDragOrigin = useRef<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
+  const selectionDragRef = useRef<SelectionDragSnapshot | null>(null)
   const dragNodeRef = useRef<HTMLDivElement | null>(null)
   const canvasRef   = useRef<HTMLDivElement>(null)
+  const tableNodeRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const chairNodeRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const marqueeStartRef = useRef<{ x: number; y: number } | null>(null)
   /** True once the pointer has moved >4px during a drag — used to distinguish click vs drag */
   const dragMoved   = useRef(false)
 
@@ -544,6 +618,41 @@ export function FloorPlanPage(): React.ReactElement {
 
   const activeFloor = floors.find((f) => f.id === activeFloorId) ?? null
 
+  const clearSelection = useCallback((): void => {
+    setSelectedTableIds([])
+    setSelectedChairIds([])
+    setSelectedWallIds([])
+  }, [])
+
+  const setSelection = useCallback((tableIds: string[], chairIds: string[], wallIds: string[]): void => {
+    setSelectedTableIds(Array.from(new Set(tableIds)))
+    setSelectedChairIds(Array.from(new Set(chairIds)))
+    setSelectedWallIds(Array.from(new Set(wallIds)))
+  }, [])
+
+  const selectedTableId =
+    selectedTableIds.length === 1 && selectedChairIds.length === 0 && selectedWallIds.length === 0
+      ? selectedTableIds[0] ?? null
+      : null
+  const selectedChairId =
+    selectedChairIds.length === 1 && selectedTableIds.length === 0 && selectedWallIds.length === 0
+      ? selectedChairIds[0] ?? null
+      : null
+  const selectedWallId =
+    selectedWallIds.length === 1 && selectedTableIds.length === 0 && selectedChairIds.length === 0
+      ? selectedWallIds[0] ?? null
+      : null
+  const totalSelected = selectedTableIds.length + selectedChairIds.length + selectedWallIds.length
+
+  useEffect(() => {
+    clearSelection()
+    setSelectionBox(null)
+    marqueeStartRef.current = null
+    dragging.current = null
+    selectionDragRef.current = null
+    dragNodeRef.current = null
+  }, [activeFloorId, clearSelection])
+
   // ── Flash message ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!msg) return
@@ -580,12 +689,8 @@ export function FloorPlanPage(): React.ReactElement {
       // ── Delete / Backspace ───────────────────────────────────────────────
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
-        if (selectedTableId) {
-          void handleDeleteTable()
-        } else if (selectedChairId) {
-          handleRemoveChair()
-        } else if (selectedWallId) {
-          void handleDeleteWall()
+        if (totalSelected > 0) {
+          void handleDeleteSelection()
         }
       }
     }
@@ -593,12 +698,121 @@ export function FloorPlanPage(): React.ReactElement {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTableId, selectedChairId, selectedWallId, activeFloor, walls])
+  }, [totalSelected, selectedTableIds, selectedChairIds, selectedWallIds, activeFloor, walls, tables, chairs])
 
   // ── Canvas coord helper ────────────────────────────────────────────────
   function canvasCoord(clientX: number, clientY: number): { x: number; y: number } {
     const r = canvasRef.current!.getBoundingClientRect()
     return { x: (clientX - r.left) / zoom, y: (clientY - r.top) / zoom }
+  }
+
+  function buildSelectionDragSnapshot(tableIds: string[], chairIds: string[], wallIds: string[]): SelectionDragSnapshot {
+    const tableIdSet = new Set(tableIds)
+    const chairIdSet = new Set(chairIds)
+    const wallIdSet = new Set(wallIds)
+
+    const selectedTables = tables
+      .filter((t) => tableIdSet.has(t.id))
+      .map((t) => ({
+        id: t.id,
+        x: t.x ?? 0,
+        y: t.y ?? 0,
+        w: t.w ?? DEFAULT_W,
+        h: t.h ?? DEFAULT_H,
+      }))
+
+    const selectedChairs = chairs
+      .filter((c) => (tableIdSet.has(c.tableId) || chairIdSet.has(c.id)))
+      .map((c) => ({ id: c.id, tableId: c.tableId, x: c.x, y: c.y }))
+
+    const selectedWalls = walls
+      .filter((w) => wallIdSet.has(w.id))
+      .map((w) => ({ id: w.id, x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2 }))
+
+    return {
+      tables: selectedTables,
+      chairs: selectedChairs,
+      walls: selectedWalls,
+    }
+  }
+
+  function clampSelectionDelta(dx: number, dy: number, snapshot: SelectionDragSnapshot): { dx: number; dy: number } {
+    if (!activeFloor || snapshot.tables.length === 0) return { dx, dy }
+
+    let minDx = -Infinity
+    let maxDx = Infinity
+    let minDy = -Infinity
+    let maxDy = Infinity
+
+    for (const table of snapshot.tables) {
+      minDx = Math.max(minDx, -table.x)
+      maxDx = Math.min(maxDx, activeFloor.width - (table.x + table.w))
+      minDy = Math.max(minDy, -table.y)
+      maxDy = Math.min(maxDy, activeFloor.height - (table.y + table.h))
+    }
+
+    return {
+      dx: Math.max(minDx, Math.min(dx, maxDx)),
+      dy: Math.max(minDy, Math.min(dy, maxDy)),
+    }
+  }
+
+  function applySelectionPreview(snapshot: SelectionDragSnapshot, dx: number, dy: number): void {
+    for (const table of snapshot.tables) {
+      const node = tableNodeRefs.current[table.id]
+      if (!node) continue
+      node.style.left = `${table.x + dx}px`
+      node.style.top = `${table.y + dy}px`
+      node.style.zIndex = '100'
+      node.style.cursor = 'grabbing'
+    }
+
+    for (const chair of snapshot.chairs) {
+      const node = chairNodeRefs.current[chair.id]
+      if (!node) continue
+      node.style.left = `${chair.x + dx - CHAIR_R}px`
+      node.style.top = `${chair.y + dy - CHAIR_R}px`
+      node.style.zIndex = '200'
+      node.style.cursor = 'grabbing'
+    }
+
+    if (snapshot.walls.length > 0) {
+      const wallIdSet = new Set(snapshot.walls.map((w) => w.id))
+      const wallOrigin = new Map(snapshot.walls.map((w) => [w.id, w]))
+      setWalls((prev) => prev.map((wall) => {
+        if (!wallIdSet.has(wall.id)) return wall
+        const original = wallOrigin.get(wall.id)
+        return original
+          ? { ...wall, x1: original.x1 + dx, y1: original.y1 + dy, x2: original.x2 + dx, y2: original.y2 + dy }
+          : wall
+      }))
+    }
+  }
+
+  function resetSelectionPreview(snapshot: SelectionDragSnapshot): void {
+    for (const table of snapshot.tables) {
+      const node = tableNodeRefs.current[table.id]
+      if (!node) continue
+      node.style.zIndex = selectedTableIds.includes(table.id) ? '10' : '2'
+      node.style.cursor = 'grab'
+    }
+
+    for (const chair of snapshot.chairs) {
+      const node = chairNodeRefs.current[chair.id]
+      if (!node) continue
+      node.style.zIndex = '20'
+      node.style.cursor = 'grab'
+    }
+  }
+
+  function startSelectionDrag(pointerX: number, pointerY: number, tableIds: string[], chairIds: string[], wallIds: string[]): void {
+    const snapshot = buildSelectionDragSnapshot(tableIds, chairIds, wallIds)
+    if (snapshot.tables.length === 0 && snapshot.chairs.length === 0 && snapshot.walls.length === 0) return
+    dragStartPoint.current = { x: pointerX, y: pointerY }
+    selectionDragRef.current = snapshot
+    dragging.current = { kind: 'selection' }
+    dragMoved.current = false
+    applySelectionPreview(snapshot, 0, 0)
   }
 
   // ── Table drag ─────────────────────────────────────────────────────────
@@ -611,17 +825,15 @@ export function FloorPlanPage(): React.ReactElement {
     const table = tables.find((t) => t.id === id)
     if (!table) return
 
-    const { x: cx, y: cy } = canvasCoord(e.clientX, e.clientY)
-    dragOffset.current = { x: cx - (table.x ?? 0), y: cy - (table.y ?? 0) }
-    dragging.current   = { kind: 'table', id }
-    dragMoved.current  = false
-    dragNodeRef.current = e.currentTarget
-    dragNodeRef.current.style.zIndex = '100'
-    dragNodeRef.current.style.cursor = 'grabbing'
+    const isInSelection = selectedTableIds.includes(id)
+    const nextTableIds = isInSelection ? selectedTableIds : [id]
+    const nextChairIds = isInSelection ? selectedChairIds : []
+    const nextWallIds = isInSelection ? selectedWallIds : []
 
-    setSelectedTableId(id)
-    setSelectedChairId(null)
-    setSelectedWallId(null)
+    if (!isInSelection) setSelection(nextTableIds, nextChairIds, nextWallIds)
+
+    const { x: cx, y: cy } = canvasCoord(e.clientX, e.clientY)
+    startSelectionDrag(cx, cy, nextTableIds, nextChairIds, nextWallIds)
   }
 
   // ── Chair drag ─────────────────────────────────────────────────────────
@@ -634,17 +846,26 @@ export function FloorPlanPage(): React.ReactElement {
     const chair = chairs.find((c) => c.id === id)
     if (!chair) return
 
-    const { x: cx, y: cy } = canvasCoord(e.clientX, e.clientY)
-    dragOffset.current = { x: cx - chair.x, y: cy - chair.y }
-    dragging.current   = { kind: 'chair', id }
-    dragMoved.current  = false
-    dragNodeRef.current = e.currentTarget
-    dragNodeRef.current.style.zIndex = '200'
-    dragNodeRef.current.style.cursor = 'grabbing'
+    const isInSelection = selectedChairIds.includes(id)
+    const nextTableIds = isInSelection ? selectedTableIds : []
+    const nextChairIds = isInSelection ? selectedChairIds : [id]
+    const nextWallIds = isInSelection ? selectedWallIds : []
 
-    setSelectedChairId(id)
-    setSelectedTableId(null)
-    setSelectedWallId(null)
+    if (!isInSelection) setSelection(nextTableIds, nextChairIds, nextWallIds)
+
+    const { x: cx, y: cy } = canvasCoord(e.clientX, e.clientY)
+    const selectionCount = nextTableIds.length + nextChairIds.length + nextWallIds.length
+    if (selectionCount === 1) {
+      dragOffset.current = { x: cx - chair.x, y: cy - chair.y }
+      dragging.current = { kind: 'chair', id }
+      dragMoved.current = false
+      dragNodeRef.current = e.currentTarget
+      dragNodeRef.current.style.zIndex = '200'
+      dragNodeRef.current.style.cursor = 'grabbing'
+      return
+    }
+
+    startSelectionDrag(cx, cy, nextTableIds, nextChairIds, nextWallIds)
   }
 
   // ── Wall drag ──────────────────────────────────────────────────────────
@@ -654,19 +875,15 @@ export function FloorPlanPage(): React.ReactElement {
     e.stopPropagation()
     e.currentTarget.setPointerCapture(e.pointerId)
 
-    const wall = walls.find((w) => w.id === id)
-    if (!wall) return
+    const isInSelection = selectedWallIds.includes(id)
+    const nextTableIds = isInSelection ? selectedTableIds : []
+    const nextChairIds = isInSelection ? selectedChairIds : []
+    const nextWallIds = isInSelection ? selectedWallIds : [id]
+
+    if (!isInSelection) setSelection(nextTableIds, nextChairIds, nextWallIds)
 
     const { x: cx, y: cy } = canvasCoord(e.clientX, e.clientY)
-    // dragOffset stores the pointer position at drag start
-    dragOffset.current    = { x: cx, y: cy }
-    wallDragOrigin.current = { x1: wall.x1, y1: wall.y1, x2: wall.x2, y2: wall.y2 }
-    dragging.current      = { kind: 'wall', id }
-    dragMoved.current     = false
-
-    setSelectedWallId(id)
-    setSelectedTableId(null)
-    setSelectedChairId(null)
+    startSelectionDrag(cx, cy, nextTableIds, nextChairIds, nextWallIds)
   }
   function handleCanvasPointerMove(e: React.PointerEvent<HTMLDivElement>): void {
     const { x: cx, y: cy } = canvasCoord(e.clientX, e.clientY)
@@ -685,22 +902,31 @@ export function FloorPlanPage(): React.ReactElement {
       return
     }
 
+    if (marqueeStartRef.current) {
+      e.preventDefault()
+      const rect = normalizeRect(marqueeStartRef.current.x, marqueeStartRef.current.y, cx, cy)
+      setSelectionBox(rect)
+      dragMoved.current = rect.right - rect.left > 4 || rect.bottom - rect.top > 4
+      return
+    }
+
     if (!dragging.current) return
     e.preventDefault()
-    dragMoved.current = true
 
-    if (dragging.current.kind === 'table') {
-      if (!dragNodeRef.current) return
-      const table = tables.find((t) => t.id === dragging.current!.id)
-      if (!table) return
-      const maxX = (activeFloor?.width  ?? 1200) - (table.w ?? DEFAULT_W)
-      const maxY = (activeFloor?.height ?? 800)  - (table.h ?? DEFAULT_H)
-      const nx = Math.max(0, Math.min(snap(cx - dragOffset.current.x), maxX))
-      const ny = Math.max(0, Math.min(snap(cy - dragOffset.current.y), maxY))
-      dragNodeRef.current.style.left = `${nx}px`
-      dragNodeRef.current.style.top  = `${ny}px`
+    if (dragging.current.kind === 'selection') {
+      const snapshot = selectionDragRef.current
+      if (!snapshot) return
+      let dx = snap(cx - dragStartPoint.current.x)
+      let dy = snap(cy - dragStartPoint.current.y)
+      const clamped = clampSelectionDelta(dx, dy, snapshot)
+      dx = clamped.dx
+      dy = clamped.dy
+      dragMoved.current = dragMoved.current || dx !== 0 || dy !== 0
+      applySelectionPreview(snapshot, dx, dy)
+      return
+    }
 
-    } else if (dragging.current.kind === 'chair') {
+    if (dragging.current.kind === 'chair') {
       if (!dragNodeRef.current) return
       const chairId = dragging.current.id
       const chair   = chairs.find((c) => c.id === chairId)
@@ -720,19 +946,7 @@ export function FloorPlanPage(): React.ReactElement {
 
       dragNodeRef.current.style.left = `${rawX - CHAIR_R}px`
       dragNodeRef.current.style.top  = `${rawY - CHAIR_R}px`
-
-    } else if (dragging.current.kind === 'wall') {
-      // Wall drag — translate both endpoints by the delta from drag start
-      if (!wallDragOrigin.current) return
-      const wallId = dragging.current.id   // capture before any async setState
-      const dx = snap(cx - dragOffset.current.x)
-      const dy = snap(cy - dragOffset.current.y)
-      const origin = wallDragOrigin.current
-      setWalls((prev) => prev.map((w) =>
-        w.id === wallId
-          ? { ...w, x1: origin.x1 + dx, y1: origin.y1 + dy, x2: origin.x2 + dx, y2: origin.y2 + dy }
-          : w
-      ))
+      dragMoved.current = true
     }
   }
 
@@ -763,36 +977,114 @@ export function FloorPlanPage(): React.ReactElement {
       return
     }
 
+    if (marqueeStartRef.current) {
+      const rect = normalizeRect(marqueeStartRef.current.x, marqueeStartRef.current.y, cx, cy)
+      marqueeStartRef.current = null
+      setSelectionBox(null)
+
+      if (rect.right - rect.left <= 4 && rect.bottom - rect.top <= 4) {
+        clearSelection()
+        dragMoved.current = false
+        return
+      }
+
+      const nextTableIds = tables
+        .filter((t) => rectsIntersect(rect, normalizeRect(
+          t.x ?? 0,
+          t.y ?? 0,
+          (t.x ?? 0) + (t.w ?? DEFAULT_W),
+          (t.y ?? 0) + (t.h ?? DEFAULT_H),
+        )))
+        .map((t) => t.id)
+
+      const nextChairIds = chairs
+        .filter((c) => rectsIntersect(rect, normalizeRect(
+          c.x - CHAIR_R,
+          c.y - CHAIR_R,
+          c.x + CHAIR_R,
+          c.y + CHAIR_R,
+        )))
+        .map((c) => c.id)
+
+      const nextWallIds = walls.filter((w) => wallIntersectsRect(w, rect)).map((w) => w.id)
+      setSelection(nextTableIds, nextChairIds, nextWallIds)
+      dragMoved.current = false
+      return
+    }
+
     if (!dragging.current) return
 
-    // Wall drag commit — persist to SQLite
-    if (dragging.current.kind === 'wall') {
-      wallDragOrigin.current = null
-      dragging.current  = null
+    if (dragging.current.kind === 'selection') {
+      const snapshot = selectionDragRef.current
+      if (!snapshot) {
+        dragging.current = null
+        dragMoved.current = false
+        return
+      }
+
+      let dx = snap(cx - dragStartPoint.current.x)
+      let dy = snap(cy - dragStartPoint.current.y)
+      const clamped = clampSelectionDelta(dx, dy, snapshot)
+      dx = clamped.dx
+      dy = clamped.dy
+
+      const movedTableIds = new Set(snapshot.tables.map((t) => t.id))
+      const movedChairIds = new Set(snapshot.chairs.map((c) => c.id))
+      const movedWallIds = new Set(snapshot.walls.map((w) => w.id))
+
+      const nextTables = tables.map((table) =>
+        movedTableIds.has(table.id)
+          ? { ...table, x: (table.x ?? 0) + dx, y: (table.y ?? 0) + dy }
+          : table
+      )
+
+      const nextTableMap = new Map(nextTables.map((table) => [table.id, table]))
+      const nextChairs = chairs.map((chair) => {
+        if (!movedChairIds.has(chair.id)) return chair
+
+        let nextX = chair.x + dx
+        let nextY = chair.y + dy
+        const ownerTable = nextTableMap.get(chair.tableId)
+        if (ownerTable && !movedTableIds.has(chair.tableId)) {
+          const tcx = (ownerTable.x ?? 0) + (ownerTable.w ?? DEFAULT_W) / 2
+          const tcy = (ownerTable.y ?? 0) + (ownerTable.h ?? DEFAULT_H) / 2
+          const orbitR = Math.max(ownerTable.w ?? DEFAULT_W, ownerTable.h ?? DEFAULT_H) / 2 + MAX_ORBIT_R
+          const clampedChair = clampToOrbit(nextX, nextY, tcx, tcy, orbitR)
+          nextX = clampedChair.x
+          nextY = clampedChair.y
+        }
+        return { ...chair, x: nextX, y: nextY }
+      })
+
+      let nextWalls = walls
+      if (movedWallIds.size > 0) {
+        const wallOrigin = new Map(snapshot.walls.map((wall) => [wall.id, wall]))
+        nextWalls = walls.map((wall) => {
+          if (!movedWallIds.has(wall.id)) return wall
+          const original = wallOrigin.get(wall.id)
+          return original
+            ? { ...wall, x1: original.x1 + dx, y1: original.y1 + dy, x2: original.x2 + dx, y2: original.y2 + dy }
+            : wall
+        })
+      }
+
+      setTables(nextTables)
+      setChairs(nextChairs)
+      if (movedWallIds.size > 0) {
+        setWalls(nextWalls)
+        if (activeFloor) void saveFloor({ ...activeFloor, walls: nextWalls })
+      }
+
+      resetSelectionPreview(snapshot)
+      selectionDragRef.current = null
+      dragging.current = null
       dragMoved.current = false
-      if (activeFloor) void saveFloor({ ...activeFloor, walls })
       return
     }
 
     if (!dragNodeRef.current) return
 
-    if (dragging.current.kind === 'table') {
-      const id    = dragging.current.id
-      const table = tables.find((t) => t.id === id)
-      if (table) {
-        const maxX = (activeFloor?.width  ?? 1200) - (table.w ?? DEFAULT_W)
-        const maxY = (activeFloor?.height ?? 800)  - (table.h ?? DEFAULT_H)
-        const newX = Math.max(0, Math.min(snap(cx - dragOffset.current.x), maxX))
-        const newY = Math.max(0, Math.min(snap(cy - dragOffset.current.y), maxY))
-        const dx = newX - (table.x ?? 0)
-        const dy = newY - (table.y ?? 0)
-        // Move table AND all its chairs by the same delta
-        setTables((prev) => prev.map((t) => t.id === id ? { ...t, x: newX, y: newY } : t))
-        setChairs((prev) => prev.map((c) =>
-          c.tableId === id ? { ...c, x: c.x + dx, y: c.y + dy } : c
-        ))
-      }
-    } else {
+    if (dragging.current.kind === 'chair') {
       // Chair — clamp to orbit, optionally reassign to nearest table
       const chairId = dragging.current.id
       const chair   = chairs.find((c) => c.id === chairId)
@@ -833,7 +1125,7 @@ export function FloorPlanPage(): React.ReactElement {
       }
     }
 
-    dragNodeRef.current.style.zIndex = ''
+    dragNodeRef.current.style.zIndex = '20'
     dragNodeRef.current.style.cursor = 'grab'
     dragging.current  = null
     dragNodeRef.current = null
@@ -842,11 +1134,22 @@ export function FloorPlanPage(): React.ReactElement {
 
   // ── Canvas pointer down (for wall drawing) ─────────────────────────────
   function handleCanvasPointerDown(e: React.PointerEvent<HTMLDivElement>): void {
-    if (tool !== 'draw_wall') return
-    if ((e.target as HTMLElement).closest('.fp-table, .fp-chair')) return
+    if ((e.target as HTMLElement) !== canvasRef.current) return
+
+    if (tool === 'draw_wall') {
+      e.preventDefault()
+      const { x, y } = canvasCoord(e.clientX, e.clientY)
+      wallStartRef.current = { x: snap(x), y: snap(y) }
+      return
+    }
+
+    if (tool !== 'select' || e.button !== 0) return
     e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
     const { x, y } = canvasCoord(e.clientX, e.clientY)
-    wallStartRef.current = { x: snap(x), y: snap(y) }
+    marqueeStartRef.current = { x, y }
+    setSelectionBox(normalizeRect(x, y, x, y))
+    dragMoved.current = false
   }
 
   // ── Canvas double-click to add table ───────────────────────────────────
@@ -856,15 +1159,6 @@ export function FloorPlanPage(): React.ReactElement {
     const { x, y } = canvasCoord(e.clientX, e.clientY)
     setDropPos({ x: snap(x), y: snap(y) })
     setShowAddTable(true)
-  }
-
-  // ── Canvas click — deselect ────────────────────────────────────────────
-  function handleCanvasClick(e: React.MouseEvent<HTMLDivElement>): void {
-    if ((e.target as HTMLElement) === canvasRef.current) {
-      setSelectedTableId(null)
-      setSelectedChairId(null)
-      setSelectedWallId(null)
-    }
   }
 
   // ── Shape toggle ───────────────────────────────────────────────────────
@@ -918,29 +1212,29 @@ export function FloorPlanPage(): React.ReactElement {
     setChairs((prev) => [...prev, newChair])
   }
 
-  // ── Remove selected chair ──────────────────────────────────────────────
-  function handleRemoveChair(): void {
-    if (!selectedChairId) return
-    setChairs((prev) => prev.filter((c) => c.id !== selectedChairId))
-    setSelectedChairId(null)
-  }
+  async function handleDeleteSelection(): Promise<void> {
+    if (totalSelected === 0) return
 
-  // ── Delete wall ────────────────────────────────────────────────────────
-  async function handleDeleteWall(): Promise<void> {
-    if (!selectedWallId || !activeFloor) return
-    const nextWalls = walls.filter((w) => w.id !== selectedWallId)
-    setWalls(nextWalls)
-    setSelectedWallId(null)
-    await saveFloor({ ...activeFloor, walls: nextWalls })
-  }
+    const tableIds = [...selectedTableIds]
+    const chairIds = [...selectedChairIds]
+    const wallIds = [...selectedWallIds]
+    const tableIdSet = new Set(tableIds)
+    const chairIdSet = new Set(chairIds)
+    const wallIdSet = new Set(wallIds)
 
-  // ── Delete table ───────────────────────────────────────────────────────
-  async function handleDeleteTable(): Promise<void> {
-    if (!selectedTableId) return
-    await deleteDiningTable(selectedTableId)
-    setTables((prev) => prev.filter((t) => t.id !== selectedTableId))
-    setChairs((prev) => prev.filter((c) => c.tableId !== selectedTableId))
-    setSelectedTableId(null)
+    if (tableIds.length > 0) {
+      await Promise.all(tableIds.map((tableId) => deleteDiningTable(tableId)))
+    }
+
+    if (wallIds.length > 0 && activeFloor) {
+      const nextWalls = walls.filter((wall) => !wallIdSet.has(wall.id))
+      setWalls(nextWalls)
+      await saveFloor({ ...activeFloor, walls: nextWalls })
+    }
+
+    setTables((prev) => prev.filter((table) => !tableIdSet.has(table.id)))
+    setChairs((prev) => prev.filter((chair) => !tableIdSet.has(chair.tableId) && !chairIdSet.has(chair.id)))
+    clearSelection()
   }
 
   // ── Save all ───────────────────────────────────────────────────────────
@@ -985,6 +1279,13 @@ export function FloorPlanPage(): React.ReactElement {
   // ── Derived ────────────────────────────────────────────────────────────
   const selectedTable = tables.find((t) => t.id === selectedTableId) ?? null
   const selectedChairCount = selectedTableId ? chairsForTable(selectedTableId, chairs).length : 0
+  const selectionLabel = totalSelected <= 1
+    ? null
+    : [
+        selectedTableIds.length > 0 ? `${selectedTableIds.length} ترابيزة` : null,
+        selectedChairIds.length > 0 ? `${selectedChairIds.length} كرسي` : null,
+        selectedWallIds.length > 0 ? `${selectedWallIds.length} جدار` : null,
+      ].filter(Boolean).join(' + ')
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (
@@ -996,7 +1297,7 @@ export function FloorPlanPage(): React.ReactElement {
           {floors.map((fl) => (
             <button key={fl.id} type="button"
               className={`fp-floor-tab${activeFloorId === fl.id ? ' fp-floor-tab--active' : ''}`}
-              onClick={() => { setActiveFloorId(fl.id); setSelectedTableId(null); setSelectedChairId(null) }}>
+              onClick={() => { setActiveFloorId(fl.id); clearSelection() }}>
               {fl.nameAr}
             </button>
           ))}
@@ -1068,10 +1369,10 @@ export function FloorPlanPage(): React.ReactElement {
                 <MdEdit />
               </button>
 
-              <ConfirmDeleteButton
-                confirmMessage={`حذف ترابيزة "${selectedTable.nameAr}"؟`}
-                onConfirm={handleDeleteTable}
-              />
+              <button type="button" className="btn btn--danger btn--sm"
+                onClick={() => void handleDeleteSelection()} title="حذف المحدد">
+                <MdDelete />
+              </button>
             </>
           )}
 
@@ -1081,7 +1382,7 @@ export function FloorPlanPage(): React.ReactElement {
               <div className="fp-toolbar__divider" />
               <span className="fp-toolbar__selected-label">كرسي</span>
               <button type="button" className="btn btn--danger btn--sm"
-                onClick={handleRemoveChair} title="حذف الكرسي">
+                onClick={() => void handleDeleteSelection()} title="حذف الكرسي">
                 <MdDelete />
               </button>
             </>
@@ -1093,7 +1394,19 @@ export function FloorPlanPage(): React.ReactElement {
               <div className="fp-toolbar__divider" />
               <span className="fp-toolbar__selected-label">جدار</span>
               <button type="button" className="btn btn--danger btn--sm"
-                onClick={() => void handleDeleteWall()} title="حذف الجدار">
+                onClick={() => void handleDeleteSelection()} title="حذف الجدار">
+                <MdDelete />
+              </button>
+            </>
+          )}
+
+          {/* Multi-selection actions */}
+          {selectionLabel && (
+            <>
+              <div className="fp-toolbar__divider" />
+              <span className="fp-toolbar__selected-label">{selectionLabel}</span>
+              <button type="button" className="btn btn--danger btn--sm"
+                onClick={() => void handleDeleteSelection()} title="حذف المحدد">
                 <MdDelete />
               </button>
             </>
@@ -1161,8 +1474,8 @@ export function FloorPlanPage(): React.ReactElement {
                 const count = chairsForTable(t.id, chairs).length
                 return (
                   <button key={t.id} type="button"
-                    className={`fp-table-list-item${selectedTableId === t.id ? ' fp-table-list-item--active' : ''}`}
-                    onClick={() => { setSelectedTableId(t.id); setSelectedChairId(null) }}>
+                    className={`fp-table-list-item${selectedTableIds.includes(t.id) ? ' fp-table-list-item--active' : ''}`}
+                    onClick={() => setSelection([t.id], [], [])}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span
                         style={{
@@ -1182,6 +1495,7 @@ export function FloorPlanPage(): React.ReactElement {
 
             <div className="fp-sidebar__section fp-sidebar__hint">
               <p>💡 نقر مزدوج لإضافة ترابيزة</p>
+              <p>💡 اسحب على مساحة فارغة لتحديد عدة عناصر</p>
               <p>💡 اسحب الكرسي لترحيله لترابيزة أخرى</p>
               <p>💡 ▭ / ● لتغيير شكل الترابيزة</p>
               <p>💡 أداة الجدار: اسحب لرسم خط</p>
@@ -1207,7 +1521,6 @@ export function FloorPlanPage(): React.ReactElement {
                 onPointerUp={handleCanvasPointerUp}
                 onPointerLeave={handleCanvasPointerUp}
                 onDoubleClick={handleCanvasDblClick}
-                onClick={handleCanvasClick}
               >
                 {/* Wall SVG layer */}
                 <WallLayer
@@ -1215,7 +1528,10 @@ export function FloorPlanPage(): React.ReactElement {
                   width={activeFloor.width}
                   height={activeFloor.height}
                   selectedWallId={selectedWallId}
-                  onSelectWall={(id) => { setSelectedWallId(id); setSelectedTableId(null); setSelectedChairId(null) }}
+                  onSelectWall={(id) => setSelection([], [], id ? [id] : [])}
+                  onWallClick={(id) => {
+                    if (!dragMoved.current) setSelection([], [], [id])
+                  }}
                   drawingWall={drawingWall}
                   onWallPointerDown={tool === 'select' ? handleWallPointerDown : undefined}
                   tool={tool}
@@ -1226,13 +1542,13 @@ export function FloorPlanPage(): React.ReactElement {
                   <TableNode
                     key={t.id}
                     table={{ ...t, shape: t.shape ?? 'rect' }}
-                    isSelected={selectedTableId === t.id}
+                    isSelected={selectedTableIds.includes(t.id)}
                     onPointerDown={handleTablePointerDown}
+                    nodeRef={(node) => { tableNodeRefs.current[t.id] = node }}
                     onClick={(id) => {
                       // Only act if this was a pure click (no drag movement)
                       if (!dragMoved.current) {
-                        setSelectedTableId(id)
-                        setSelectedChairId(null)
+                        setSelection([id], [], [])
                       }
                     }}
                   />
@@ -1244,16 +1560,28 @@ export function FloorPlanPage(): React.ReactElement {
                     key={c.id}
                     chair={c}
                     color={tableColor(c.tableId, tables)}
-                    isSelected={selectedChairId === c.id}
+                    isSelected={selectedChairIds.includes(c.id)}
                     onPointerDown={handleChairPointerDown}
+                    nodeRef={(node) => { chairNodeRefs.current[c.id] = node }}
                     onClick={(id) => {
                       if (!dragMoved.current) {
-                        setSelectedChairId(id)
-                        setSelectedTableId(null)
+                        setSelection([], [id], [])
                       }
                     }}
                   />
                 ))}
+
+                {selectionBox && (
+                  <div
+                    className="fp-selection-box"
+                    style={{
+                      left: selectionBox.left,
+                      top: selectionBox.top,
+                      width: selectionBox.right - selectionBox.left,
+                      height: selectionBox.bottom - selectionBox.top,
+                    }}
+                  />
+                )}
               </div>
             </div>
           </div>
@@ -1296,7 +1624,7 @@ export function FloorPlanPage(): React.ReactElement {
           onSave={(t, newChairs) => {
             setTables((prev) => [...prev, t])
             setChairs((prev) => [...prev, ...newChairs])
-            setSelectedTableId(t.id)
+            setSelection([t.id], [], [])
             setShowAddTable(false)
             setDropPos(null)
           }}

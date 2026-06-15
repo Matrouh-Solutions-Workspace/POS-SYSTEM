@@ -1,11 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import type { AppSettings, DiningTable } from '@shared/types'
+import type { AppSettings } from '@shared/types'
 import { getSettings, updateSettings } from '@renderer/features/orders/order-service'
 import { applyThemeColor, DEFAULT_PRIMARY } from '@renderer/features/theme/theme-store'
 import { listUsersByRole, updateUserProfile } from '@renderer/features/auth/auth-service'
 import { hashPin } from '@renderer/features/auth/pin-store'
-import { listDiningTables, saveDiningTable, setDiningTableActive } from '@renderer/features/tables/table-service'
-import { MdSave, MdPalette, MdLock, MdPerson, MdTableRestaurant, MdBackup, MdRestorePage, MdKeyboard } from 'react-icons/md'
+import { MdSave, MdPalette, MdLock, MdPerson, MdBackup, MdRestorePage, MdKeyboard } from 'react-icons/md'
 import type { AppUser } from '@shared/types'
 import {
   SHORTCUT_ACTIONS,
@@ -208,7 +207,6 @@ function ShortcutsTab(): React.ReactElement {
 export function SettingsPage(): React.ReactElement {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [cashiers, setCashiers] = useState<AppUser[]>([])
-  const [tables, setTables] = useState<DiningTable[]>([])
 
   // ── Receipt ─────────────────────────────────────────────────────────────
   const [receiptForm, setReceiptForm] = useState({ restaurantNameAr: '', currencySymbol: '', phoneNumber: '', receiptFooterAr: '', taxRate: '', defaultDeliveryFee: '', maxCashierDiscountPct: '' })
@@ -229,12 +227,9 @@ export function SettingsPage(): React.ReactElement {
   // Per-cashier PIN setting
   const [cashierPins, setCashierPins] = useState<Record<string, string>>({})
   const [pinSavingFor, setPinSavingFor] = useState<string | null>(null)
-  const [tableForm, setTableForm] = useState({ id: '', nameAr: '', categoryAr: '', sortOrder: '0' })
-  const [tableSaving, setTableSaving] = useState(false)
-  const [tableMsg, setTableMsg] = useState<string | null>(null)
 
   useEffect(() => {
-    void Promise.all([getSettings(), listUsersByRole('cashier'), listDiningTables(true)]).then(([s, c, t]) => {
+    void Promise.all([getSettings(), listUsersByRole('cashier')]).then(([s, c]) => {
       setSettings(s)
       setReceiptForm({
         restaurantNameAr: s.restaurantNameAr,
@@ -251,7 +246,6 @@ export function SettingsPage(): React.ReactElement {
       setPinEnabled(s.pinEnabled ?? false)
       setAutoLockMinutes(s.autoLockMinutes ?? 5)
       setCashiers(c)
-      setTables(t)
     })
   }, [])
 
@@ -319,42 +313,11 @@ export function SettingsPage(): React.ReactElement {
     finally { setPinSavingFor(null) }
   }
 
-  async function reloadTables(): Promise<void> {
-    setTables(await listDiningTables(true))
-  }
-
-  async function handleTableSave(e: FormEvent): Promise<void> {
-    e.preventDefault()
-    if (!tableForm.nameAr.trim()) return
-    setTableSaving(true)
-    setTableMsg(null)
-    try {
-      const existing = tables.find((table) => table.id === tableForm.id)
-      await saveDiningTable({
-        ...existing,
-        id: tableForm.id || undefined,
-        nameAr: tableForm.nameAr,
-        categoryAr: tableForm.categoryAr || undefined,
-        sortOrder: Number(tableForm.sortOrder) || 0,
-        active: existing?.active ?? true
-      })
-      setTableForm({ id: '', nameAr: '', categoryAr: '', sortOrder: '0' })
-      setTableMsg('تم حفظ الترابيزة')
-      await reloadTables()
-    } catch (e) {
-      setTableMsg(e instanceof Error ? e.message : 'فشل حفظ الترابيزة')
-    } finally {
-      setTableSaving(false)
-    }
-  }
-
-  // ── Backup/Restore — REQ-8 ───────────────────────────────────────────────
+  // ── Settings tab ─────────────────────────────────────────────────────────
+  type SettingsTab = 'general' | 'theme' | 'pin' | 'backup' | 'shortcuts'
   const [backupMsg, setBackupMsg] = useState<string | null>(null)
   const [backupLoading, setBackupLoading] = useState(false)
   const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false)
-
-  // ── Settings tab ─────────────────────────────────────────────────────────
-  type SettingsTab = 'general' | 'tables' | 'theme' | 'pin' | 'backup' | 'shortcuts'
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>('general')
 
   async function handleBackup(): Promise<void> {
@@ -389,19 +352,12 @@ export function SettingsPage(): React.ReactElement {
     }
   }
 
-  function editTable(table: DiningTable): void {
-    setTableForm({
-      id: table.id,
-      nameAr: table.nameAr,
-      categoryAr: table.categoryAr ?? '',
-      sortOrder: String(table.sortOrder)
-    })
-  }
+  // ── Backup/Restore — REQ-8 ───────────────────────────────────────────────
+
   if (!settings) return <p className="app-loading">جارٍ التحميل…</p>
 
   const settingsTabs: { key: SettingsTab; labelAr: string; icon: React.ReactNode }[] = [
     { key: 'general',   labelAr: 'عام',          icon: <MdSave /> },
-    { key: 'tables',    labelAr: 'الترابيزات',   icon: <MdTableRestaurant /> },
     { key: 'theme',     labelAr: 'المظهر',        icon: <MdPalette /> },
     { key: 'pin',       labelAr: 'PIN والقفل',    icon: <MdLock /> },
     { key: 'backup',    labelAr: 'نسخ احتياطي',   icon: <MdBackup /> },
@@ -471,23 +427,6 @@ export function SettingsPage(): React.ReactElement {
                 </button>
               </div>
             </form>
-          </div>
-        )}
-
-        {/* ── Tables ── */}
-        {activeSettingsTab === 'tables' && (
-          <div className="card">
-            <h2 className="card__title"><MdTableRestaurant style={{ verticalAlign: 'middle', marginLeft: 6 }} />ترابيزات الصالة</h2>
-            <div style={{ padding: '16px 0', fontSize: '0.9rem', color: 'var(--color-muted)' }}>
-              تم نقل إدارة الترابيزات إلى صفحة مستقلة.{' '}
-              <a
-                href="#/manager/tables"
-                style={{ color: 'var(--color-primary)', fontWeight: 700, textDecoration: 'underline', cursor: 'pointer' }}
-                onClick={(e) => { e.preventDefault(); window.location.hash = '/manager/tables' }}
-              >
-                الذهاب إلى صفحة الترابيزات ←
-              </a>
-            </div>
           </div>
         )}
 

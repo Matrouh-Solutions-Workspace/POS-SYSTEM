@@ -35,7 +35,7 @@ export interface MenuItem {
   itemType?: MenuItemType
   /** Only set when itemType === 'product' */
   productType?: ProductType
-  /** For raw_material items: the linked ingredient id for stock deduction */
+  /** Backing ingredient id for stocked sellables and direct-sale raw materials */
   linkedIngredientId?: string
   sizeOptions?: MenuItemSizeOption[]
   attachments?: MenuItemAttachment[]

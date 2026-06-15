@@ -2,7 +2,7 @@
  * أصناف — unified items page
  * Tabs: الأصناف | التصنيفات | الأحجام | الإضافات | المواد الخام
  */
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import type {
   MenuCategory,
   MenuItem,
@@ -41,7 +41,7 @@ import { listAddons, createAddon, updateAddon, deleteAddon, reorderAddons } from
 import { ConfirmDeleteButton } from '@renderer/components/ConfirmDeleteButton'
 import {
   MdArrowUpward, MdArrowDownward, MdEdit, MdCheck,
-  MdClose, MdMenuBook, MdCategory, MdStraighten, MdAddBox,
+  MdClose, MdMenuBook, MdStraighten, MdAddBox,
   MdInventory2
 } from 'react-icons/md'
 import { usePageState } from '@renderer/features/tabs/page-state-store'
@@ -91,15 +91,33 @@ function normalizeWeightedOptions(opts: WeightedPriceOptionForm[]): WeightedPric
     .map((o) => ({ id: o.id || crypto.randomUUID(), label: o.label.trim(), weightKg: Number(o.weightGrams) / 1000, price: Number(o.price) }))
     .filter((o) => o.label && o.weightKg > 0 && o.price >= 0)
 }
-function normalizeSizeOptions(opts: SizeOptionForm[]): MenuItemSizeOption[] {
+function normalizeSizeOptions(opts: SizeOptionForm[], sizes: ItemSize[]): MenuItemSizeOption[] {
+  const sizeById = new Map(sizes.map((s) => [s.id, s]))
   return opts
-    .map((o) => ({ id: o.id || crypto.randomUUID(), masterSizeId: o.masterSizeId || undefined, labelAr: o.labelAr.trim(), price: Number(o.price) }))
-    .filter((o) => o.labelAr && o.price >= 0)
+    .map((o) => {
+      const master = o.masterSizeId ? sizeById.get(o.masterSizeId) : undefined
+      return {
+        id: o.id || crypto.randomUUID(),
+        masterSizeId: master?.id,
+        labelAr: master?.nameAr ?? '',
+        price: Number(o.price)
+      }
+    })
+    .filter((o) => o.masterSizeId && o.labelAr && o.price >= 0)
 }
-function normalizeAttachments(opts: AttachmentForm[]): MenuItemAttachment[] {
+function normalizeAttachments(opts: AttachmentForm[], addons: ItemAddon[]): MenuItemAttachment[] {
+  const addonById = new Map(addons.map((a) => [a.id, a]))
   return opts
-    .map((o) => ({ id: o.id || crypto.randomUUID(), masterAddonId: o.masterAddonId || undefined, nameAr: o.nameAr.trim(), price: Number(o.price) }))
-    .filter((o) => o.nameAr && o.price >= 0)
+    .map((o) => {
+      const master = o.masterAddonId ? addonById.get(o.masterAddonId) : undefined
+      return {
+        id: o.id || crypto.randomUUID(),
+        masterAddonId: master?.id,
+        nameAr: master?.nameAr ?? '',
+        price: Number(o.price)
+      }
+    })
+    .filter((o) => o.masterAddonId && o.nameAr && o.price >= 0)
 }
 
 // ── CategoriesTab ───────────────────────────────────────────────────────────
@@ -574,6 +592,16 @@ export const defaultItemForm: ItemFormState = {
   lines: [{ ingredientId: '', quantity: '', unit: 'جرام' }]
 }
 
+function cloneItemFormForRepeat(form: ItemFormState): ItemFormState {
+  return {
+    ...form,
+    sizeOptions: form.sizeOptions.map((option) => ({ ...option, id: crypto.randomUUID() })),
+    attachments: form.attachments.map((attachment) => ({ ...attachment, id: crypto.randomUUID() })),
+    weightedPriceOptions: form.weightedPriceOptions.map((option) => ({ ...option, id: crypto.randomUUID() })),
+    lines: form.lines.map((line) => ({ ...line }))
+  }
+}
+
 // labels for itemType + productType
 const ITEM_TYPE_LABELS: Record<MenuItemType, string> = {
   product: 'منتج',
@@ -594,7 +622,13 @@ function needsRecipe(itemType: MenuItemType, productType: ProductType): boolean 
   return productType === 'recipe'
 }
 
-function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, setMessage, itemForm, setItemForm }: {
+function needsLinkedStock(itemType: MenuItemType, productType: ProductType): boolean {
+  if (itemType === 'raw_material') return true
+  if (itemType !== 'product') return false
+  return productType === 'ready_made' || productType === 'manufactured'
+}
+
+function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, setMessage, itemForm, setItemForm, formRef }: {
   categories: MenuCategory[]
   items: MenuItem[]
   ingredients: Ingredient[]
@@ -604,6 +638,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
   setMessage: (m: string | null) => void
   itemForm: ItemFormState
   setItemForm: React.Dispatch<React.SetStateAction<ItemFormState>>
+  formRef: React.RefObject<HTMLFormElement | null>
 }): React.ReactElement {
   const [editingItem, setEditingItem] = useState<ItemEditState | null>(null)
   const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null)
@@ -619,13 +654,15 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
   async function addItem(e: FormEvent): Promise<void> {
     e.preventDefault()
     setMessage(null)
+    const submitter = (e.nativeEvent as Event & { submitter?: HTMLButtonElement | null }).submitter
+    const shouldRepeat = submitter?.value === 'repeat'
     if (!itemForm.categoryId) { setMessage('اختر التصنيف أولاً'); return }
     const recipeLines: RecipeLine[] = needsRecipe(itemForm.itemType, itemForm.productType)
       ? itemForm.lines.filter((l) => l.ingredientId && l.quantity).map((l) => ({ ingredientId: l.ingredientId, quantity: Number(l.quantity), unit: l.unit }))
       : []
     const weightedOpts = normalizeWeightedOptions(itemForm.weightedPriceOptions)
-    const sizeOpts = normalizeSizeOptions(itemForm.sizeOptions)
-    const attachOpts = normalizeAttachments(itemForm.attachments)
+    const sizeOpts = normalizeSizeOptions(itemForm.sizeOptions, activeSizes)
+    const attachOpts = normalizeAttachments(itemForm.attachments, activeAddons)
     if (itemForm.isWeighted && !validateWeightedPricing(weightedOpts, itemForm.allowCustomWeight, itemForm.customWeightUnitPrice)) return
     try {
       await createMenuItemWithRecipe({
@@ -638,7 +675,9 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
           : Number(itemForm.price),
         itemType: itemForm.itemType,
         productType: itemForm.itemType === 'product' ? itemForm.productType : undefined,
-        linkedIngredientId: itemForm.itemType === 'raw_material' ? (itemForm.linkedIngredientId || undefined) : undefined,
+        linkedIngredientId: needsLinkedStock(itemForm.itemType, itemForm.productType)
+          ? (itemForm.linkedIngredientId || undefined)
+          : undefined,
         sizeOptions: itemForm.isWeighted ? [] : sizeOpts,
         attachments: attachOpts,
         isWeighted: itemForm.isWeighted,
@@ -648,8 +687,12 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
         lines: recipeLines,
         sortOrder: items.length
       })
-      setItemForm((f) => ({ ...defaultItemForm, categoryId: f.categoryId, weightedPriceOptions: [newWeightedOption(true)] }))
-      setMessage('تم حفظ الصنف')
+      setItemForm((f) => (
+        shouldRepeat
+          ? cloneItemFormForRepeat(f)
+          : { ...defaultItemForm, categoryId: f.categoryId, weightedPriceOptions: [newWeightedOption(true)] }
+      ))
+      setMessage(shouldRepeat ? 'تم حفظ الصنف مع الإبقاء على البيانات' : 'تم حفظ الصنف')
       await onRefresh()
     } catch (err) { setMessage(err instanceof Error ? err.message : 'فشل') }
   }
@@ -657,8 +700,8 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
   async function saveItemEdit(): Promise<void> {
     if (!editingItem) return
     const weightedOpts = normalizeWeightedOptions(editingItem.weightedPriceOptions)
-    const sizeOpts = normalizeSizeOptions(editingItem.sizeOptions)
-    const attachOpts = normalizeAttachments(editingItem.attachments)
+    const sizeOpts = normalizeSizeOptions(editingItem.sizeOptions, activeSizes)
+    const attachOpts = normalizeAttachments(editingItem.attachments, activeAddons)
     if (editingItem.isWeighted && !validateWeightedPricing(weightedOpts, editingItem.allowCustomWeight, editingItem.customWeightUnitPrice)) return
     await updateMenuItem(editingItem.id, {
       nameAr: editingItem.nameAr.trim(),
@@ -670,7 +713,9 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
       categoryId: editingItem.categoryId,
       itemType: editingItem.itemType,
       productType: editingItem.itemType === 'product' ? editingItem.productType : undefined,
-      linkedIngredientId: editingItem.itemType === 'raw_material' ? (editingItem.linkedIngredientId || undefined) : undefined,
+      linkedIngredientId: needsLinkedStock(editingItem.itemType, editingItem.productType)
+        ? (editingItem.linkedIngredientId || undefined)
+        : undefined,
       sizeOptions: editingItem.isWeighted ? [] : sizeOpts,
       attachments: attachOpts,
       isWeighted: editingItem.isWeighted,
@@ -774,28 +819,25 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
     if (isWeighted) return null
     return (
       <div className="weighted-pricing-editor">
-        <h3>
-          أحجام
-          {activeSizes.length > 0 && <em style={{ fontWeight: 400, fontSize: '0.78rem', color: 'var(--color-muted)', marginRight: 8 }}>اختر من قائمة الأحجام أو اكتب يدوياً</em>}
-        </h3>
+        <h3>أحجام</h3>
+        {activeSizes.length === 0 && (
+          <p style={{ fontSize: '0.82rem', color: 'var(--color-muted)', margin: '0 0 8px' }}>
+            أضف أحجاماً من تبويب الأحجام أولاً.
+          </p>
+        )}
         {sizeOpts.map((o, idx) => (
           <div key={o.id} className="weighted-pricing-row">
-            {activeSizes.length > 0 && (
-              <select
-                value={o.masterSizeId}
-                onChange={(e) => handleSizeSelect(idx, e.target.value, isForm as true)}
-                style={{ minWidth: 100 }}
-              >
-                <option value="">يدوي...</option>
-                {activeSizes.map((s) => <option key={s.id} value={s.id}>{s.nameAr}</option>)}
-              </select>
-            )}
+            <select
+              value={o.masterSizeId}
+              onChange={(e) => handleSizeSelect(idx, e.target.value, isForm as true)}
+              style={{ minWidth: 140 }}
+            >
+              <option value="">اختر الحجم...</option>
+              {activeSizes.map((s) => <option key={s.id} value={s.id}>{s.nameAr}</option>)}
+            </select>
             <input
-              value={o.labelAr}
-              onChange={(e) => {
-                if (isForm) setItemForm((f) => { const s=[...f.sizeOptions]; s[idx]={...s[idx]!,labelAr:e.target.value,masterSizeId:''}; return {...f,sizeOptions:s} })
-                else setEditingItem((p) => p ? { ...p, sizeOptions: p.sizeOptions.map((s,i)=>i===idx?{...s,labelAr:e.target.value,masterSizeId:''}:s) } : p)
-              }}
+              value={o.masterSizeId ? (activeSizes.find((s) => s.id === o.masterSizeId)?.nameAr ?? o.labelAr) : ''}
+              readOnly
               placeholder="اسم الحجم"
             />
             <input
@@ -818,6 +860,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
         ))}
         <button
           type="button" className="btn btn--secondary btn--sm"
+          disabled={activeSizes.length === 0}
           onClick={() => {
             if (isForm) setItemForm((f) => ({ ...f, sizeOptions: [...f.sizeOptions, newSizeOption()] }))
             else setEditingItem((p) => p ? { ...p, sizeOptions: [...p.sizeOptions, newSizeOption()] } : p)
@@ -834,28 +877,25 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
   ): React.ReactElement {
     return (
       <div className="weighted-pricing-editor">
-        <h3>
-          مرفقات -
-          {activeAddons.length > 0 && <em style={{ fontWeight: 400, fontSize: '0.78rem', color: 'var(--color-muted)', marginRight: 8 }}>اختر من قائمة الإضافات أو اكتب يدوياً</em>}
-        </h3>
+        <h3>مرفقات</h3>
+        {activeAddons.length === 0 && (
+          <p style={{ fontSize: '0.82rem', color: 'var(--color-muted)', margin: '0 0 8px' }}>
+            أضف مرفقات من تبويب الإضافات أولاً.
+          </p>
+        )}
         {attOpts.map((o, idx) => (
           <div key={o.id} className="weighted-pricing-row">
-            {activeAddons.length > 0 && (
-              <select
-                value={o.masterAddonId}
-                onChange={(e) => handleAddonSelect(idx, e.target.value, isForm)}
-                style={{ minWidth: 120 }}
-              >
-                <option value="">يدوي...</option>
-                {activeAddons.map((a) => <option key={a.id} value={a.id}>{a.nameAr}</option>)}
-              </select>
-            )}
+            <select
+              value={o.masterAddonId}
+              onChange={(e) => handleAddonSelect(idx, e.target.value, isForm)}
+              style={{ minWidth: 160 }}
+            >
+              <option value="">اختر المرفق...</option>
+              {activeAddons.map((a) => <option key={a.id} value={a.id}>{a.nameAr}</option>)}
+            </select>
             <input
-              value={o.nameAr}
-              onChange={(e) => {
-                if (isForm) setItemForm((f) => { const a=[...f.attachments]; a[idx]={...a[idx]!,nameAr:e.target.value,masterAddonId:''}; return {...f,attachments:a} })
-                else setEditingItem((p) => p ? { ...p, attachments: p.attachments.map((a,i)=>i===idx?{...a,nameAr:e.target.value,masterAddonId:''}:a) } : p)
-              }}
+              value={o.masterAddonId ? (activeAddons.find((a) => a.id === o.masterAddonId)?.nameAr ?? o.nameAr) : ''}
+              readOnly
               placeholder="اسم المرفق"
             />
             <input
@@ -878,6 +918,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
         ))}
         <button
           type="button" className="btn btn--secondary btn--sm"
+          disabled={activeAddons.length === 0}
           onClick={() => {
             if (isForm) setItemForm((f) => ({ ...f, attachments: [...f.attachments, newAttachment()] }))
             else setEditingItem((p) => p ? { ...p, attachments: [...p.attachments, newAttachment()] } : p)
@@ -894,10 +935,12 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
     <div className="tab-content">
       {savingOrder && <p className="form-message" role="status">جارٍ حفظ الترتيب...</p>}
 
+      <CategoriesTab categories={categories} onRefresh={onRefresh} setMessage={setMessage} />
+
       {/* ── Add item form ── */}
       <div className="card">
         <h2 className="card__title">إضافة صنف</h2>
-        <form onSubmit={(e) => void addItem(e)}>
+        <form ref={formRef} onSubmit={(e) => void addItem(e)}>
           <div className="settings-form-grid">
             <label className="field">
               <span>التصنيف</span>
@@ -934,16 +977,16 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
                 </select>
               </label>
             )}
-            {itemForm.itemType === 'raw_material' && (
+            {needsLinkedStock(itemForm.itemType, itemForm.productType) && (
               <label className="field">
-                <span>المادة الخام المرتبطة (للمخزون)</span>
+                <span>رصيد المخزون المرتبط</span>
                 <select value={itemForm.linkedIngredientId} onChange={(e) => setItemForm((f) => ({ ...f, linkedIngredientId: e.target.value }))}>
                   <option value="">بدون ربط</option>
                   {ingredients.filter((i) => i.active).map((i) => <option key={i.id} value={i.id}>{i.nameAr} ({i.unit})</option>)}
                 </select>
               </label>
             )}
-            {!itemForm.isWeighted && itemForm.itemType !== 'raw_material' && (
+            {!itemForm.isWeighted && (
               <label className="field">
                 <span>السعر</span>
                 <input type="number" min="0" step="0.01" value={itemForm.price} onChange={(e) => setItemForm((f) => ({ ...f, price: e.target.value }))} required={!itemForm.isWeighted} />
@@ -1019,7 +1062,8 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
           )}
 
           <div className="form-actions" style={{ marginTop: 12 }}>
-            <button type="submit" className="btn btn--primary">حفظ الصنف</button>
+            <button type="submit" className="btn btn--primary" value="save">حفظ الصنف</button>
+            <button type="submit" className="btn btn--secondary" value="repeat">حفظ وتكرار</button>
           </div>
         </form>
       </div>
@@ -1103,6 +1147,18 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
                           {editingItem.itemType !== 'raw_material' && renderSizeSection(editingItem.sizeOptions, editingItem.isWeighted, false)}
                           {/* inline edit: attachments */}
                           {editingItem.itemType !== 'raw_material' && renderAttachmentsSection(editingItem.attachments, false)}
+                          {needsLinkedStock(editingItem.itemType, editingItem.productType) && (
+                            <select
+                              className="inline-edit-input"
+                              value={editingItem.linkedIngredientId}
+                              onChange={(e) => setEditingItem({ ...editingItem, linkedIngredientId: e.target.value })}
+                            >
+                              <option value="">بدون ربط مخزون</option>
+                              {ingredients.filter((i) => i.active).map((i) => (
+                                <option key={i.id} value={i.id}>{i.nameAr} ({i.unit})</option>
+                              ))}
+                            </select>
+                          )}
                           {/* inline edit: weighted */}
                           {editingItem.itemType === 'product' && editingItem.isWeighted && (
                             <div className="weighted-pricing-editor">
@@ -1173,7 +1229,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
 
 // ── Main page ───────────────────────────────────────────────────────────────
 
-type ItemsPageTab = 'items' | 'categories' | 'sizes' | 'addons' | 'raw_materials'
+type ItemsPageTab = 'items' | 'sizes' | 'addons' | 'raw_materials'
 
 export function ItemsPage(): React.ReactElement {
   const { saved, save } = usePageState<{
@@ -1181,13 +1237,19 @@ export function ItemsPage(): React.ReactElement {
     itemForm: ItemFormState
   }>('/manager/items')
 
-  const [activeTab, setActiveTab] = useState<ItemsPageTab>(saved.activeTab ?? 'items')
+  const [activeTab, setActiveTab] = useState<ItemsPageTab>(() => {
+    return saved.activeTab === 'sizes' || saved.activeTab === 'addons' || saved.activeTab === 'raw_materials'
+      ? saved.activeTab
+      : 'items'
+  })
   const [categories, setCategories] = useState<MenuCategory[]>([])
   const [items, setItems] = useState<MenuItem[]>([])
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
   const [sizes, setSizes] = useState<ItemSize[]>([])
   const [addons, setAddons] = useState<ItemAddon[]>([])
   const [message, setMessage] = useState<string | null>(null)
+  const tabListRef = useRef<HTMLDivElement>(null)
+  const addItemFormRef = useRef<HTMLFormElement>(null)
 
   const [itemForm, setItemForm] = useState<ItemFormState>(() => {
     const s = saved.itemForm
@@ -1221,9 +1283,27 @@ export function ItemsPage(): React.ReactElement {
     return () => clearTimeout(t)
   }, [message])
 
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent): void {
+      if (!e.ctrlKey) return
+      if (e.key === 's') {
+        e.preventDefault()
+        addItemFormRef.current?.requestSubmit()
+        return
+      }
+      const index = Number(e.key)
+      if (!Number.isInteger(index) || index < 1 || index > 5) return
+      e.preventDefault()
+      const nextTab = tabs[index - 1]
+      if (nextTab) setActiveTab(nextTab.key)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  })
+
   const tabs: { key: ItemsPageTab; label: string; icon: React.ReactNode; count?: number }[] = [
     { key: 'items',        label: 'الأصناف',     icon: <MdMenuBook />,   count: items.length },
-    { key: 'categories',   label: 'التصنيفات',   icon: <MdCategory />,   count: categories.length },
     { key: 'sizes',        label: 'الأحجام',     icon: <MdStraighten />, count: sizes.length },
     { key: 'addons',       label: 'الإضافات',    icon: <MdAddBox />,     count: addons.length },
     { key: 'raw_materials',label: 'المواد الخام', icon: <MdInventory2 />, count: ingredients.length },
@@ -1231,7 +1311,25 @@ export function ItemsPage(): React.ReactElement {
 
   return (
     <div className="unified-page">
-      <div className="inner-tabs" role="tablist">
+      <div
+        ref={tabListRef}
+        className="inner-tabs"
+        role="tablist"
+        onKeyDown={(e) => {
+          const currentIndex = tabs.findIndex((t) => t.key === activeTab)
+          if (currentIndex === -1) return
+          let nextIndex = currentIndex
+          if (e.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length
+          else if (e.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
+          else if (e.key === 'Home') nextIndex = 0
+          else if (e.key === 'End') nextIndex = tabs.length - 1
+          else return
+          e.preventDefault()
+          setActiveTab(tabs[nextIndex]!.key)
+          const buttons = tabListRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+          buttons?.[nextIndex]?.focus()
+        }}
+      >
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -1240,6 +1338,7 @@ export function ItemsPage(): React.ReactElement {
             aria-selected={activeTab === t.key}
             className={`inner-tab${activeTab === t.key ? ' inner-tab--active' : ''}`}
             onClick={() => setActiveTab(t.key)}
+            tabIndex={activeTab === t.key ? 0 : -1}
           >
             {t.icon}
             {t.label}
@@ -1265,9 +1364,9 @@ export function ItemsPage(): React.ReactElement {
           setMessage={setMessage}
           itemForm={itemForm}
           setItemForm={setItemForm}
+          formRef={addItemFormRef}
         />
       )}
-      {activeTab === 'categories'    && <CategoriesTab   categories={categories}   onRefresh={load} setMessage={setMessage} />}
       {activeTab === 'sizes'         && <SizesTab         sizes={sizes}             onRefresh={load} setMessage={setMessage} />}
       {activeTab === 'addons'        && <AddonsTab        addons={addons}           onRefresh={load} setMessage={setMessage} />}
       {activeTab === 'raw_materials' && <RawMaterialsTab  ingredients={ingredients} onRefresh={load} setMessage={setMessage} />}

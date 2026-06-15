@@ -24,6 +24,30 @@ const useUpdateStore = create<UpdateStore>((set) => ({
   set: (state) => set({ state })
 }))
 
+const OFFLINE_UPDATE_MESSAGE = 'لا يوجد اتصال بالإنترنت حالياً، تعذّر التحقق من التحديثات'
+
+function normalizeUpdaterMessage(message: string): string {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return OFFLINE_UPDATE_MESSAGE
+  }
+
+  const normalized = message.toLowerCase()
+  const offlineMarkers = [
+    'net::err_internet_disconnected',
+    'internet disconnected',
+    'net::err_network_changed',
+    'net::err_name_not_resolved',
+    'network is unreachable',
+    'failed to fetch',
+    'getaddrinfo enotfound',
+    'enetunreach'
+  ]
+
+  return offlineMarkers.some((marker) => normalized.includes(marker))
+    ? OFFLINE_UPDATE_MESSAGE
+    : message
+}
+
 // ── Public helpers ────────────────────────────────────────────────────────────
 
 export function useUpdateState(): UpdateState {
@@ -31,15 +55,28 @@ export function useUpdateState(): UpdateState {
 }
 
 export function triggerCheckNow(): void {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    useUpdateStore.getState().set({
+      phase: 'error',
+      message: OFFLINE_UPDATE_MESSAGE
+    })
+    return
+  }
+
   useUpdateStore.getState().set({ phase: 'checking' })
-  window.electronAPI?.updaterCheckNow().catch(() => {})
+  window.electronAPI?.updaterCheckNow().catch((error) => {
+    useUpdateStore.getState().set({
+      phase: 'error',
+      message: normalizeUpdaterMessage(error instanceof Error ? error.message : String(error))
+    })
+  })
   // Fallback timeout if updater never responds
   setTimeout(() => {
     const cur = useUpdateStore.getState().state
     if (cur.phase === 'checking') {
       useUpdateStore.getState().set({
         phase: 'error',
-        message: 'انتهت مهلة الاتصال — تأكد من الاتصال بالإنترنت'
+        message: 'تعذّر التحقق من التحديثات حالياً، تأكد من الاتصال بالإنترنت ثم حاول مرة أخرى'
       })
     }
   }, 30000)
@@ -71,7 +108,7 @@ export function useUpdaterBootstrap(): void {
       useUpdateStore.getState().set({ phase: 'ready', version })
     })
     const unsub4 = api.onUpdaterError(({ message }) => {
-      useUpdateStore.getState().set({ phase: 'error', message })
+      useUpdateStore.getState().set({ phase: 'error', message: normalizeUpdaterMessage(message) })
     })
     const unsub5 = api.onUpdateUpToDate(({ latestVersion }) => {
       useUpdateStore.getState().set({ phase: 'uptodate', latestVersion })
@@ -94,7 +131,7 @@ export function UpdateNotification(): React.ReactElement | null {
     window.electronAPI.updaterStartDownload().catch((e) => {
       useUpdateStore.getState().set({
         phase: 'error',
-        message: e instanceof Error ? e.message : 'فشل بدء التحميل'
+        message: normalizeUpdaterMessage(e instanceof Error ? e.message : 'فشل بدء التحميل')
       })
     })
   }

@@ -4862,6 +4862,15 @@ select.inline-edit-input {
   overflow: hidden;
 }
 
+.fp-selection-box {
+  position: absolute;
+  pointer-events: none;
+  border: 1.5px solid var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.45);
+  z-index: 90;
+}
+
 /* Grid overlay */
 .fp-canvas--grid {
   background-image:
@@ -4991,8 +5000,10 @@ select.inline-edit-input {
 
 /* Modal — wider than the default modal to fit the floor canvas */
 .fmp-modal {
-  width: min(860px, calc(100vw - 32px));
-  max-height: calc(100vh - 80px);
+  width: min(1140px, calc(100vw - 24px));
+  height: min(820px, calc(100vh - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -5006,12 +5017,29 @@ select.inline-edit-input {
   overflow: hidden;
 }
 
+.fmp-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 0 12px;
+  flex-shrink: 0;
+}
+
+.fmp-toolbar__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 /* ── Floor tabs ── */
 .fmp-tabs {
   display: flex;
   gap: 4px;
-  padding: 0 0 10px;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
 }
 
@@ -5054,9 +5082,9 @@ select.inline-edit-input {
 /* ── Legend ── */
 .fmp-legend {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 14px;
-  padding: 0 0 10px;
-  flex-shrink: 0;
 }
 
 .fmp-legend__item {
@@ -5080,21 +5108,57 @@ select.inline-edit-input {
 .fmp-legend__item--occupied::before  { background: #b91c1c; }
 .fmp-legend__item--selected::before  { background: #1d4ed8; }
 
-/* ── Canvas wrapper — scrollable, auto-scales ── */
+/* ── Zoom controls ── */
+.fmp-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fmp-zoom__value {
+  min-width: 54px;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--color-text);
+}
+
+/* ── Canvas wrapper — centered, no internal scrolling ── */
 .fmp-floor-wrap {
   flex: 1;
-  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   background: #d0d4d9;
   background-image: radial-gradient(circle, #b0b5bc 1px, transparent 1px);
   background-size: 24px 24px;
-  padding: 16px;
+  padding: 12px;
   min-height: 0;
 }
 
+.fmp-floor-wrap--pannable {
+  cursor: grab;
+}
+
+.fmp-floor-wrap--panning {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.fmp-canvas-shell {
+  position: relative;
+  flex-shrink: 0;
+  overflow: hidden;
+  will-change: transform;
+}
+
 .fmp-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
   background: #fff;
   box-shadow: 0 4px 20px rgba(0,0,0,0.18);
-  position: relative;
   overflow: hidden;
 }
 
@@ -5157,6 +5221,18 @@ select.inline-edit-input {
   padding: 32px 16px;
   text-align: center;
   color: var(--color-muted);
+  font-size: 0.9rem;
+
+@media (max-width: 900px) {
+  .fmp-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .fmp-toolbar__actions {
+    justify-content: space-between;
+  }
+}
   font-size: 0.9rem;
   font-weight: 600;
 }

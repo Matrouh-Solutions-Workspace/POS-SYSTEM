@@ -269,27 +269,78 @@ async function buildInventoryTransactions(
   createdAt: number,
   shiftId?: string
 ): Promise<InventoryTransaction[]> {
-  const allLines: Array<{ ingredientId: string; quantity: number; unit: string }> = []
+  const transactions: InventoryTransaction[] = []
   for (const item of items) {
-    const menuItem = await getCachedDoc<MenuItem>(COLLECTIONS.menuItems, item.menuItemId)
-    if (!menuItem?.recipeId) continue
-    const recipe = await getRecipe(menuItem.recipeId)
-    if (!recipe) continue
-    allLines.push(...recipeDeductionLines(recipe, item.quantity))
+    const lines = await buildInventoryLinesForOrderItem(item)
+    for (const line of lines) {
+      transactions.push({
+        id: generateId(),
+        ingredientId: line.ingredientId,
+        orderItemId: item.id,
+        menuItemId: item.menuItemId,
+        type: 'sale' as const,
+        quantity: line.quantity,
+        unit: line.unit,
+        referenceType: 'order' as const,
+        referenceId: orderId,
+        shiftId,
+        noteAr: 'خصم تلقائي من الطلب',
+        createdBy,
+        createdAt
+      })
+    }
   }
-  return mergeDeductionLines(allLines).map((line) => ({
-    id: generateId(),
-    ingredientId: line.ingredientId,
-    type: 'sale' as const,
-    quantity: line.quantity,
-    unit: line.unit,
-    referenceType: 'order' as const,
-    referenceId: orderId,
-    shiftId,
-    noteAr: 'خصم تلقائي من الطلب',
-    createdBy,
-    createdAt
-  }))
+  return transactions
+}
+
+function stockQuantityForOrderItem(item: OrderItem, stockUnit: string): number {
+  const normalized = stockUnit.trim().toLowerCase()
+  if (item.weightGrams != null) {
+    if (normalized === 'جرام' || normalized === 'gram' || normalized === 'grams') {
+      return item.weightGrams
+    }
+    if (
+      normalized === 'كيلوجرام' ||
+      normalized === 'كيلو' ||
+      normalized === 'كجم' ||
+      normalized === 'kg' ||
+      normalized === 'kilogram'
+    ) {
+      return item.weightGrams / 1000
+    }
+  }
+  return item.quantity
+}
+
+async function buildInventoryLinesForOrderItem(
+  item: OrderItem
+): Promise<Array<{ ingredientId: string; quantity: number; unit: string }>> {
+  const menuItem = await getCachedDoc<MenuItem>(COLLECTIONS.menuItems, item.menuItemId)
+  if (!menuItem) return []
+  if (menuItem.itemType === 'service') return []
+
+  const usesLinkedStock =
+    menuItem.itemType === 'raw_material' ||
+    menuItem.productType === 'ready_made' ||
+    menuItem.productType === 'manufactured'
+
+  if (usesLinkedStock && menuItem.linkedIngredientId) {
+    const ingredient = await getCachedDoc<{ unit: string }>(
+      COLLECTIONS.ingredients,
+      menuItem.linkedIngredientId
+    )
+    if (!ingredient) return []
+    return [{
+      ingredientId: menuItem.linkedIngredientId,
+      quantity: -Math.abs(stockQuantityForOrderItem(item, ingredient.unit)),
+      unit: ingredient.unit
+    }]
+  }
+
+  if (!menuItem.recipeId) return []
+  const recipe = await getRecipe(menuItem.recipeId)
+  if (!recipe) return []
+  return mergeDeductionLines(recipeDeductionLines(recipe, item.quantity))
 }
 
 // ---------------------------------------------------------------------------
@@ -675,18 +726,20 @@ export async function refundOrder(params: {
   const inventoryReversals: InventoryTransaction[] = []
   const allInventoryTxs = await getCachedDocs<InventoryTransaction>(COLLECTIONS.inventoryTransactions)
   for (const line of params.lines) {
-    const saleTxs = allInventoryTxs.filter(
-      (tx) => tx.referenceId === params.originalOrderId && tx.type === 'sale'
+    const saleTxs = allInventoryTxs.filter((tx) =>
+      tx.referenceId === params.originalOrderId &&
+      tx.type === 'sale' &&
+      tx.orderItemId === line.orderItemId
     )
-    // Find the matching inventory deduction (proportional to refund qty)
+    const originalItem = await getCachedDoc<OrderItem>(COLLECTIONS.orderItems, line.orderItemId)
+    if (!originalItem || originalItem.quantity <= 0) continue
+    const qtyRatio = line.quantity / originalItem.quantity
     for (const tx of saleTxs) {
-      const originalItem = (await getCachedDocs<OrderItem>(COLLECTIONS.orderItems))
-        .find((oi) => oi.orderId === params.originalOrderId && oi.menuItemId === tx.ingredientId)
-      if (!originalItem) continue
-      const qtyRatio = line.quantity / originalItem.quantity
       inventoryReversals.push({
         id: generateId(),
         ingredientId: tx.ingredientId,
+        orderItemId: line.orderItemId,
+        menuItemId: line.menuItemId,
         type: 'sale_reversal',
         quantity: Math.abs(tx.quantity) * qtyRatio,
         unit: tx.unit,

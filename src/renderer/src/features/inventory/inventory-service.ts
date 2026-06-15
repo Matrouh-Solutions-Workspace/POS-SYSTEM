@@ -10,7 +10,8 @@ import type {
   Ingredient,
   InventoryTransaction,
   InventoryTransactionType,
-  IngredientStock
+  IngredientStock,
+  MenuItem
 } from '@shared/types'
 import { COLLECTIONS } from '@shared/constants/collections'
 import { cacheDocs, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
@@ -48,6 +49,11 @@ export async function deleteIngredient(id: string): Promise<void> {
   const used = recipes.some((r) => (r.lines ?? []).some((l) => l.ingredientId === id))
   if (used) {
     throw new Error('لا يمكن الحذف — المكوّن مستخدم في وصفة. احذف الصنف من القائمة أولاً.')
+  }
+  const linkedMenuItems = await getCachedDocs<MenuItem>(COLLECTIONS.menuItems)
+  const linked = linkedMenuItems.some((item) => item.linkedIngredientId === id)
+  if (linked) {
+    throw new Error('لا يمكن الحذف — المكوّن مرتبط بصنف للبيع أو بالمخزون. أزل الربط أولاً.')
   }
   await dbDelete(COLLECTIONS.ingredients, id)
 }

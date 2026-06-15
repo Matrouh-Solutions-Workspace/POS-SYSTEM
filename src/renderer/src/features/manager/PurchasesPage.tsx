@@ -10,7 +10,7 @@
  *   thresholds. Used less frequently (setup & maintenance).
  * This mirrors how Square, Toast, and Lightspeed structure their inventory.
  */
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import type { Ingredient, IngredientStock } from '@shared/types'
 import {
   listIngredients,
@@ -26,6 +26,7 @@ import { ConfirmDeleteButton } from '@renderer/components/ConfirmDeleteButton'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { InventoryActionModal, type InventoryActionType } from './InventoryActionModal'
 import { MdEdit, MdCheck, MdClose, MdInventory, MdKitchen, MdWarning } from 'react-icons/md'
+import { usePageState } from '@renderer/features/tabs/page-state-store'
 
 const UNITS = ['جرام', 'كيلوجرام', 'قطعة', 'مل', 'لتر']
 
@@ -251,10 +252,16 @@ function IngredientsTab({ ingredients, onRefresh, setMessage }: {
 type PurchasesTab = 'stock' | 'ingredients'
 
 export function PurchasesPage(): React.ReactElement {
-  const [activeTab, setActiveTab] = useState<PurchasesTab>('stock')
+  const { saved, save } = usePageState<{ activeTab: PurchasesTab }>('/manager/purchases')
+  const [activeTab, setActiveTab] = useState<PurchasesTab>(saved.activeTab ?? 'stock')
   const [stocks, setStocks] = useState<IngredientStock[]>([])
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
   const [message, setMessage] = useState<string | null>(null)
+  const tabListRef = useRef<HTMLDivElement>(null)
+  const stockTabRef = useRef<HTMLDivElement>(null)
+  const ingredientsTabRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => { save({ activeTab }) }, [activeTab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async () => {
     const [s, ing] = await Promise.all([getIngredientStocks(), listIngredients()])
@@ -277,9 +284,47 @@ export function PurchasesPage(): React.ReactElement {
     { key: 'ingredients', label: 'المكوّنات',       icon: <MdKitchen />,   badge: undefined },
   ]
 
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent): void {
+      if (!e.ctrlKey) return
+      if (e.key === 's') {
+        e.preventDefault()
+        const scope = activeTab === 'stock' ? stockTabRef.current : ingredientsTabRef.current
+        const form = scope?.querySelector<HTMLFormElement>('form')
+        form?.requestSubmit()
+        return
+      }
+      if (e.key === '1' || e.key === '2') {
+        e.preventDefault()
+        setActiveTab(e.key === '1' ? 'stock' : 'ingredients')
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [activeTab])
+
   return (
     <div className="unified-page">
-      <div className="inner-tabs" role="tablist">
+      <div
+        ref={tabListRef}
+        className="inner-tabs"
+        role="tablist"
+        onKeyDown={(e) => {
+          const currentIndex = tabs.findIndex((t) => t.key === activeTab)
+          if (currentIndex === -1) return
+          let nextIndex = currentIndex
+          if (e.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length
+          else if (e.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
+          else if (e.key === 'Home') nextIndex = 0
+          else if (e.key === 'End') nextIndex = tabs.length - 1
+          else return
+          e.preventDefault()
+          setActiveTab(tabs[nextIndex]!.key)
+          const buttons = tabListRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+          buttons?.[nextIndex]?.focus()
+        }}
+      >
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -288,6 +333,7 @@ export function PurchasesPage(): React.ReactElement {
             aria-selected={activeTab === t.key}
             className={`inner-tab${activeTab === t.key ? ' inner-tab--active' : ''}`}
             onClick={() => setActiveTab(t.key)}
+            tabIndex={activeTab === t.key ? 0 : -1}
           >
             {t.icon}
             {t.label}
@@ -300,8 +346,16 @@ export function PurchasesPage(): React.ReactElement {
         <p className={`form-message ${message.includes('فشل')||message.includes('لا يمكن') ? 'form-message--error' : 'form-message--ok'}`} role="status">{message}</p>
       )}
 
-      {activeTab === 'stock'       && <StockTab stocks={stocks} ingredients={ingredients} onRefresh={load} setMessage={setMessage} />}
-      {activeTab === 'ingredients' && <IngredientsTab ingredients={ingredients} onRefresh={load} setMessage={setMessage} />}
+      {activeTab === 'stock' && (
+        <div ref={stockTabRef}>
+          <StockTab stocks={stocks} ingredients={ingredients} onRefresh={load} setMessage={setMessage} />
+        </div>
+      )}
+      {activeTab === 'ingredients' && (
+        <div ref={ingredientsTabRef}>
+          <IngredientsTab ingredients={ingredients} onRefresh={load} setMessage={setMessage} />
+        </div>
+      )}
     </div>
   )
 }

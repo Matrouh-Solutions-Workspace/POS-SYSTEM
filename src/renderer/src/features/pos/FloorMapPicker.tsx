@@ -22,6 +22,8 @@ const CHAIR_R   = 11
 const CHAIR_GAP = 5
 const DEFAULT_W = 80
 const DEFAULT_H = 80
+const MIN_ZOOM  = 0.6
+const MAX_ZOOM  = 1.8
 
 // ── Chair positions (same algorithm as FloorPlanPage) ─────────────────────
 
@@ -91,41 +93,115 @@ function FloorCanvas({
   occupiedIds,
   selectedId,
   onSelect,
+  zoom,
 }: {
   floor: Floor
   tables: DiningTable[]
   occupiedIds: Set<string>
   selectedId: string
   onSelect: (id: string) => void
+  zoom: number
 }): React.ReactElement {
   const wrapRef = useRef<HTMLDivElement>(null)
-  const [scale, setScale] = useState(1)
+  const [fitScale, setFitScale] = useState(1)
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [isPanning, setIsPanning] = useState(false)
+  const panningRef = useRef<{ startClientX: number; startClientY: number; startX: number; startY: number } | null>(null)
 
-  // Auto-fit the canvas to the available container width
+  // Auto-fit the entire floor plan to the available width and height.
   useEffect(() => {
     if (!wrapRef.current) return
     const obs = new ResizeObserver(([entry]) => {
       if (!entry) return
-      const available = entry.contentRect.width
-      setScale(Math.min(1, available / floor.width))
+      const availableWidth = Math.max(entry.contentRect.width - 24, 100)
+      const availableHeight = Math.max(entry.contentRect.height - 24, 100)
+      setViewportSize({ width: availableWidth, height: availableHeight })
+      const widthScale = availableWidth / floor.width
+      const heightScale = availableHeight / floor.height
+      setFitScale(Math.min(1, widthScale, heightScale))
     })
     obs.observe(wrapRef.current)
     return () => obs.disconnect()
-  }, [floor.width])
+  }, [floor.width, floor.height])
+
+  const scale = +(fitScale * zoom).toFixed(3)
+  const scaledWidth = floor.width * scale
+  const scaledHeight = floor.height * scale
+  const overflowX = Math.max(0, scaledWidth - viewportSize.width)
+  const overflowY = Math.max(0, scaledHeight - viewportSize.height)
+  const isPannable = overflowX > 1 || overflowY > 1
+
+  function clampPan(x: number, y: number): { x: number; y: number } {
+    const maxX = overflowX / 2
+    const maxY = overflowY / 2
+    return {
+      x: Math.max(-maxX, Math.min(x, maxX)),
+      y: Math.max(-maxY, Math.min(y, maxY)),
+    }
+  }
+
+  useEffect(() => {
+    setPan((current) => clampPan(current.x, current.y))
+  }, [overflowX, overflowY])
+
+  useEffect(() => {
+    setPan({ x: 0, y: 0 })
+  }, [floor.id])
+
+  function handlePointerDown(e: React.PointerEvent<HTMLDivElement>): void {
+    if (!isPannable || e.button !== 0) return
+    if ((e.target as HTMLElement).closest('.fmp-table')) return
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    panningRef.current = {
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startX: pan.x,
+      startY: pan.y,
+    }
+    setIsPanning(true)
+  }
+
+  function handlePointerMove(e: React.PointerEvent<HTMLDivElement>): void {
+    if (!panningRef.current) return
+    e.preventDefault()
+    const dx = e.clientX - panningRef.current.startClientX
+    const dy = e.clientY - panningRef.current.startClientY
+    setPan(clampPan(panningRef.current.startX + dx, panningRef.current.startY + dy))
+  }
+
+  function handlePointerUp(): void {
+    panningRef.current = null
+    setIsPanning(false)
+  }
 
   return (
-    <div ref={wrapRef} className="fmp-floor-wrap">
+    <div
+      ref={wrapRef}
+      className={`fmp-floor-wrap${isPannable ? ' fmp-floor-wrap--pannable' : ''}${isPanning ? ' fmp-floor-wrap--panning' : ''}`}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp}
+    >
       <div
-        className="fmp-canvas"
+        className="fmp-canvas-shell"
         style={{
-          width:  floor.width,
-          height: floor.height,
-          transform: `scale(${scale})`,
-          transformOrigin: 'top left',
-          flexShrink: 0,
-          marginBottom: scale < 1 ? floor.height * scale - floor.height : 0,
+          width: scaledWidth,
+          height: scaledHeight,
+          transform: `translate(${pan.x}px, ${pan.y}px)`,
         }}
       >
+        <div
+          className="fmp-canvas"
+          style={{
+            width: floor.width,
+            height: floor.height,
+            transform: `scale(${scale})`,
+            transformOrigin: 'top left',
+          }}
+        >
         {/* Walls */}
         <WallSvg walls={floor.walls ?? []} width={floor.width} height={floor.height} />
 
@@ -192,6 +268,7 @@ function FloorCanvas({
             </button>
           )
         })}
+        </div>
       </div>
     </div>
   )
@@ -262,6 +339,7 @@ interface FloorMapPickerProps {
 export function FloorMapPicker({ tables, occupiedIds, selectedId, onSelect }: FloorMapPickerProps): React.ReactElement {
   const [floors, setFloors] = useState<Floor[]>([])
   const [activeFloorId, setActiveFloorId] = useState<string | null>(null)
+  const [zoom, setZoom] = useState(1)
 
   useEffect(() => {
     void listFloors().then((fl) => {
@@ -281,31 +359,62 @@ export function FloorMapPicker({ tables, occupiedIds, selectedId, onSelect }: Fl
     ? tables.filter((t) => t.floorId === activeFloor.id && t.active)
     : []
 
+  function handleZoomIn(): void {
+    setZoom((current) => Math.min(MAX_ZOOM, +(current + 0.1).toFixed(1)))
+  }
+
+  function handleZoomOut(): void {
+    setZoom((current) => Math.max(MIN_ZOOM, +(current - 0.1).toFixed(1)))
+  }
+
+  function handleZoomReset(): void {
+    setZoom(1)
+  }
+
   return (
     <div className="fmp-root">
       {hasFloorLayout ? (
         <>
-          {/* Floor tabs */}
-          {floors.length > 1 && (
-            <div className="fmp-tabs">
-              {floors.map((fl) => (
-                <button key={fl.id} type="button"
-                  className={`fmp-tab${activeFloorId === fl.id ? ' fmp-tab--active' : ''}`}
-                  onClick={() => setActiveFloorId(fl.id)}>
-                  {fl.nameAr}
-                  <span className="fmp-tab__count">
-                    {tables.filter((t) => t.floorId === fl.id).length}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="fmp-toolbar">
+            {/* Floor tabs */}
+            {floors.length > 1 && (
+              <div className="fmp-tabs">
+                {floors.map((fl) => (
+                  <button key={fl.id} type="button"
+                    className={`fmp-tab${activeFloorId === fl.id ? ' fmp-tab--active' : ''}`}
+                    onClick={() => {
+                      setActiveFloorId(fl.id)
+                      setZoom(1)
+                    }}>
+                    {fl.nameAr}
+                    <span className="fmp-tab__count">
+                      {tables.filter((t) => t.floorId === fl.id).length}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
 
-          {/* Legend */}
-          <div className="fmp-legend">
-            <span className="fmp-legend__item fmp-legend__item--available">متاحة</span>
-            <span className="fmp-legend__item fmp-legend__item--occupied">مشغولة</span>
-            <span className="fmp-legend__item fmp-legend__item--selected">محددة</span>
+            <div className="fmp-toolbar__actions">
+              <div className="fmp-legend">
+                <span className="fmp-legend__item fmp-legend__item--available">متاحة</span>
+                <span className="fmp-legend__item fmp-legend__item--occupied">مشغولة</span>
+                <span className="fmp-legend__item fmp-legend__item--selected">محددة</span>
+              </div>
+
+              <div className="fmp-zoom">
+                <button type="button" className="btn btn--secondary btn--sm" onClick={handleZoomOut} title="تصغير">
+                  -
+                </button>
+                <button type="button" className="btn btn--secondary btn--sm" onClick={handleZoomReset} title="ملاءمة الشاشة">
+                  ملاءمة
+                </button>
+                <button type="button" className="btn btn--secondary btn--sm" onClick={handleZoomIn} title="تكبير">
+                  +
+                </button>
+                <span className="fmp-zoom__value">{Math.round(zoom * 100)}%</span>
+              </div>
+            </div>
           </div>
 
           {/* Canvas */}
@@ -316,6 +425,7 @@ export function FloorMapPicker({ tables, occupiedIds, selectedId, onSelect }: Fl
               occupiedIds={occupiedIds}
               selectedId={selectedId}
               onSelect={onSelect}
+              zoom={zoom}
             />
           )}
 
