@@ -3875,15 +3875,15 @@ select.inline-edit-input {
 }
 
 .receipt-ascii-preview {
-  max-height: 180px;
+  max-height: 260px;
   width: 80mm;
   max-width: 100%;
   overflow: auto;
   direction: ltr;
   text-align: center;
   font-family: "Courier New", monospace;
-  font-size: 7px;
-  line-height: 0.78;
+  font-size: 5px;
+  line-height: 0.76;
   color: #111827;
   background: #fff;
   border: 1px solid var(--color-border);

@@ -227,11 +227,16 @@ type ReceiptPreviewItem = {
 }
 
 const RECEIPT_PRINTER_PIXEL_WIDTH = 576
-const RECEIPT_ASCII_MAX_COLUMNS = 64
-const RECEIPT_ASCII_MIN_COLUMNS = 32
+const RECEIPT_ASCII_MAX_COLUMNS = 96
+const RECEIPT_ASCII_MIN_COLUMNS = 48
 
 function clampReceiptLogoWidth(width?: number): number {
   return Math.max(RECEIPT_ASCII_MIN_COLUMNS, Math.min(RECEIPT_ASCII_MAX_COLUMNS, Number(width) || RECEIPT_ASCII_MAX_COLUMNS))
+}
+
+function initialReceiptLogoWidth(width?: number): number {
+  const numeric = Number(width) || RECEIPT_ASCII_MAX_COLUMNS
+  return numeric < 80 ? RECEIPT_ASCII_MAX_COLUMNS : clampReceiptLogoWidth(numeric)
 }
 
 function hasOversizedAscii(ascii: string): boolean {
@@ -254,7 +259,7 @@ function ReceiptDesigner({
   const [logoAscii, setLogoAscii] = useState(settings.receiptLogoAscii ?? '')
   const [logoMode, setLogoMode] = useState<AppSettings['receiptLogoMode']>(settings.receiptLogoMode ?? 'image')
   const [logoThreshold, setLogoThreshold] = useState(settings.receiptLogoThreshold ?? 176)
-  const [logoWidth, setLogoWidth] = useState(clampReceiptLogoWidth(settings.receiptLogoWidth))
+  const [logoWidth, setLogoWidth] = useState(initialReceiptLogoWidth(settings.receiptLogoWidth))
   const [logoInvert, setLogoInvert] = useState(Boolean(settings.receiptLogoInvert))
   const [draggingSection, setDraggingSection] = useState<ReceiptSectionId | null>(null)
   const [saving, setSaving] = useState(false)
@@ -603,7 +608,7 @@ function processLogoImage(dataUrl: string, width: number, threshold: number, inv
       const crop = cropImageBounds(image)
       const safeWidth = clampReceiptLogoWidth(width)
       const ratio = crop.height / Math.max(1, crop.width)
-      const asciiHeight = Math.max(8, Math.round(safeWidth * ratio * 0.46))
+      const asciiHeight = Math.max(12, Math.round(safeWidth * ratio * 0.42))
       const asciiCanvas = document.createElement('canvas')
       asciiCanvas.width = safeWidth
       asciiCanvas.height = asciiHeight
@@ -615,17 +620,30 @@ function processLogoImage(dataUrl: string, width: number, threshold: number, inv
       asciiCtx.imageSmoothingQuality = 'high'
       asciiCtx.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, safeWidth, asciiHeight)
       const pixels = asciiCtx.getImageData(0, 0, safeWidth, asciiHeight).data
-      const chars = invert ? ' .:-=+*#%@' : '@%#*+=-:. '
-      const lines: string[] = []
+      const luminanceMap = new Array<number>(safeWidth * asciiHeight)
       for (let y = 0; y < asciiHeight; y += 1) {
-        let line = ''
         for (let x = 0; x < safeWidth; x += 1) {
           const offset = (y * safeWidth + x) * 4
           const alpha = pixels[offset + 3] / 255
-          const luminance = (pixels[offset] * 0.299 + pixels[offset + 1] * 0.587 + pixels[offset + 2] * 0.114) * alpha + 255 * (1 - alpha)
-          const contrast = Math.max(0, Math.min(255, (luminance - threshold) * 1.6 + threshold))
-          const adjusted = contrast < threshold ? contrast * 0.62 : 255 - ((255 - contrast) * 0.7)
-          const index = Math.max(0, Math.min(chars.length - 1, Math.round((adjusted / 255) * (chars.length - 1))))
+          luminanceMap[y * safeWidth + x] = (pixels[offset] * 0.299 + pixels[offset + 1] * 0.587 + pixels[offset + 2] * 0.114) * alpha + 255 * (1 - alpha)
+        }
+      }
+      const chars = invert ? '@%#*+=-:. ' : ' .:-=+*#%@'
+      const lines: string[] = []
+      const edgeStrength = 72
+      const thresholdBias = (176 - threshold) / 255
+      for (let y = 0; y < asciiHeight; y += 1) {
+        let line = ''
+        for (let x = 0; x < safeWidth; x += 1) {
+          const center = luminanceMap[y * safeWidth + x] ?? 255
+          const left = luminanceMap[y * safeWidth + Math.max(0, x - 1)] ?? center
+          const right = luminanceMap[y * safeWidth + Math.min(safeWidth - 1, x + 1)] ?? center
+          const top = luminanceMap[Math.max(0, y - 1) * safeWidth + x] ?? center
+          const bottom = luminanceMap[Math.min(asciiHeight - 1, y + 1) * safeWidth + x] ?? center
+          const edge = Math.min(1, (Math.abs(left - right) + Math.abs(top - bottom)) / edgeStrength)
+          const darkness = Math.max(0, Math.min(1, 1 - center / 255 + thresholdBias))
+          const ink = Math.max(darkness * 0.95, edge * 0.8)
+          const index = Math.max(0, Math.min(chars.length - 1, Math.round(ink * (chars.length - 1))))
           line += chars[index]
         }
         lines.push(line.replace(/\s+$/g, ''))
