@@ -392,12 +392,24 @@ function ReceiptDesigner({
     }
   }
 
+  async function printPreviewReceipt(): Promise<void> {
+    setMessage(null)
+    const result = await window.electronAPI.printReceipt(previewHtml)
+    setMessage(result.ok ? 'تم إرسال معاينة الإيصال للطباعة' : result.error ?? 'فشل اختبار طباعة معاينة الإيصال')
+  }
+
   return (
     <div className="receipt-designer">
       {message && <p className={`form-message ${message.includes('فشل') ? 'form-message--error' : 'form-message--ok'}`}>{message}</p>}
       <div className="receipt-designer__workspace">
         <div className="receipt-designer__controls">
           <div className="receipt-designer__preview">
+            <div className="receipt-designer__preview-actions">
+              <h3 className="card__title">معاينة الإيصال</h3>
+              <button type="button" className="btn btn--secondary" onClick={() => void printPreviewReceipt()}>
+                <MdPrint /> اختبار طباعة المعاينة
+              </button>
+            </div>
             <iframe title="POS receipt preview" srcDoc={previewHtml} />
           </div>
 

@@ -3852,6 +3852,18 @@ select.inline-edit-input {
   overflow: visible;
 }
 
+.receipt-designer__preview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.receipt-designer__preview-actions .card__title {
+  margin: 0;
+}
+
 .receipt-designer__preview iframe {
   display: block;
   width: min(100%, 460px);
