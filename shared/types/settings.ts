@@ -52,6 +52,10 @@ export interface AppSettings {
   receiptLogoWidth?: number
   /** Invert the processed logo output. */
   receiptLogoInvert?: boolean
+  /** Logo block alignment on the printed receipt. */
+  receiptLogoAlign?: 'left' | 'center' | 'right'
+  /** Maximum logo block width as a percentage of the printable receipt body. */
+  receiptLogoMaxWidthPercent?: number
   /** Directory used for automatic and quick backups. */
   backupDirectory?: string
   /** Additional backup directories (up to 2 extra). Written to alongside backupDirectory. */

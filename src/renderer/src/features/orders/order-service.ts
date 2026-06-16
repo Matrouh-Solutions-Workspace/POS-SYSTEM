@@ -63,6 +63,8 @@ export async function getSettings(): Promise<AppSettings> {
     receiptLogoThreshold: 176,
     receiptLogoWidth: 96,
     receiptLogoInvert: false,
+    receiptLogoAlign: 'center',
+    receiptLogoMaxWidthPercent: 100,
     autoBackupEnabled: false,
     autoBackupIntervalDays: 1,
     autoBackupOnClose: false,
@@ -104,6 +106,8 @@ export async function updateSettings(
       | 'receiptLogoThreshold'
       | 'receiptLogoWidth'
       | 'receiptLogoInvert'
+      | 'receiptLogoAlign'
+      | 'receiptLogoMaxWidthPercent'
       | 'backupDirectory'
       | 'backupDirectories'
       | 'autoBackupEnabled'

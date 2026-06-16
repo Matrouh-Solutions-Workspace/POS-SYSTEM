@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import type { AppSettings, KitchenPrinter, KitchenPrinterVisibility, Order, OrderItem, ReceiptSectionId, SystemPrinter } from '@shared/types'
 import { getSettings, updateSettings } from '@renderer/features/orders/order-service'
 import { applyThemeColor, DEFAULT_PRIMARY } from '@renderer/features/theme/theme-store'
@@ -229,14 +229,46 @@ type ReceiptPreviewItem = {
 const RECEIPT_PRINTER_PIXEL_WIDTH = 576
 const RECEIPT_ASCII_MAX_COLUMNS = 96
 const RECEIPT_ASCII_MIN_COLUMNS = 48
+const RECEIPT_LOGO_MIN_WIDTH_PERCENT = 20
+const RECEIPT_LOGO_MAX_WIDTH_PERCENT = 100
 
 function clampReceiptLogoWidth(width?: number): number {
   return Math.max(RECEIPT_ASCII_MIN_COLUMNS, Math.min(RECEIPT_ASCII_MAX_COLUMNS, Number(width) || RECEIPT_ASCII_MAX_COLUMNS))
 }
 
+function clampReceiptLogoMaxWidthPercent(width?: number): number {
+  return Math.max(RECEIPT_LOGO_MIN_WIDTH_PERCENT, Math.min(RECEIPT_LOGO_MAX_WIDTH_PERCENT, Number(width) || RECEIPT_LOGO_MAX_WIDTH_PERCENT))
+}
+
 function initialReceiptLogoWidth(width?: number): number {
   const numeric = Number(width) || RECEIPT_ASCII_MAX_COLUMNS
   return numeric < 80 ? RECEIPT_ASCII_MAX_COLUMNS : clampReceiptLogoWidth(numeric)
+}
+
+function logoPreviewBlockStyle(align: AppSettings['receiptLogoAlign'], maxWidthPercent: number): CSSProperties {
+  const margin =
+    align === 'left'
+      ? '10px auto 0 0'
+      : align === 'right'
+        ? '10px 0 0 auto'
+        : '10px auto 0'
+  return { width: `${maxWidthPercent}%`, margin }
+}
+
+function fitAsciiPreview(ascii: string, maxWidthPercent: number): string {
+  const columns = Math.max(12, Math.round(RECEIPT_ASCII_MAX_COLUMNS * clampReceiptLogoMaxWidthPercent(maxWidthPercent) / 100))
+  return ascii
+    .split('\n')
+    .map((line) => {
+      if (line.length <= columns) return line
+      let fitted = ''
+      for (let i = 0; i < columns; i += 1) {
+        const sourceIndex = Math.min(line.length - 1, Math.floor(i * line.length / columns))
+        fitted += line[sourceIndex] ?? ' '
+      }
+      return fitted.replace(/\s+$/g, '')
+    })
+    .join('\n')
 }
 
 function hasOversizedAscii(ascii: string): boolean {
@@ -261,6 +293,8 @@ function ReceiptDesigner({
   const [logoThreshold, setLogoThreshold] = useState(settings.receiptLogoThreshold ?? 176)
   const [logoWidth, setLogoWidth] = useState(initialReceiptLogoWidth(settings.receiptLogoWidth))
   const [logoInvert, setLogoInvert] = useState(Boolean(settings.receiptLogoInvert))
+  const [logoAlign, setLogoAlign] = useState<AppSettings['receiptLogoAlign']>(settings.receiptLogoAlign ?? 'center')
+  const [logoMaxWidthPercent, setLogoMaxWidthPercent] = useState(clampReceiptLogoMaxWidthPercent(settings.receiptLogoMaxWidthPercent))
   const [draggingSection, setDraggingSection] = useState<ReceiptSectionId | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -283,8 +317,10 @@ function ReceiptDesigner({
     receiptLogoMode: logoMode,
     receiptLogoThreshold: logoThreshold,
     receiptLogoWidth: logoWidth,
-    receiptLogoInvert: logoInvert
-  }), [compactMode, hiddenSections, logoAscii, logoDataUrl, logoInvert, logoMode, logoProcessedDataUrl, logoThreshold, logoWidth, sectionOrder, settings, showItemNotes])
+    receiptLogoInvert: logoInvert,
+    receiptLogoAlign: logoAlign,
+    receiptLogoMaxWidthPercent: logoMaxWidthPercent
+  }), [compactMode, hiddenSections, logoAlign, logoAscii, logoDataUrl, logoInvert, logoMaxWidthPercent, logoMode, logoProcessedDataUrl, logoThreshold, logoWidth, sectionOrder, settings, showItemNotes])
 
   const previewHtml = useMemo(() => {
     const subtotal = previewItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
@@ -403,7 +439,9 @@ function ReceiptDesigner({
       receiptLogoMode: logoMode,
       receiptLogoThreshold: logoThreshold,
       receiptLogoWidth: logoWidth,
-      receiptLogoInvert: logoInvert
+      receiptLogoInvert: logoInvert,
+      receiptLogoAlign: logoAlign,
+      receiptLogoMaxWidthPercent: logoMaxWidthPercent
     }
     try {
       await updateSettings(patch)
@@ -504,6 +542,25 @@ function ReceiptDesigner({
                 </select>
               </label>
               <label className="field">
+                <span>محاذاة الشعار</span>
+                <select value={logoAlign} onChange={(e) => setLogoAlign(e.target.value as AppSettings['receiptLogoAlign'])}>
+                  <option value="center">في المنتصف</option>
+                  <option value="right">يمين</option>
+                  <option value="left">شمال</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>أقصى عرض للشعار: {logoMaxWidthPercent}%</span>
+                <input
+                  type="range"
+                  min={RECEIPT_LOGO_MIN_WIDTH_PERCENT}
+                  max={RECEIPT_LOGO_MAX_WIDTH_PERCENT}
+                  step="5"
+                  value={logoMaxWidthPercent}
+                  onChange={(e) => setLogoMaxWidthPercent(clampReceiptLogoMaxWidthPercent(Number(e.target.value)))}
+                />
+              </label>
+              <label className="field">
                 <span>عرض المعالجة</span>
                 <input
                   type="range"
@@ -547,9 +604,13 @@ function ReceiptDesigner({
               <div className="receipt-logo-print-preview">
                 <span>معاينة ما سيتم طباعته</span>
                 {logoMode === 'ascii' ? (
-                  <pre className="receipt-ascii receipt-ascii-preview" dir="ltr">{logoAscii}</pre>
+                  <pre className="receipt-ascii receipt-ascii-preview" dir="ltr" style={logoPreviewBlockStyle(logoAlign, logoMaxWidthPercent)}>{fitAsciiPreview(logoAscii, logoMaxWidthPercent)}</pre>
                 ) : (
-                  <img src={logoMode === 'mono' ? logoProcessedDataUrl || logoDataUrl : logoDataUrl} alt="Receipt logo print preview" />
+                  <img
+                    src={logoMode === 'mono' ? logoProcessedDataUrl || logoDataUrl : logoDataUrl}
+                    alt="Receipt logo print preview"
+                    style={logoPreviewBlockStyle(logoAlign, logoMaxWidthPercent)}
+                  />
                 )}
               </div>
             )}

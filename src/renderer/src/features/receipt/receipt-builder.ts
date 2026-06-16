@@ -5,6 +5,16 @@ const RECEIPT_PAPER_WIDTH_MM = 80
 const RECEIPT_PAGE_HEIGHT_MM = 297
 const RECEIPT_ASCII_COLUMNS = 96
 
+function receiptLogoMaxWidth(settings: AppSettings): number {
+  return Math.max(20, Math.min(100, Number(settings.receiptLogoMaxWidthPercent) || 100))
+}
+
+function receiptLogoMargin(settings: AppSettings): string {
+  if (settings.receiptLogoAlign === 'left') return '0 auto 6px 0'
+  if (settings.receiptLogoAlign === 'right') return '0 0 6px auto'
+  return '0 auto 6px'
+}
+
 export const DEFAULT_RECEIPT_SECTIONS: ReceiptSectionId[] = [
   'logo',
   'restaurant',
@@ -56,6 +66,8 @@ export function buildReceiptHtml(
   const hidden = new Set(settings.receiptHiddenSections ?? [])
   const sections = normalizeReceiptSections(settings.receiptSectionOrder)
   const compact = Boolean(settings.receiptCompactMode)
+  const logoMaxWidth = receiptLogoMaxWidth(settings)
+  const logoMargin = receiptLogoMargin(settings)
   const sectionHtml = sections
     .filter((section) => !hidden.has(section))
     .map((section) => renderSection(section, order, items, settings, cur, options))
@@ -85,8 +97,8 @@ export function buildReceiptHtml(
     }
     h1 { font-size: ${compact ? '15px' : '17px'}; text-align: center; margin: 0 0 2px; font-weight: 900; }
     .sub { text-align: center; font-size: 11px; color: #333; margin: 2px 0; }
-    .receipt-logo { display: block; width: 100%; max-width: 100%; height: auto; margin: 0 auto 6px; object-fit: contain; }
-    .receipt-ascii { direction: ltr; display: block; width: 100%; max-width: 100%; margin: 0 auto 6px; overflow: hidden; text-align: center; font-family: 'Courier New', monospace; font-size: ${compact ? '4.7px' : '5px'}; line-height: 0.76; white-space: pre; letter-spacing: 0; }
+    .receipt-logo { display: block; width: ${logoMaxWidth}%; max-width: ${logoMaxWidth}%; height: auto; margin: ${logoMargin}; object-fit: contain; }
+    .receipt-ascii { direction: ltr; display: block; width: ${logoMaxWidth}%; max-width: ${logoMaxWidth}%; margin: ${logoMargin}; overflow: hidden; text-align: center; font-family: 'Courier New', monospace; font-size: ${compact ? '4.7px' : '5px'}; line-height: 0.76; white-space: pre; letter-spacing: 0; }
     table { width: 100%; border-collapse: collapse; margin: ${compact ? '5px' : '8px'} 0; }
     th, td { padding: ${compact ? '2px 3px' : '3px 4px'}; text-align: right; border-bottom: 1px dashed #bdbdbd; font-size: ${compact ? '10px' : '11px'}; vertical-align: top; }
     th { font-weight: 900; background: #f5f5f5; }
@@ -141,7 +153,8 @@ function renderSection(
 
 function renderLogo(settings: AppSettings): string {
   if (settings.receiptLogoMode === 'ascii' && settings.receiptLogoAscii) {
-    return `<pre class="receipt-ascii">${escapeHtml(fitAsciiToReceipt(settings.receiptLogoAscii))}</pre>`
+    const columns = Math.max(12, Math.round(RECEIPT_ASCII_COLUMNS * receiptLogoMaxWidth(settings) / 100))
+    return `<pre class="receipt-ascii">${escapeHtml(fitAsciiToReceipt(settings.receiptLogoAscii, columns))}</pre>`
   }
   const imageSrc = settings.receiptLogoMode === 'mono'
     ? settings.receiptLogoProcessedDataUrl || settings.receiptLogoDataUrl
@@ -150,14 +163,14 @@ function renderLogo(settings: AppSettings): string {
   return `<img class="receipt-logo" src="${escapeAttribute(imageSrc)}" alt="Restaurant logo" />`
 }
 
-function fitAsciiToReceipt(ascii: string): string {
+function fitAsciiToReceipt(ascii: string, columns = RECEIPT_ASCII_COLUMNS): string {
   return ascii
     .split('\n')
     .map((line) => {
-      if (line.length <= RECEIPT_ASCII_COLUMNS) return line
+      if (line.length <= columns) return line
       let fitted = ''
-      for (let i = 0; i < RECEIPT_ASCII_COLUMNS; i += 1) {
-        const sourceIndex = Math.min(line.length - 1, Math.floor(i * line.length / RECEIPT_ASCII_COLUMNS))
+      for (let i = 0; i < columns; i += 1) {
+        const sourceIndex = Math.min(line.length - 1, Math.floor(i * line.length / columns))
         fitted += line[sourceIndex] ?? ' '
       }
       return fitted.replace(/\s+$/g, '')
