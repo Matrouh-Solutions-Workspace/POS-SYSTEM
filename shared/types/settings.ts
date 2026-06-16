@@ -20,5 +20,13 @@ export interface AppSettings {
   maxCashierDiscountPct?: number
   /** User-configurable keyboard shortcuts: action id → chord string e.g. "ctrl+tab" */
   keyboardShortcuts?: Record<string, string>
+  /** Local network mode. Standalone keeps the current single-device behavior. */
+  networkMode?: 'standalone' | 'master' | 'side'
+  /** LAN port used by the master HTTP API. */
+  masterServerPort?: number
+  /** Side terminals do not write locally; disconnected writes are blocked. */
+  sideDisconnectPolicy?: 'block_actions'
+  /** Where receipts should print when side terminals submit orders. */
+  receiptPrintRoute?: 'side' | 'master'
   updatedAt: number
 }

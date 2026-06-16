@@ -4,7 +4,7 @@ import { getSettings, updateSettings } from '@renderer/features/orders/order-ser
 import { applyThemeColor, DEFAULT_PRIMARY } from '@renderer/features/theme/theme-store'
 import { listUsersByRole, updateUserProfile } from '@renderer/features/auth/auth-service'
 import { hashPin } from '@renderer/features/auth/pin-store'
-import { MdSave, MdPalette, MdLock, MdPerson, MdBackup, MdRestorePage, MdKeyboard } from 'react-icons/md'
+import { MdSave, MdPalette, MdLock, MdPerson, MdBackup, MdRestorePage, MdKeyboard, MdDevices } from 'react-icons/md'
 import type { AppUser } from '@shared/types'
 import {
   SHORTCUT_ACTIONS,
@@ -227,6 +227,19 @@ export function SettingsPage(): React.ReactElement {
   // Per-cashier PIN setting
   const [cashierPins, setCashierPins] = useState<Record<string, string>>({})
   const [pinSavingFor, setPinSavingFor] = useState<string | null>(null)
+  const [networkMode, setNetworkMode] = useState<'standalone' | 'master' | 'side'>('standalone')
+  const [masterServerPort, setMasterServerPort] = useState(47831)
+  const [receiptPrintRoute, setReceiptPrintRoute] = useState<'side' | 'master'>('side')
+  const [networkMsg, setNetworkMsg] = useState<string | null>(null)
+  const [networkSaving, setNetworkSaving] = useState(false)
+  const [masterStatus, setMasterStatus] = useState<{
+    running?: boolean
+    port?: number
+    addresses?: string[]
+    pairingCode?: string
+    pairedDevices?: Array<{ id: string; name: string; pairedAt: number; lastSeenAt?: number }>
+    lastError?: string
+  } | null>(null)
 
   useEffect(() => {
     void Promise.all([getSettings(), listUsersByRole('cashier')]).then(([s, c]) => {
@@ -245,8 +258,25 @@ export function SettingsPage(): React.ReactElement {
       setCustomColor(color)
       setPinEnabled(s.pinEnabled ?? false)
       setAutoLockMinutes(s.autoLockMinutes ?? 5)
+      setNetworkMode(s.networkMode ?? 'standalone')
+      setMasterServerPort(s.masterServerPort ?? 47831)
+      setReceiptPrintRoute(s.receiptPrintRoute === 'master' ? 'master' : 'side')
       setCashiers(c)
     })
+  }, [])
+
+  useEffect(() => {
+    let disposed = false
+    async function refresh(): Promise<void> {
+      const status = await window.electronAPI.getMasterNetworkStatus().catch(() => null)
+      if (!disposed) setMasterStatus(status as typeof masterStatus)
+    }
+    void refresh()
+    const timer = window.setInterval(() => { void refresh() }, 5000)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
   }, [])
 
   // ── Receipt save ──────────────────────────────────────────────────────────
@@ -314,7 +344,27 @@ export function SettingsPage(): React.ReactElement {
   }
 
   // ── Settings tab ─────────────────────────────────────────────────────────
-  type SettingsTab = 'general' | 'theme' | 'pin' | 'backup' | 'shortcuts'
+  async function handleNetworkSave(): Promise<void> {
+    setNetworkSaving(true)
+    setNetworkMsg(null)
+    try {
+      await updateSettings({
+        networkMode,
+        masterServerPort,
+        sideDisconnectPolicy: 'block_actions',
+        receiptPrintRoute
+      })
+      const status = await window.electronAPI.refreshMasterServer()
+      setMasterStatus(status as typeof masterStatus)
+      setNetworkMsg('تم حفظ إعدادات الشبكة')
+    } catch (e) {
+      setNetworkMsg(e instanceof Error ? e.message : 'فشل حفظ إعدادات الشبكة')
+    } finally {
+      setNetworkSaving(false)
+    }
+  }
+
+  type SettingsTab = 'general' | 'theme' | 'pin' | 'network' | 'backup' | 'shortcuts'
   const [backupMsg, setBackupMsg] = useState<string | null>(null)
   const [backupLoading, setBackupLoading] = useState(false)
   const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false)
@@ -362,6 +412,7 @@ export function SettingsPage(): React.ReactElement {
     { key: 'pin',       labelAr: 'PIN والقفل',    icon: <MdLock /> },
     { key: 'backup',    labelAr: 'نسخ احتياطي',   icon: <MdBackup /> },
     { key: 'shortcuts', labelAr: 'الاختصارات',    icon: <MdKeyboard /> },
+    { key: 'network', labelAr: 'Network', icon: <MdDevices /> },
   ]
 
   return (
@@ -547,6 +598,78 @@ export function SettingsPage(): React.ReactElement {
         )}
 
         {/* ── Backup ── */}
+        {activeSettingsTab === 'network' && (
+          <div className="card">
+            <h2 className="card__title"><MdDevices style={{ verticalAlign: 'middle', marginLeft: 6 }} />Network terminals</h2>
+            {networkMsg && <p className={`form-message ${networkMsg.includes('فشل') ? 'form-message--error' : 'form-message--ok'}`}>{networkMsg}</p>}
+            <div className="settings-form-grid">
+              <label className="field">
+                <span>وضع الجهاز</span>
+                <select value={networkMode} onChange={(e) => setNetworkMode(e.target.value as typeof networkMode)}>
+                  <option value="standalone">Standalone</option>
+                  <option value="master">Master</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Master port</span>
+                <input type="number" min="1024" max="65535" value={masterServerPort} onChange={(e) => setMasterServerPort(Number(e.target.value) || 47831)} />
+              </label>
+              <label className="field">
+                <span>طباعة الفاتورة</span>
+                <select value={receiptPrintRoute} onChange={(e) => setReceiptPrintRoute(e.target.value as typeof receiptPrintRoute)}>
+                  <option value="side">على الجهاز الجانبي</option>
+                  <option value="master">على الماستر</option>
+                </select>
+              </label>
+            </div>
+            <div className="form-actions">
+              <button type="button" className="btn btn--primary" onClick={() => void handleNetworkSave()} disabled={networkSaving}>
+                <MdSave /> {networkSaving ? 'جارٍ...' : 'حفظ الشبكة'}
+              </button>
+              <button type="button" className="btn btn--secondary" onClick={async () => setMasterStatus(await window.electronAPI.getMasterNetworkStatus() as typeof masterStatus)}>
+                تحديث الحالة
+              </button>
+              <button type="button" className="btn btn--secondary" onClick={async () => { await window.electronAPI.resetMasterPairingCode(); setMasterStatus(await window.electronAPI.getMasterNetworkStatus() as typeof masterStatus) }}>
+                كود ربط جديد
+              </button>
+            </div>
+            <div className="license-panel__meta" style={{ marginTop: 16 }}>
+              <span>الحالة</span>
+              <code dir="ltr">{masterStatus?.running ? `Running on ${masterStatus.port}` : 'Stopped'}</code>
+            </div>
+            <div className="license-panel__meta">
+              <span>IPs</span>
+              <code dir="ltr">{masterStatus?.addresses?.join(', ') || '-'}</code>
+            </div>
+            <div className="license-panel__meta">
+              <span>Pairing code</span>
+              <code dir="ltr">{masterStatus?.pairingCode ?? '-'}</code>
+            </div>
+            {masterStatus?.lastError && <p className="form-message form-message--error">{masterStatus.lastError}</p>}
+            <table className="data-table" style={{ marginTop: 16 }}>
+              <thead>
+                <tr><th>الجهاز</th><th>آخر اتصال</th><th>إجراءات</th></tr>
+              </thead>
+              <tbody>
+                {(masterStatus?.pairedDevices ?? []).map((device) => (
+                  <tr key={device.id}>
+                    <td>{device.name}</td>
+                    <td>{device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString('ar-EG') : '-'}</td>
+                    <td>
+                      <button type="button" className="btn btn--danger btn--sm" onClick={async () => { await window.electronAPI.revokeMasterDevice(device.id); setMasterStatus(await window.electronAPI.getMasterNetworkStatus() as typeof masterStatus) }}>
+                        إلغاء
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {(masterStatus?.pairedDevices ?? []).length === 0 && (
+                  <tr><td colSpan={3}>لا توجد أجهزة مرتبطة</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         {activeSettingsTab === 'backup' && (
           <div className="card">
             <h2 className="card__title">

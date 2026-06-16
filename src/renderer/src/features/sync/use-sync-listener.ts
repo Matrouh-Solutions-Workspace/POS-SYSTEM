@@ -8,6 +8,7 @@
 import { useEffect } from 'react'
 import { useSyncStore } from './sync-store'
 import { getPendingUploadCount, uploadOutboxToFirebase } from './outbox-uploader'
+import { getSettings } from '@renderer/features/orders/order-service'
 
 export function useSyncListener(): void {
   const setPendingUpload = useSyncStore((s) => s.setPendingUpload)
@@ -17,6 +18,12 @@ export function useSyncListener(): void {
 
     async function tryUpload(): Promise<void> {
       if (disposed) return
+
+      const settings = await getSettings().catch(() => null)
+      if (settings?.networkMode === 'master' || settings?.networkMode === 'side') {
+        setPendingUpload(0)
+        return
+      }
 
       // Refresh pending count in the store (drives the UI badge)
       let count = 0

@@ -43,6 +43,15 @@ export interface ElectronAPI {
     error?: string
   }>
   activateMasterKey: (key: string) => Promise<{ ok: boolean; error?: string }>
+  getNetworkStatus: () => Promise<unknown>
+  pairSideDevice: (params: { masterUrl: string; deviceName: string; code: string }) => Promise<{ ok: boolean; error?: string }>
+  clearSideConnection: () => Promise<{ ok: boolean }>
+  getMasterNetworkStatus: () => Promise<unknown>
+  refreshMasterServer: () => Promise<unknown>
+  resetMasterPairingCode: () => Promise<{ code: string }>
+  revokeMasterDevice: (deviceId: string) => Promise<{ ok: boolean }>
+  authLoginLocal: (username: string, passwordHash: string) => Promise<{ ok: boolean; user?: unknown; error?: string }>
+  authStoreCredential: (username: string, passwordHash: string, user: unknown) => Promise<{ ok: boolean; error?: string }>
   getLocalStoreStatus: () => Promise<{
     ok: boolean
     path: string

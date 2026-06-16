@@ -81,6 +81,7 @@ async function storeLocalCredential(user: AppUser, password: string): Promise<vo
   const existing = readAuthCache().filter((e) => e.username !== username)
   existing.push({ username, passwordHash, userId: user.id, updatedAt: Date.now() })
   writeAuthCache(existing)
+  await window.electronAPI.authStoreCredential(username, passwordHash, user)
 }
 
 async function verifyLocalCredential(username: string, password: string): Promise<string | null> {
@@ -109,6 +110,18 @@ export async function restoreSessionFromLocal(): Promise<AppUser | null> {
 
 /** Login with username + password — reads from SQLite, no Firebase required */
 export async function loginAndLoadUser(username: string, password: string): Promise<AppUser> {
+  const normalized = normalizeUsername(username)
+  const passwordHash = await sha256(`${normalized}:${password}`)
+  const mainAuth = await window.electronAPI.authLoginLocal(normalized, passwordHash).catch(() => null)
+  if (mainAuth?.ok && mainAuth.user) {
+    const user = mainAuth.user as AppUser
+    writeSession(user.id)
+    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+      logAudit({ action: 'login', actorId: user.id, actorName: user.displayName, detailAr: `ØªØ³Ø¬ÙŠÙ„ Ø¯Ø®ÙˆÙ„: ${user.displayName}` })
+    )
+    return user
+  }
+
   const userId = await verifyLocalCredential(username, password)
   if (!userId) {
     throw new Error('اسم المستخدم أو كلمة المرور غير صحيحة')

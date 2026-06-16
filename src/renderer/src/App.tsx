@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { HashRouter, Navigate, Route, Routes, Outlet } from 'react-router-dom'
 import { useAuthBootstrap } from '@renderer/features/auth/use-auth-bootstrap'
 import { useSyncListener } from '@renderer/features/sync/use-sync-listener'
@@ -126,6 +126,7 @@ function LazyPage({ children }: { children: React.ReactNode }): React.ReactEleme
 }
 
 export default function App(): React.ReactElement {
+  const [sideDisconnected, setSideDisconnected] = useState(false)
   useAuthBootstrap()
   useSyncListener()
   useUpdaterBootstrap()
@@ -138,12 +139,36 @@ export default function App(): React.ReactElement {
     })
   }, [])
 
+  useEffect(() => {
+    let disposed = false
+    async function checkNetwork(): Promise<void> {
+      const status = await window.electronAPI.getNetworkStatus().catch(() => null) as
+        | { mode?: string; connected?: boolean }
+        | null
+      if (!disposed) setSideDisconnected(status?.mode === 'side' && status.connected === false)
+    }
+    void checkNetwork()
+    const timer = window.setInterval(() => { void checkNetwork() }, 5000)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [])
+
   return (
     <HashRouter>
       <PinLockScreen />
       <UpdateNotification />
       <WhatsNewModal />
       <SyncProgressNotification />
+      {sideDisconnected && (
+        <div className="modal-overlay" style={{ zIndex: 99998 }}>
+          <div className="modal" style={{ maxWidth: 420, textAlign: 'center' }}>
+            <h2 className="order-details__title">الاتصال بالماستر مقطوع</h2>
+            <p className="muted">تم إيقاف العمليات مؤقتا حتى يعود الاتصال بجهاز الماستر.</p>
+          </div>
+        </div>
+      )}
       <Routes>
         <Route
           path="/login"

@@ -50,6 +50,10 @@ export async function getSettings(): Promise<AppSettings> {
     nextOrderNumber: 1,
     taxRate: 0,
     defaultDeliveryFee: 0,
+    networkMode: 'standalone',
+    masterServerPort: 47831,
+    sideDisconnectPolicy: 'block_actions',
+    receiptPrintRoute: 'side',
     updatedAt: Date.now()
   }
   const cached = await getCachedDoc<AppSettings>(COLLECTIONS.settings, SETTINGS_DOC_ID)
@@ -71,6 +75,10 @@ export async function updateSettings(
       | 'defaultDeliveryFee'
       | 'maxCashierDiscountPct'
       | 'keyboardShortcuts'
+      | 'networkMode'
+      | 'masterServerPort'
+      | 'sideDisconnectPolicy'
+      | 'receiptPrintRoute'
     >
   >
 ): Promise<void> {

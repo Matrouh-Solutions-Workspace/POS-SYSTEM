@@ -72,8 +72,35 @@ function openDatabase(): DatabaseSync {
       quantity REAL NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS seed_auth (
+      username TEXT PRIMARY KEY,
+      password_hash TEXT NOT NULL,
+      user_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `)
   return db
+}
+
+function readSettingsNetworkMode(): string {
+  try {
+    const database = openDatabase()
+    const row = database.prepare(`
+      SELECT payload_json
+      FROM cached_documents
+      WHERE collection_name = 'settings' AND document_id = 'app'
+    `).get() as { payload_json?: string } | undefined
+    if (!row?.payload_json) return 'standalone'
+    const settings = JSON.parse(row.payload_json) as { networkMode?: string }
+    return settings.networkMode ?? 'standalone'
+  } catch {
+    return 'standalone'
+  }
+}
+
+function shouldEnqueueOutbox(): boolean {
+  return readSettingsNetworkMode() !== 'master'
 }
 
 export function initLocalStore(): LocalStoreStatus {
@@ -172,6 +199,7 @@ export function enqueueOutbox(
   operation: 'set' | 'delete',
   payload: unknown
 ): void {
+  if (!shouldEnqueueOutbox()) return
   const database = openDatabase()
   const now = Date.now()
   const id = `${entityType}:${entityId}:${now}`
@@ -342,13 +370,80 @@ export function executeBatch(operations: BatchOperation[]): { ok: boolean; error
       }
       const outboxId = `${op.collection}:${op.id}:${now}`
       const payload = op.op === 'delete' ? JSON.stringify({ id: op.id }) : JSON.stringify(op.data)
-      outboxStmt.run(outboxId, op.collection, op.id, op.op, payload, now, now)
+      if (shouldEnqueueOutbox()) {
+        outboxStmt.run(outboxId, op.collection, op.id, op.op, payload, now, now)
+      }
     }
     database.exec('COMMIT')
     return { ok: true }
   } catch (e) {
     try { database.exec('ROLLBACK') } catch { /* ignore rollback error */ }
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export function storeAuthCredential(
+  username: string,
+  passwordHash: string,
+  user: unknown
+): { ok: boolean; error?: string } {
+  try {
+    const normalized = username.toLowerCase().trim()
+    const database = openDatabase()
+    database.prepare(`
+      INSERT INTO seed_auth (username, password_hash, user_json, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(username)
+      DO UPDATE SET password_hash = excluded.password_hash,
+                    user_json = excluded.user_json,
+                    updated_at = excluded.updated_at
+    `).run(normalized, passwordHash, JSON.stringify(user), Date.now())
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export function verifyAuthCredential(
+  username: string,
+  passwordHash: string
+): { ok: boolean; user?: unknown; error?: string } {
+  try {
+    const normalized = username.toLowerCase().trim()
+    const database = openDatabase()
+    const row = database.prepare(`
+      SELECT user_json
+      FROM seed_auth
+      WHERE username = ? AND password_hash = ?
+    `).get(normalized, passwordHash) as { user_json?: string } | undefined
+    if (!row?.user_json) return { ok: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' }
+    const storedUser = JSON.parse(row.user_json) as { id?: string; active?: boolean }
+    const current = storedUser.id
+      ? readCachedDocument('users', storedUser.id) as ({ active?: boolean } | null)
+      : null
+    const user = current ?? storedUser
+    if (user && user.active === false) return { ok: false, error: 'الحساب غير نشط' }
+    return { ok: true, user }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export function deleteAuthCredentialForUser(userId: string): void {
+  const database = openDatabase()
+  const rows = database.prepare('SELECT username, user_json FROM seed_auth').all() as Array<{
+    username: string
+    user_json: string
+  }>
+  for (const row of rows) {
+    try {
+      const user = JSON.parse(row.user_json) as { id?: string }
+      if (user.id === userId) {
+        database.prepare('DELETE FROM seed_auth WHERE username = ?').run(row.username)
+      }
+    } catch {
+      // ignore malformed credential rows
+    }
   }
 }
 
