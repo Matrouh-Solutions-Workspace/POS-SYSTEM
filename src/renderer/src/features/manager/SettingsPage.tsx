@@ -226,6 +226,18 @@ type ReceiptPreviewItem = {
   noteAr?: string
 }
 
+const RECEIPT_PRINTER_PIXEL_WIDTH = 576
+const RECEIPT_ASCII_MAX_COLUMNS = 64
+const RECEIPT_ASCII_MIN_COLUMNS = 32
+
+function clampReceiptLogoWidth(width?: number): number {
+  return Math.max(RECEIPT_ASCII_MIN_COLUMNS, Math.min(RECEIPT_ASCII_MAX_COLUMNS, Number(width) || RECEIPT_ASCII_MAX_COLUMNS))
+}
+
+function hasOversizedAscii(ascii: string): boolean {
+  return ascii.split('\n').some((line) => line.length > RECEIPT_ASCII_MAX_COLUMNS)
+}
+
 function ReceiptDesigner({
   settings,
   onSettingsSaved
@@ -242,7 +254,7 @@ function ReceiptDesigner({
   const [logoAscii, setLogoAscii] = useState(settings.receiptLogoAscii ?? '')
   const [logoMode, setLogoMode] = useState<AppSettings['receiptLogoMode']>(settings.receiptLogoMode ?? 'image')
   const [logoThreshold, setLogoThreshold] = useState(settings.receiptLogoThreshold ?? 176)
-  const [logoWidth, setLogoWidth] = useState(settings.receiptLogoWidth ?? 112)
+  const [logoWidth, setLogoWidth] = useState(clampReceiptLogoWidth(settings.receiptLogoWidth))
   const [logoInvert, setLogoInvert] = useState(Boolean(settings.receiptLogoInvert))
   const [draggingSection, setDraggingSection] = useState<ReceiptSectionId | null>(null)
   const [saving, setSaving] = useState(false)
@@ -348,6 +360,13 @@ function ReceiptDesigner({
     setLogoProcessedDataUrl(processed.monoDataUrl)
     setLogoAscii(processed.ascii)
   }
+
+  useEffect(() => {
+    if (!logoDataUrl) return
+    if (settings.receiptLogoWidth !== logoWidth || hasOversizedAscii(logoAscii)) {
+      void regenerateLogoAssets({ width: logoWidth })
+    }
+  }, [])
 
   function updatePreviewItem(id: string, patch: Partial<ReceiptPreviewItem>): void {
     setPreviewItems((items) => items.map((item) => (
@@ -483,8 +502,8 @@ function ReceiptDesigner({
                 <span>عرض المعالجة</span>
                 <input
                   type="range"
-                  min="64"
-                  max="180"
+                  min={RECEIPT_ASCII_MIN_COLUMNS}
+                  max={RECEIPT_ASCII_MAX_COLUMNS}
                   value={logoWidth}
                   onChange={(e) => {
                     const width = Number(e.target.value)
@@ -582,9 +601,9 @@ function processLogoImage(dataUrl: string, width: number, threshold: number, inv
     const image = new Image()
     image.onload = () => {
       const crop = cropImageBounds(image)
-      const safeWidth = Math.max(64, Math.min(180, width))
+      const safeWidth = clampReceiptLogoWidth(width)
       const ratio = crop.height / Math.max(1, crop.width)
-      const asciiHeight = Math.max(10, Math.round(safeWidth * ratio * 0.48))
+      const asciiHeight = Math.max(8, Math.round(safeWidth * ratio * 0.46))
       const asciiCanvas = document.createElement('canvas')
       asciiCanvas.width = safeWidth
       asciiCanvas.height = asciiHeight
@@ -612,7 +631,7 @@ function processLogoImage(dataUrl: string, width: number, threshold: number, inv
         lines.push(line.replace(/\s+$/g, ''))
       }
 
-      const monoWidth = Math.max(384, Math.min(640, safeWidth * 6))
+      const monoWidth = RECEIPT_PRINTER_PIXEL_WIDTH
       const monoHeight = Math.max(24, Math.round(monoWidth * ratio))
       const monoCanvas = document.createElement('canvas')
       monoCanvas.width = monoWidth

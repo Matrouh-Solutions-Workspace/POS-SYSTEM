@@ -61,7 +61,7 @@ export async function getSettings(): Promise<AppSettings> {
     receiptLogoEnabled: false,
     receiptLogoMode: 'image',
     receiptLogoThreshold: 176,
-    receiptLogoWidth: 112,
+    receiptLogoWidth: 64,
     receiptLogoInvert: false,
     autoBackupEnabled: false,
     autoBackupIntervalDays: 1,

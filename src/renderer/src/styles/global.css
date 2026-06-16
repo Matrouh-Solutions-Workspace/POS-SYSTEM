@@ -3866,7 +3866,8 @@ select.inline-edit-input {
 
 .receipt-designer__preview iframe {
   display: block;
-  width: min(100%, 460px);
+  width: 80mm;
+  max-width: 100%;
   min-height: 680px;
   border: 1px solid var(--color-border);
   background: #fff;
@@ -3875,12 +3876,14 @@ select.inline-edit-input {
 
 .receipt-ascii-preview {
   max-height: 180px;
+  width: 80mm;
+  max-width: 100%;
   overflow: auto;
   direction: ltr;
-  text-align: left;
+  text-align: center;
   font-family: "Courier New", monospace;
-  font-size: 5px;
-  line-height: 0.82;
+  font-size: 7px;
+  line-height: 0.78;
   color: #111827;
   background: #fff;
   border: 1px solid var(--color-border);
@@ -3893,6 +3896,8 @@ select.inline-edit-input {
   display: grid;
   gap: 8px;
   margin-top: 10px;
+  width: 80mm;
+  max-width: 100%;
 }
 
 .receipt-logo-print-preview > span {
@@ -3903,8 +3908,9 @@ select.inline-edit-input {
 
 .receipt-logo-print-preview img {
   display: block;
-  max-width: min(100%, 360px);
-  max-height: 180px;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
   object-fit: contain;
   background: #fff;
   border: 1px solid var(--color-border);
