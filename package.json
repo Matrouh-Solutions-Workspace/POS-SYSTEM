@@ -1,6 +1,6 @@
 {
   "name": "shift-pos",
-  "version": "2.1.8",
+  "version": "2.1.9",
   "description": "Restaurant Management and POS - Arabic RTL",
   "main": "./out/main/index.js",
   "private": true,
