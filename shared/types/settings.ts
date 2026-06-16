@@ -30,14 +30,16 @@ export interface AppSettings {
   receiptPrintRoute?: 'side' | 'master'
   /** Directory used for automatic and quick backups. */
   backupDirectory?: string
+  /** Additional backup directories (up to 2 extra). Written to alongside backupDirectory. */
+  backupDirectories?: string[]
   /** Enables scheduled automatic backups while the app is running. */
   autoBackupEnabled?: boolean
   /** Scheduled backup cadence in days. */
   autoBackupIntervalDays?: 1 | 2 | 3 | 4 | 5 | 6 | 7
   /** Run an extra backup when the app closes. */
   autoBackupOnClose?: boolean
-  /** Delete automatic backups older than this many days. */
-  backupRetentionDays?: 1 | 2 | 3 | 4 | 5 | 6 | 7
+  /** Delete automatic backups older than this many days (0 = never delete). */
+  backupRetentionDays?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 14 | 30 | 60 | 90
   /** Timestamp of the last successful automatic backup. */
   lastAutoBackupAt?: number
   updatedAt: number

@@ -32,6 +32,8 @@ export interface LocalStoreStatus {
 
 export interface BackupSettings {
   backupDirectory?: string
+  /** All configured directories (primary + extras). */
+  allDirectories: string[]
   autoBackupEnabled: boolean
   autoBackupIntervalDays: number
   autoBackupOnClose: boolean
@@ -143,15 +145,32 @@ function clampDays(value: unknown, fallback: number): number {
   return Math.max(1, Math.min(7, Math.round(n)))
 }
 
+function clampRetentionDays(value: unknown, fallback: number): number {
+  const valid = [0, 1, 2, 3, 4, 5, 6, 7, 14, 30, 60, 90]
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return valid.includes(n) ? n : fallback
+}
+
 export function readBackupSettings(): BackupSettings {
   const settings = readSettingsDocument()
+  // Merge legacy single directory into the directories array
+  const primaryDir = typeof settings?.backupDirectory === 'string' ? settings.backupDirectory : undefined
+  const extraDirs = Array.isArray(settings?.backupDirectories)
+    ? (settings.backupDirectories as string[]).filter((d) => typeof d === 'string' && d.trim())
+    : []
   return {
-    backupDirectory: typeof settings?.backupDirectory === 'string' ? settings.backupDirectory : undefined,
+    backupDirectory: primaryDir,
     autoBackupEnabled: settings?.autoBackupEnabled === true,
     autoBackupIntervalDays: clampDays(settings?.autoBackupIntervalDays, 1),
     autoBackupOnClose: settings?.autoBackupOnClose === true,
-    backupRetentionDays: clampDays(settings?.backupRetentionDays, 7),
-    lastAutoBackupAt: typeof settings?.lastAutoBackupAt === 'number' ? settings.lastAutoBackupAt : undefined
+    backupRetentionDays: clampRetentionDays(settings?.backupRetentionDays, 7),
+    lastAutoBackupAt: typeof settings?.lastAutoBackupAt === 'number' ? settings.lastAutoBackupAt : undefined,
+    // All directories (primary + extra, deduplicated, non-empty)
+    allDirectories: Array.from(new Set([
+      ...(primaryDir ? [primaryDir] : []),
+      ...extraDirs
+    ])).filter(Boolean)
   }
 }
 
@@ -566,10 +585,11 @@ export function pruneBackupDirectory(
   retentionDays: number
 ): { ok: boolean; deleted: number; error?: string } {
   try {
+    if (retentionDays <= 0) return { ok: true, deleted: 0 } // 0 = keep forever
     if (!destinationDirectory.trim() || !existsSync(destinationDirectory)) {
       return { ok: true, deleted: 0 }
     }
-    const cutoff = Date.now() - clampDays(retentionDays, 7) * DAY_MS
+    const cutoff = Date.now() - retentionDays * DAY_MS
     let deleted = 0
     for (const file of readdirSync(destinationDirectory)) {
       if (!/^shift-pos-backup-.+\.sqlite$/i.test(file)) continue
@@ -591,7 +611,9 @@ export function runConfiguredBackup(
   options: { force?: boolean } = {}
 ): { ok: boolean; skipped?: boolean; path?: string; error?: string } {
   const settings = readBackupSettings()
-  if (!settings.backupDirectory) return { ok: false, skipped: true, error: 'Backup directory is not set' }
+  const dirs = settings.allDirectories
+
+  if (dirs.length === 0) return { ok: false, skipped: true, error: 'Backup directory is not set' }
   if (reason === 'scheduled' && !settings.autoBackupEnabled) return { ok: true, skipped: true }
   if (reason === 'close' && !settings.autoBackupOnClose) return { ok: true, skipped: true }
 
@@ -605,11 +627,27 @@ export function runConfiguredBackup(
     return { ok: true, skipped: true }
   }
 
-  const result = backupDatabaseToDirectory(settings.backupDirectory, reason)
-  if (!result.ok) return result
-  pruneBackupDirectory(settings.backupDirectory, settings.backupRetentionDays)
-  updateSettingsPatch({ lastAutoBackupAt: Date.now() })
-  return result
+  let lastResult: { ok: boolean; path?: string; error?: string } = { ok: false, error: 'No directories' }
+
+  for (const dir of dirs) {
+    const result = backupDatabaseToDirectory(dir, reason)
+    if (result.ok) {
+      // Prune old backups in this directory only if retention > 0
+      if (settings.backupRetentionDays > 0) {
+        pruneBackupDirectory(dir, settings.backupRetentionDays)
+      }
+      lastResult = result
+    } else {
+      // Log failure but continue with other directories
+      console.warn(`[backup] Failed to backup to ${dir}:`, result.error)
+      if (!lastResult.ok) lastResult = result
+    }
+  }
+
+  if (lastResult.ok) {
+    updateSettingsPatch({ lastAutoBackupAt: Date.now() })
+  }
+  return lastResult
 }
 
 /**

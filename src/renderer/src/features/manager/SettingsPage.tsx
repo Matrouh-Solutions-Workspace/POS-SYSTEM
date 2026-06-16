@@ -508,6 +508,7 @@ export function SettingsPage(): React.ReactElement {
     lastError?: string
   } | null>(null)
   const [backupDirectory, setBackupDirectory] = useState('')
+  const [backupDirectories, setBackupDirectories] = useState<string[]>([])   // extra locations
   const [autoBackupEnabled, setAutoBackupEnabled] = useState(false)
   const [autoBackupIntervalDays, setAutoBackupIntervalDays] = useState(1)
   const [autoBackupOnClose, setAutoBackupOnClose] = useState(false)
@@ -535,6 +536,7 @@ export function SettingsPage(): React.ReactElement {
       setMasterServerPort(s.masterServerPort ?? 47831)
       setReceiptPrintRoute(s.receiptPrintRoute === 'master' ? 'master' : 'side')
       setBackupDirectory(s.backupDirectory ?? '')
+      setBackupDirectories(s.backupDirectories ?? [])
       setAutoBackupEnabled(s.autoBackupEnabled ?? false)
       setAutoBackupIntervalDays(s.autoBackupIntervalDays ?? 1)
       setAutoBackupOnClose(s.autoBackupOnClose ?? false)
@@ -671,16 +673,44 @@ export function SettingsPage(): React.ReactElement {
     }
   }
 
+  async function handleChooseExtraDirectory(index: number): Promise<void> {
+    setBackupMsg(null)
+    const result = await window.electronAPI.chooseBackupDirectory()
+    if (result.ok && result.path) {
+      setBackupDirectories((prev) => {
+        const next = [...prev]
+        next[index] = result.path!
+        return next
+      })
+    } else if (result.error && result.error !== 'Cancelled') {
+      setBackupMsg(`فشل اختيار المجلد: ${result.error}`)
+    }
+  }
+
+  function removeExtraDirectory(index: number): void {
+    setBackupDirectories((prev) => prev.filter((_, i) => i !== index))
+  }
+
   async function handleBackupDirectoryNow(): Promise<void> {
-    if (!backupDirectory.trim()) {
-      setBackupMsg('اختر مجلد النسخ الاحتياطي أولاً')
+    const allDirs = [backupDirectory.trim(), ...backupDirectories.map((d) => d.trim())].filter(Boolean)
+    if (allDirs.length === 0) {
+      setBackupMsg('أضف مجلد نسخ احتياطي أولاً')
       return
     }
     setBackupLoading(true)
     setBackupMsg(null)
     try {
-      const result = await window.electronAPI.backupDatabaseToDirectory(backupDirectory.trim())
-      setBackupMsg(result.ok ? `تم حفظ النسخة في: ${result.path ?? backupDirectory}` : `فشل النسخ: ${result.error ?? ''}`)
+      const results = await Promise.all(
+        allDirs.map((dir) => window.electronAPI.backupDatabaseToDirectory(dir))
+      )
+      const failed = results.filter((r) => !r.ok)
+      if (failed.length === 0) {
+        setBackupMsg(`✓ تم النسخ إلى ${allDirs.length} ${allDirs.length === 1 ? 'مجلد' : 'مجلدات'}`)
+      } else if (failed.length < results.length) {
+        setBackupMsg(`تم النسخ جزئياً — فشل ${failed.length} من ${results.length}`)
+      } else {
+        setBackupMsg(`فشل النسخ: ${failed[0]?.error ?? ''}`)
+      }
     } catch (e) {
       setBackupMsg(`فشل: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
@@ -694,12 +724,13 @@ export function SettingsPage(): React.ReactElement {
     try {
       await updateSettings({
         backupDirectory: backupDirectory.trim() || undefined,
+        backupDirectories: backupDirectories.filter((d) => d.trim()),
         autoBackupEnabled,
         autoBackupIntervalDays: Math.max(1, Math.min(7, autoBackupIntervalDays)) as AppSettings['autoBackupIntervalDays'],
         autoBackupOnClose,
-        backupRetentionDays: Math.max(1, Math.min(7, backupRetentionDays)) as AppSettings['backupRetentionDays']
+        backupRetentionDays: backupRetentionDays as AppSettings['backupRetentionDays']
       })
-      setBackupMsg('تم حفظ إعدادات النسخ الاحتياطي')
+      setBackupMsg('تم حفظ إعدادات النسخ الاحتياطي ✓')
     } catch (e) {
       setBackupMsg(e instanceof Error ? e.message : 'فشل حفظ إعدادات النسخ الاحتياطي')
     } finally {
@@ -1011,87 +1042,173 @@ export function SettingsPage(): React.ReactElement {
         )}
 
         {activeSettingsTab === 'backup' && (
-          <div className="card">
-            <h2 className="card__title">
-              <MdBackup style={{ verticalAlign: 'middle', marginLeft: 6 }} />نسخ احتياطي واستعادة
-            </h2>
-            <p style={{ fontSize: '0.85rem', color: 'var(--color-muted)', marginBottom: 16 }}>
-              صدّر قاعدة البيانات كاملةً إلى ملف آمن، أو استعد من نسخة سابقة.
-              الاستعادة تستبدل جميع البيانات الحالية وتُعيد تشغيل التطبيق تلقائيًا.
-            </p>
+          <div className="backup-tab">
+
             {backupMsg && (
-              <p className={`form-message ${backupMsg.includes('فشل') ? 'form-message--error' : 'form-message--ok'}`}>{backupMsg}</p>
+              <p className={`form-message ${backupMsg.includes('فشل') ? 'form-message--error' : 'form-message--ok'}`}
+                style={{ marginBottom: 16 }}>
+                {backupMsg}
+              </p>
             )}
-            <div className="settings-form-grid" style={{ marginBottom: 16 }}>
-              <label className="field settings-form-grid__full">
-                <span>مجلد النسخ الاحتياطي التلقائي</span>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+
+            {/* ── Section 1: Backup locations ── */}
+            <div className="card backup-section">
+              <h2 className="card__title">
+                <MdFolderOpen style={{ verticalAlign: 'middle', marginLeft: 6 }} />
+                مواقع النسخ الاحتياطي
+              </h2>
+              <p className="backup-section__desc">
+                يمكنك تحديد حتى 3 مواقع — مثلاً قرص محلي + فلاشة USB + مجلد شبكة. يتم النسخ إلى جميع المواقع في نفس الوقت.
+              </p>
+
+              {/* Primary location */}
+              <div className="backup-dir-row">
+                <span className="backup-dir-row__badge backup-dir-row__badge--primary">رئيسي</span>
+                <input
+                  className="backup-dir-row__input"
+                  value={backupDirectory}
+                  onChange={(e) => setBackupDirectory(e.target.value)}
+                  placeholder="اختر المجلد الرئيسي للنسخ الاحتياطي..."
+                  dir="ltr"
+                  readOnly
+                  onClick={() => void handleChooseBackupDirectory()}
+                />
+                <button type="button" className="btn btn--secondary btn--sm backup-dir-row__btn"
+                  onClick={() => void handleChooseBackupDirectory()} title="اختيار مجلد">
+                  <MdFolderOpen />
+                </button>
+                {backupDirectory && (
+                  <button type="button" className="btn btn--secondary btn--sm backup-dir-row__btn"
+                    onClick={() => setBackupDirectory('')} title="إزالة">
+                    <MdDelete />
+                  </button>
+                )}
+              </div>
+
+              {/* Extra locations */}
+              {backupDirectories.map((dir, idx) => (
+                <div key={idx} className="backup-dir-row">
+                  <span className="backup-dir-row__badge">{idx + 2}</span>
                   <input
-                    value={backupDirectory}
-                    onChange={(e) => setBackupDirectory(e.target.value)}
-                    placeholder="اختر مكان حفظ النسخ الاحتياطية"
+                    className="backup-dir-row__input"
+                    value={dir}
+                    onChange={(e) => setBackupDirectories((prev) => { const n=[...prev]; n[idx]=e.target.value; return n })}
+                    placeholder="مجلد إضافي..."
                     dir="ltr"
+                    readOnly
+                    onClick={() => void handleChooseExtraDirectory(idx)}
                   />
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    onClick={() => void handleChooseBackupDirectory()}
-                    title="اختيار مجلد"
-                    aria-label="اختيار مجلد النسخ الاحتياطي"
-                  >
+                  <button type="button" className="btn btn--secondary btn--sm backup-dir-row__btn"
+                    onClick={() => void handleChooseExtraDirectory(idx)} title="اختيار مجلد">
                     <MdFolderOpen />
                   </button>
+                  <button type="button" className="btn btn--secondary btn--sm backup-dir-row__btn"
+                    onClick={() => removeExtraDirectory(idx)} title="حذف هذا الموقع">
+                    <MdDelete />
+                  </button>
                 </div>
-              </label>
-              <label className="pin-toggle-label">
-                <input
-                  type="checkbox"
-                  className="pin-toggle-checkbox"
-                  checked={autoBackupEnabled}
-                  onChange={(e) => setAutoBackupEnabled(e.target.checked)}
-                />
-                <span className="pin-toggle-text">تشغيل النسخ التلقائي أثناء عمل التطبيق</span>
-              </label>
-              <label className="pin-toggle-label">
-                <input
-                  type="checkbox"
-                  className="pin-toggle-checkbox"
-                  checked={autoBackupOnClose}
-                  onChange={(e) => setAutoBackupOnClose(e.target.checked)}
-                />
-                <span className="pin-toggle-text">عمل نسخة تلقائية عند إغلاق التطبيق</span>
-              </label>
-              <label className="field">
-                <span>تكرار النسخ التلقائي</span>
-                <select value={autoBackupIntervalDays} onChange={(e) => setAutoBackupIntervalDays(Number(e.target.value))}>
-                  {[1, 2, 3, 4, 5, 6, 7].map((days) => (
-                    <option key={days} value={days}>كل {days} يوم</option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>الاحتفاظ بالنسخ لمدة</span>
-                <select value={backupRetentionDays} onChange={(e) => setBackupRetentionDays(Number(e.target.value))}>
-                  {[1, 2, 3, 4, 5, 6, 7].map((days) => (
-                    <option key={days} value={days}>{days} يوم</option>
-                  ))}
-                </select>
-              </label>
+              ))}
+
+              {/* Add extra location button (max 2 extras = 3 total) */}
+              {backupDirectories.length < 2 && (
+                <button type="button" className="btn btn--secondary btn--sm" style={{ marginTop: 8 }}
+                  onClick={() => setBackupDirectories((prev) => [...prev, ''])}>
+                  + إضافة موقع نسخ آخر
+                </button>
+              )}
+
+              {/* Quick backup now */}
+              <div className="backup-section__actions" style={{ marginTop: 16 }}>
+                <button type="button" className="btn btn--primary"
+                  onClick={() => void handleBackupDirectoryNow()}
+                  disabled={backupLoading || (!backupDirectory.trim() && backupDirectories.every((d) => !d.trim()))}>
+                  <MdBackup /> {backupLoading ? 'جارٍ النسخ…' : 'نسخ الآن إلى كل المواقع'}
+                </button>
+              </div>
             </div>
-            <div className="form-actions" style={{ gap: 12 }}>
-              <button type="button" className="btn btn--primary" onClick={() => void handleBackupSettingsSave()} disabled={backupSaving}>
-                <MdSave /> {backupSaving ? 'جارٍ الحفظ…' : 'حفظ إعدادات النسخ'}
-              </button>
-              <button type="button" className="btn btn--secondary" onClick={() => void handleBackupDirectoryNow()} disabled={backupLoading || !backupDirectory.trim()}>
-                <MdBackup /> {backupLoading ? 'جارٍ…' : 'نسخ الآن للمجلد'}
-              </button>
-              <button type="button" className="btn btn--primary" onClick={() => void handleBackup()} disabled={backupLoading}>
-                <MdBackup /> {backupLoading ? 'جارٍ…' : 'تصدير قاعدة البيانات'}
-              </button>
-              <button type="button" className="btn btn--secondary" onClick={() => setRestoreConfirmOpen(true)} disabled={backupLoading}>
-                <MdRestorePage /> استعادة من نسخة احتياطية
-              </button>
+
+            {/* ── Section 2: Auto-backup schedule ── */}
+            <div className="card backup-section">
+              <h2 className="card__title">
+                <MdSave style={{ verticalAlign: 'middle', marginLeft: 6 }} />
+                جدولة النسخ التلقائي
+              </h2>
+
+              <div className="backup-toggles">
+                <label className="backup-toggle-row">
+                  <div className="backup-toggle-row__info">
+                    <strong>تشغيل النسخ التلقائي أثناء عمل التطبيق</strong>
+                    <span>يعمل تلقائياً في الخلفية حسب التكرار المحدد</span>
+                  </div>
+                  <input type="checkbox" className="pin-toggle-checkbox"
+                    checked={autoBackupEnabled}
+                    onChange={(e) => setAutoBackupEnabled(e.target.checked)} />
+                </label>
+
+                <label className="backup-toggle-row">
+                  <div className="backup-toggle-row__info">
+                    <strong>نسخة عند إغلاق التطبيق</strong>
+                    <span>يعمل نسخة واحدة إضافية في كل مرة تغلق فيها البرنامج</span>
+                  </div>
+                  <input type="checkbox" className="pin-toggle-checkbox"
+                    checked={autoBackupOnClose}
+                    onChange={(e) => setAutoBackupOnClose(e.target.checked)} />
+                </label>
+              </div>
+
+              <div className="settings-form-grid" style={{ marginTop: 16 }}>
+                <label className="field">
+                  <span>تكرار النسخ التلقائي</span>
+                  <select value={autoBackupIntervalDays}
+                    onChange={(e) => setAutoBackupIntervalDays(Number(e.target.value))}
+                    disabled={!autoBackupEnabled}>
+                    {[1, 2, 3, 4, 5, 6, 7].map((d) => (
+                      <option key={d} value={d}>كل {d === 1 ? 'يوم' : `${d} أيام`}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field">
+                  <span>الاحتفاظ بالنسخ لمدة</span>
+                  <select value={backupRetentionDays}
+                    onChange={(e) => setBackupRetentionDays(Number(e.target.value))}>
+                    <option value={0}>للأبد (لا حذف تلقائي)</option>
+                    <option value={7}>7 أيام</option>
+                    <option value={14}>14 يوم</option>
+                    <option value={30}>30 يوم</option>
+                    <option value={60}>60 يوم</option>
+                    <option value={90}>90 يوم</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="form-actions" style={{ marginTop: 8 }}>
+                <button type="button" className="btn btn--primary" onClick={() => void handleBackupSettingsSave()} disabled={backupSaving}>
+                  <MdSave /> {backupSaving ? 'جارٍ الحفظ…' : 'حفظ إعدادات النسخ'}
+                </button>
+              </div>
             </div>
+
+            {/* ── Section 3: Export & Restore ── */}
+            <div className="card backup-section">
+              <h2 className="card__title">
+                <MdRestorePage style={{ verticalAlign: 'middle', marginLeft: 6 }} />
+                تصدير واستعادة
+              </h2>
+              <p className="backup-section__desc">
+                تصدير قاعدة البيانات كاملةً إلى ملف اختياري، أو استعادة من نسخة سابقة.
+                <strong style={{ color: 'var(--color-danger)' }}> الاستعادة تستبدل جميع البيانات الحالية وتُعيد تشغيل التطبيق.</strong>
+              </p>
+              <div className="backup-section__actions">
+                <button type="button" className="btn btn--secondary" onClick={() => void handleBackup()} disabled={backupLoading}>
+                  <MdBackup /> {backupLoading ? 'جارٍ…' : 'تصدير قاعدة البيانات…'}
+                </button>
+                <button type="button" className="btn btn--danger" onClick={() => setRestoreConfirmOpen(true)} disabled={backupLoading}>
+                  <MdRestorePage /> استعادة من نسخة احتياطية…
+                </button>
+              </div>
+            </div>
+
           </div>
         )}
 

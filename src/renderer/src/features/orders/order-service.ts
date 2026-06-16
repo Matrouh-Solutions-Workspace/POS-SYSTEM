@@ -84,6 +84,7 @@ export async function updateSettings(
       | 'sideDisconnectPolicy'
       | 'receiptPrintRoute'
       | 'backupDirectory'
+      | 'backupDirectories'
       | 'autoBackupEnabled'
       | 'autoBackupIntervalDays'
       | 'autoBackupOnClose'
