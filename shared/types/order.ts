@@ -1,6 +1,8 @@
 export type OrderStatus = 'draft' | 'completed' | 'cancelled'
 export type OrderType = 'takeaway' | 'dine_in' | 'delivery'
-export type PaymentStatus = 'paid' | 'unpaid'
+export type PaymentStatus = 'paid' | 'unpaid' | 'split'
+
+export type DiscountType = 'percent' | 'fixed'
 
 export interface Order {
   id: string
@@ -17,8 +19,18 @@ export interface Order {
   cashierName: string
   cashierCode?: string
   subtotal: number
-  total: number
+  discountType?: DiscountType
+  discountValue?: number   // percentage (0-100) or fixed amount
+  discountAmount?: number  // computed discount amount stored for receipts
+  taxRate?: number         // percentage e.g. 14 for 14% VAT
+  taxAmount?: number       // computed tax amount stored for receipts
+  deliveryFee?: number
+  total: number            // subtotal - discountAmount + taxAmount + deliveryFee
   noteAr?: string
+  // Delivery customer info
+  customerName?: string
+  customerPhone?: string
+  customerAddress?: string
   archived?: boolean
   createdAt: number
   updatedAt: number

@@ -1,6 +1,6 @@
 {
   "name": "shift-pos",
-  "version": "2.1.4",
+  "version": "2.2.0",
   "description": "Restaurant Management and POS - Arabic RTL",
   "main": "./out/main/index.js",
   "private": true,
@@ -95,6 +95,7 @@
       "uninstallerIcon": "build/installerIcon.ico",
       "installerSidebar": "build/installerSidebar.bmp",
       "uninstallerSidebar": "build/installerSidebar.bmp",
+      "include": "build/installer.nsh",
       "installerLanguages": [
         "en-US",
         "ar"

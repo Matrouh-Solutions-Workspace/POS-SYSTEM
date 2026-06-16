@@ -7,7 +7,7 @@ import {
   updateUserActive,
   updateUserProfile,
   resetCashierPassword,
-  deleteCashierAccount
+  deleteAccount
 } from '@renderer/features/auth/auth-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { MdEdit, MdCheck, MdClose, MdLock } from 'react-icons/md'
@@ -51,6 +51,7 @@ export function CashiersPage(): React.ReactElement {
           displayName: form.displayName.trim(),
           cashierCode: form.cashierCode.trim().toUpperCase(),
           role: 'cashier',
+          permissions: ['pos', 'order_history', 'cashier_inventory'],
           password: form.password
         },
         manager.id
@@ -266,7 +267,7 @@ export function CashiersPage(): React.ReactElement {
                                 setError('لا يمكن الحذف بدون اتصال')
                                 return
                               }
-                              await deleteCashierAccount(c.id)
+                              await deleteAccount(c.id, manager.id)
                               await load()
                             }}
                           />

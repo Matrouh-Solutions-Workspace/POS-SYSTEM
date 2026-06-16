@@ -169,12 +169,44 @@ export function ShiftsPage(): React.ReactElement {
           <h2 className="card__title">ملخص شيفت {selected.shift.cashierName}</h2>
           <div className="stats-grid">
             <div className="stat-card"><div className="stat-card__label">إجمالي الإيراد</div><div className="stat-card__value">{selected.revenue.toFixed(2)}</div></div>
-            <div className="stat-card"><div className="stat-card__label">فلوس الدرج</div><div className="stat-card__value">{selected.drawerTotal.toFixed(2)}</div></div>
+            <div className="stat-card"><div className="stat-card__label">فلوس الدرج الكلي</div><div className="stat-card__value">{selected.drawerTotal.toFixed(2)}</div></div>
+            <div className="stat-card"><div className="stat-card__label">إيراد نقدي</div><div className="stat-card__value">{selected.cashRevenue.toFixed(2)}</div></div>
+            <div className="stat-card"><div className="stat-card__label">إيراد بطاقة</div><div className="stat-card__value">{selected.cardRevenue.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">المصروفات</div><div className="stat-card__value">{selected.expenses.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">كل الطلبات</div><div className="stat-card__value">{selected.orders.length}</div></div>
             <div className="stat-card"><div className="stat-card__label">طلبات مكتملة</div><div className="stat-card__value">{selected.completedOrders.length}</div></div>
             <div className="stat-card"><div className="stat-card__label">طلبات ملغية</div><div className="stat-card__value">{selected.cancelledOrders.length}</div></div>
             <div className="stat-card"><div className="stat-card__label">توريدات مخزون</div><div className="stat-card__value">{selected.suppliedInventory.length}</div></div>
+          </div>
+
+          {/* Cash reconciliation */}
+          <div className="card" style={{ background: '#f0fdf4', borderColor: '#22c55e', marginBottom: 12 }}>
+            <h3 className="card__title" style={{ borderColor: '#22c55e' }}>تسوية الكاش</h3>
+            <div className="stats-grid" style={{ marginBottom: 0 }}>
+              <div className="stat-card">
+                <div className="stat-card__label">كاش بداية الشيفت</div>
+                <div className="stat-card__value">{(selected.shift.openingCash ?? 0).toFixed(2)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-card__label">الكاش المتوقع</div>
+                <div className="stat-card__value">{selected.expectedCash.toFixed(2)}</div>
+              </div>
+              {selected.actualCash !== undefined && (
+                <div className="stat-card">
+                  <div className="stat-card__label">الكاش الفعلي</div>
+                  <div className="stat-card__value">{selected.actualCash.toFixed(2)}</div>
+                </div>
+              )}
+              {selected.cashDifference !== undefined && (
+                <div className="stat-card" style={{ borderColor: Math.abs(selected.cashDifference) < 0.01 ? '#22c55e' : '#f97316' }}>
+                  <div className="stat-card__label">الفرق</div>
+                  <div className="stat-card__value" style={{ color: Math.abs(selected.cashDifference) < 0.01 ? 'var(--color-success)' : '#ea580c', fontSize: '1.2rem' }}>
+                    {selected.cashDifference >= 0 ? '+' : ''}{selected.cashDifference.toFixed(2)}
+                    {Math.abs(selected.cashDifference) < 0.01 && ' ✓'}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <h3 className="section-title">أوردرات الشيفت</h3>

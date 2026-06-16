@@ -18,6 +18,10 @@ export interface Ingredient {
 export interface InventoryTransaction {
   id: string
   ingredientId: string
+  /** Original order item that produced this stock movement, when applicable */
+  orderItemId?: string
+  /** Original sellable menu item that produced this stock movement, when applicable */
+  menuItemId?: string
   ingredientNameAr?: string
   type: InventoryTransactionType
   /** Signed quantity in base unit (positive = in, negative = out) */

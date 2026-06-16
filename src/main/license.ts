@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process'
 const MASTER_KEY_HASH = '6c79e238d59dfc64a86988042e3cf84e179574d37bffaaa76dc2cd9211612fb5'
 
 const LICENSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEADGYiLWKug8a+dgJDwnUgQoL6zCWvqy1r4upfRI7F+CQ=
+MCowBQYDK2VwAyEA6a1H+875wp9OrSjSzdgsiufVmclxnQlaY5kAHn+Fmio=
 -----END PUBLIC KEY-----`
 
 export interface ActivationRequest {

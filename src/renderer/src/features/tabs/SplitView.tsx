@@ -62,7 +62,12 @@ export function SplitView({ children, onNavigate }: SplitViewProps): React.React
     function onMove(ev: MouseEvent): void {
       if (!dividerDragging.current || !containerRef.current) return
       const rect = containerRef.current.getBoundingClientRect()
-      const ratio = ((ev.clientX - rect.left) / rect.width) * 100
+      // In RTL layout the primary pane is on the right, so we invert the ratio:
+      // distance from the RIGHT edge / total width gives the primary pane's share.
+      const isRtl = document.documentElement.dir === 'rtl' ||
+        getComputedStyle(document.documentElement).direction === 'rtl'
+      const raw = (ev.clientX - rect.left) / rect.width
+      const ratio = isRtl ? (1 - raw) * 100 : raw * 100
       setSplitRatio(ratio)
     }
     function onUp(): void {

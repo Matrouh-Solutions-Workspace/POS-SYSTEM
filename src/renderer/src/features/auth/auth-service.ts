@@ -75,15 +75,25 @@ function normalizeUsername(username: string): string {
   return username.toLowerCase().trim()
 }
 
+async function isLanSideDevice(): Promise<boolean> {
+  const network = await window.electronAPI.getNetworkStatus().catch(() => null) as { mode?: string } | null
+  return network?.mode === 'side'
+}
+
 async function storeLocalCredential(user: AppUser, password: string): Promise<void> {
+  const side = await isLanSideDevice()
   const username = normalizeUsername(user.username)
   const passwordHash = await sha256(`${username}:${password}`)
-  const existing = readAuthCache().filter((e) => e.username !== username)
-  existing.push({ username, passwordHash, userId: user.id, updatedAt: Date.now() })
-  writeAuthCache(existing)
+  if (!side) {
+    const existing = readAuthCache().filter((e) => e.username !== username)
+    existing.push({ username, passwordHash, userId: user.id, updatedAt: Date.now() })
+    writeAuthCache(existing)
+  }
+  await window.electronAPI.authStoreCredential(username, passwordHash, user)
 }
 
 async function verifyLocalCredential(username: string, password: string): Promise<string | null> {
+  if (await isLanSideDevice()) return null
   const norm = normalizeUsername(username)
   const hash = await sha256(`${norm}:${password}`)
   const match = readAuthCache().find((e) => e.username === norm && e.passwordHash === hash)
@@ -109,6 +119,21 @@ export async function restoreSessionFromLocal(): Promise<AppUser | null> {
 
 /** Login with username + password — reads from SQLite, no Firebase required */
 export async function loginAndLoadUser(username: string, password: string): Promise<AppUser> {
+  const normalized = normalizeUsername(username)
+  const passwordHash = await sha256(`${normalized}:${password}`)
+  const mainAuth = await window.electronAPI.authLoginLocal(normalized, passwordHash).catch(() => null)
+  if (mainAuth?.ok && mainAuth.user) {
+    const user = mainAuth.user as AppUser
+    writeSession(user.id)
+    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+      logAudit({ action: 'login', actorId: user.id, actorName: user.displayName, detailAr: `ØªØ³Ø¬ÙŠÙ„ Ø¯Ø®ÙˆÙ„: ${user.displayName}` })
+    )
+    return user
+  }
+  if (await isLanSideDevice()) {
+    throw new Error(mainAuth?.error ?? 'لا يمكن تسجيل الدخول على الجهاز الجانبي بدون اتصال صحيح بالماستر')
+  }
+
   const userId = await verifyLocalCredential(username, password)
   if (!userId) {
     throw new Error('اسم المستخدم أو كلمة المرور غير صحيحة')
@@ -121,14 +146,21 @@ export async function loginAndLoadUser(username: string, password: string): Prom
     throw new Error('الحساب غير نشط')
   }
   writeSession(user.id)
+  // Audit: login
+  void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+    logAudit({ action: 'login', actorId: user.id, actorName: user.displayName, detailAr: `تسجيل دخول: ${user.displayName}` })
+  )
   return user
 }
 
 /** Logout — clear local session only */
-export async function logoutUser(): Promise<void> {
+export async function logoutUser(user?: { id: string; displayName: string }): Promise<void> {
+  if (user) {
+    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+      logAudit({ action: 'logout', actorId: user.id, actorName: user.displayName, detailAr: `تسجيل خروج: ${user.displayName}` })
+    )
+  }
   clearSession()
-  // Background: sign out of Firebase Auth too (fire-and-forget, no dynamic import needed)
-  // Firebase Auth will expire naturally on the server side
 }
 
 /** Create a new manager account (first-time setup) */
@@ -137,6 +169,9 @@ export async function createFirstOfflineManager(params: {
   password: string
   displayName?: string
 }): Promise<AppUser> {
+  if (await isLanSideDevice()) {
+    throw new Error('لا يمكن إنشاء مدير محلي على جهاز جانبي. سجّل الدخول بحساب موجود على الماستر.')
+  }
   if (hasOfflineAuthUsers()) {
     throw new Error('يوجد حساب محلي بالفعل')
   }
@@ -220,6 +255,18 @@ export async function createAccount(
   await cacheDocs(COLLECTIONS.users, [user])
   await storeLocalCredential(user, data.password)
 
+  // Audit: account created
+  void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+    logAudit({
+      action: 'account_created',
+      actorId: _createdByManagerId,
+      actorName: 'مدير',
+      targetId: user.id,
+      targetType: 'user',
+      detailAr: `إنشاء حساب جديد: ${user.displayName} (${user.role})`
+    })
+  )
+
   // Background: create in Firebase Auth (fire-and-forget)
   void (async () => {
     try {
@@ -240,10 +287,20 @@ export async function createAccount(
 /** Backwards-compat alias */
 export const createCashierAccount = createAccount
 
-export async function updateUserActive(userId: string, active: boolean): Promise<void> {
+export async function updateUserActive(userId: string, active: boolean, actorId = 'system', actorName = 'النظام'): Promise<void> {
   const cached = await getCachedDoc<AppUser>(COLLECTIONS.users, userId)
   if (!cached) return
   await cacheDocs(COLLECTIONS.users, [{ ...cached, active, updatedAt: Date.now() }])
+  void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+    logAudit({
+      action: 'account_deactivated',
+      actorId,
+      actorName,
+      targetId: userId,
+      targetType: 'user',
+      detailAr: `${active ? 'تفعيل' : 'تعطيل'} حساب: ${cached.displayName}`
+    })
+  )
 }
 
 export async function updateUserProfile(
@@ -289,11 +346,20 @@ export async function deleteAccount(userId: string, currentUserId: string): Prom
 
   const cached = await getCachedDoc<AppUser>(COLLECTIONS.users, userId)
   if (cached) {
-    await cacheDocs(COLLECTIONS.users, [{ ...cached, active: false, updatedAt: Date.now() }])
+    await dbDelete(COLLECTIONS.users, userId)
+    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+      logAudit({
+        action: 'account_deleted',
+        actorId: currentUserId,
+        actorName: 'مدير',
+        targetId: userId,
+        targetType: 'user',
+        detailAr: `حذف حساب: ${cached.displayName}`
+      })
+    )
   }
 
   writeAuthCache(readAuthCache().filter((e) => e.userId !== userId))
-
   void window.electronAPI.deleteAuthUser(userId).catch(() => {})
 }
 

@@ -55,3 +55,29 @@ export async function dbDelete(collectionName: string, id: string): Promise<void
   // 2. Enqueue deletion for Firebase background upload (fire-and-forget)
   void window.electronAPI.outboxEnqueue(collectionName, id, 'delete', { id })
 }
+
+// ---------------------------------------------------------------------------
+// Atomic batch write
+// ---------------------------------------------------------------------------
+
+export interface DbBatchOp {
+  collection: string
+  id: string
+  data: unknown
+  op: 'set' | 'delete'
+}
+
+/**
+ * Execute multiple document operations atomically in a single SQLite transaction.
+ * If any operation fails the entire batch is rolled back.
+ * Also enqueues all operations to the Firebase outbox inside the same transaction.
+ *
+ * Use this for any multi-table write (order + items + payments + inventory + cash drawer).
+ */
+export async function dbBatch(ops: DbBatchOp[]): Promise<void> {
+  if (!ops.length) return
+  const result = await window.electronAPI.executeBatch(ops)
+  if (!result.ok) {
+    throw new Error(result.error ?? 'فشل حفظ البيانات — تم التراجع عن العملية')
+  }
+}

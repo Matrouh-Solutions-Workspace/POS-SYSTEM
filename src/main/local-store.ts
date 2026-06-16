@@ -1,7 +1,14 @@
 import { app } from 'electron'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
-
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+  unlinkSync
+} from 'node:fs'
 const require = createRequire(import.meta.url)
 
 type DatabaseSync = {
@@ -22,6 +29,21 @@ export interface LocalStoreStatus {
   pendingOutbox: number
   error?: string
 }
+
+export interface BackupSettings {
+  backupDirectory?: string
+  /** All configured directories (primary + extras). */
+  allDirectories: string[]
+  autoBackupEnabled: boolean
+  autoBackupIntervalDays: number
+  autoBackupOnClose: boolean
+  backupRetentionDays: number
+  lastAutoBackupAt?: number
+}
+
+const SETTINGS_COLLECTION = 'settings'
+const SETTINGS_DOC_ID = 'app'
+const DAY_MS = 86_400_000
 
 function dbPath(): string {
   return join(app.getPath('userData'), 'offline-pos.sqlite')
@@ -62,8 +84,109 @@ function openDatabase(): DatabaseSync {
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (collection_name, document_id)
     );
+
+    CREATE INDEX IF NOT EXISTS idx_cached_docs_collection
+      ON cached_documents(collection_name, updated_at DESC);
+
+    -- REQ-11: Materialized stock balances — O(1) reads instead of O(n) transaction scans
+    CREATE TABLE IF NOT EXISTS ingredient_stock (
+      ingredient_id TEXT PRIMARY KEY,
+      quantity REAL NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS seed_auth (
+      username TEXT PRIMARY KEY,
+      password_hash TEXT NOT NULL,
+      user_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `)
   return db
+}
+
+function readSettingsNetworkMode(): string {
+  try {
+    const database = openDatabase()
+    const row = database.prepare(`
+      SELECT payload_json
+      FROM cached_documents
+      WHERE collection_name = 'settings' AND document_id = 'app'
+    `).get() as { payload_json?: string } | undefined
+    if (!row?.payload_json) return 'standalone'
+    const settings = JSON.parse(row.payload_json) as { networkMode?: string }
+    return settings.networkMode ?? 'standalone'
+  } catch {
+    return 'standalone'
+  }
+}
+
+function shouldEnqueueOutbox(): boolean {
+  return readSettingsNetworkMode() !== 'master'
+}
+
+function readSettingsDocument(): Record<string, unknown> | null {
+  try {
+    const database = openDatabase()
+    const row = database.prepare(`
+      SELECT payload_json
+      FROM cached_documents
+      WHERE collection_name = ? AND document_id = ?
+    `).get(SETTINGS_COLLECTION, SETTINGS_DOC_ID) as { payload_json?: string } | undefined
+    return row?.payload_json ? JSON.parse(row.payload_json) as Record<string, unknown> : null
+  } catch {
+    return null
+  }
+}
+
+function clampDays(value: unknown, fallback: number): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.max(1, Math.min(7, Math.round(n)))
+}
+
+function clampRetentionDays(value: unknown, fallback: number): number {
+  const valid = [0, 1, 2, 3, 4, 5, 6, 7, 14, 30, 60, 90]
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return valid.includes(n) ? n : fallback
+}
+
+export function readBackupSettings(): BackupSettings {
+  const settings = readSettingsDocument()
+  // Merge legacy single directory into the directories array
+  const primaryDir = typeof settings?.backupDirectory === 'string' ? settings.backupDirectory : undefined
+  const extraDirs = Array.isArray(settings?.backupDirectories)
+    ? (settings.backupDirectories as string[]).filter((d) => typeof d === 'string' && d.trim())
+    : []
+  return {
+    backupDirectory: primaryDir,
+    autoBackupEnabled: settings?.autoBackupEnabled === true,
+    autoBackupIntervalDays: clampDays(settings?.autoBackupIntervalDays, 1),
+    autoBackupOnClose: settings?.autoBackupOnClose === true,
+    backupRetentionDays: clampRetentionDays(settings?.backupRetentionDays, 7),
+    lastAutoBackupAt: typeof settings?.lastAutoBackupAt === 'number' ? settings.lastAutoBackupAt : undefined,
+    // All directories (primary + extra, deduplicated, non-empty)
+    allDirectories: Array.from(new Set([
+      ...(primaryDir ? [primaryDir] : []),
+      ...extraDirs
+    ])).filter(Boolean)
+  }
+}
+
+function updateSettingsPatch(patch: Record<string, unknown>): void {
+  const current = readSettingsDocument() ?? {
+    id: SETTINGS_DOC_ID,
+    restaurantNameAr: '',
+    currencySymbol: 'ج.م',
+    pinEnabled: false,
+    autoLockMinutes: 5,
+    nextOrderNumber: 1
+  }
+  cacheDocuments(SETTINGS_COLLECTION, [{
+    id: SETTINGS_DOC_ID,
+    data: { ...current, ...patch, updatedAt: Date.now() }
+  }])
 }
 
 export function initLocalStore(): LocalStoreStatus {
@@ -162,6 +285,7 @@ export function enqueueOutbox(
   operation: 'set' | 'delete',
   payload: unknown
 ): void {
+  if (!shouldEnqueueOutbox()) return
   const database = openDatabase()
   const now = Date.now()
   const id = `${entityType}:${entityId}:${now}`
@@ -232,6 +356,320 @@ export function countPendingOutbox(): number {
   ).get() as { count?: number } | undefined
   return Number(row?.count ?? 0)
 }
+
+// ---------------------------------------------------------------------------
+// Materialized stock reads — REQ-11
+// ---------------------------------------------------------------------------
+
+export interface StockRow {
+  ingredient_id: string
+  quantity: number
+}
+
+/**
+ * Read materialized stock balances directly from ingredient_stock table.
+ * O(1) per ingredient — does not scan inventory_transactions.
+ */
+export function readIngredientStocks(): StockRow[] {
+  const database = openDatabase()
+  return database.prepare('SELECT ingredient_id, quantity FROM ingredient_stock').all() as StockRow[]
+}
+
+/**
+ * Read the materialized stock for a single ingredient.
+ */
+export function readIngredientStock(ingredientId: string): number {
+  const database = openDatabase()
+  const row = database.prepare(
+    'SELECT quantity FROM ingredient_stock WHERE ingredient_id = ?'
+  ).get(ingredientId) as { quantity?: number } | undefined
+  return Number(row?.quantity ?? 0)
+}
+
+// ---------------------------------------------------------------------------
+// Atomic batch write — executes multiple document upserts in a single
+// SQLite transaction so partial failures are impossible.
+// ---------------------------------------------------------------------------
+
+export interface BatchOperation {
+  collection: string
+  id: string
+  data: unknown
+  op: 'set' | 'delete'
+}
+
+/**
+ * Execute an array of document operations atomically.
+ * All writes succeed together or all are rolled back.
+ * Also enqueues every operation in the outbox for Firebase sync.
+ */
+export function executeBatch(operations: BatchOperation[]): { ok: boolean; error?: string } {
+  if (!operations.length) return { ok: true }
+  const database = openDatabase()
+  const now = Date.now()
+
+  const upsertStmt = database.prepare(`
+    INSERT INTO cached_documents (collection_name, document_id, payload_json, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(collection_name, document_id)
+    DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at
+  `)
+
+  const deleteStmt = database.prepare(`
+    DELETE FROM cached_documents
+    WHERE collection_name = ? AND document_id = ?
+  `)
+
+  const outboxStmt = database.prepare(`
+    INSERT INTO sync_outbox (id, entity_type, entity_id, operation, payload_json, status, attempts, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      operation = excluded.operation,
+      payload_json = excluded.payload_json,
+      status = 'pending',
+      updated_at = excluded.updated_at
+  `)
+
+  // REQ-11: materialized stock upsert — keeps ingredient_stock in sync atomically
+  const stockUpsertStmt = database.prepare(`
+    INSERT INTO ingredient_stock (ingredient_id, quantity, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(ingredient_id)
+    DO UPDATE SET quantity = quantity + excluded.quantity, updated_at = excluded.updated_at
+  `)
+
+  try {
+    database.exec('BEGIN IMMEDIATE')
+    for (const op of operations) {
+      if (op.op === 'delete') {
+        deleteStmt.run(op.collection, op.id)
+      } else {
+        upsertStmt.run(op.collection, op.id, JSON.stringify(op.data), now)
+
+        // REQ-11: update materialized stock when an inventory transaction is saved
+        if (op.collection === 'inventory_transactions') {
+          const tx = op.data as { ingredientId?: string; quantity?: number }
+          if (tx.ingredientId && typeof tx.quantity === 'number') {
+            stockUpsertStmt.run(tx.ingredientId, tx.quantity, now)
+          }
+        }
+      }
+      const outboxId = `${op.collection}:${op.id}:${now}`
+      const payload = op.op === 'delete' ? JSON.stringify({ id: op.id }) : JSON.stringify(op.data)
+      if (shouldEnqueueOutbox()) {
+        outboxStmt.run(outboxId, op.collection, op.id, op.op, payload, now, now)
+      }
+    }
+    database.exec('COMMIT')
+    return { ok: true }
+  } catch (e) {
+    try { database.exec('ROLLBACK') } catch { /* ignore rollback error */ }
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export function storeAuthCredential(
+  username: string,
+  passwordHash: string,
+  user: unknown
+): { ok: boolean; error?: string } {
+  try {
+    const normalized = username.toLowerCase().trim()
+    const database = openDatabase()
+    database.prepare(`
+      INSERT INTO seed_auth (username, password_hash, user_json, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(username)
+      DO UPDATE SET password_hash = excluded.password_hash,
+                    user_json = excluded.user_json,
+                    updated_at = excluded.updated_at
+    `).run(normalized, passwordHash, JSON.stringify(user), Date.now())
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export function verifyAuthCredential(
+  username: string,
+  passwordHash: string
+): { ok: boolean; user?: unknown; error?: string } {
+  try {
+    const normalized = username.toLowerCase().trim()
+    const database = openDatabase()
+    const row = database.prepare(`
+      SELECT user_json
+      FROM seed_auth
+      WHERE username = ? AND password_hash = ?
+    `).get(normalized, passwordHash) as { user_json?: string } | undefined
+    if (!row?.user_json) return { ok: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' }
+    const storedUser = JSON.parse(row.user_json) as { id?: string; active?: boolean }
+    const current = storedUser.id
+      ? readCachedDocument('users', storedUser.id) as ({ active?: boolean } | null)
+      : null
+    const user = current ?? storedUser
+    if (user && user.active === false) return { ok: false, error: 'الحساب غير نشط' }
+    return { ok: true, user }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export function deleteAuthCredentialForUser(userId: string): void {
+  const database = openDatabase()
+  const rows = database.prepare('SELECT username, user_json FROM seed_auth').all() as Array<{
+    username: string
+    user_json: string
+  }>
+  for (const row of rows) {
+    try {
+      const user = JSON.parse(row.user_json) as { id?: string }
+      if (user.id === userId) {
+        database.prepare('DELETE FROM seed_auth WHERE username = ?').run(row.username)
+      }
+    } catch {
+      // ignore malformed credential rows
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Backup & Restore — REQ-8
+// ---------------------------------------------------------------------------
+
+/**
+ * Copy the live SQLite file to a destination path chosen by the user.
+ * We WAL-checkpoint first so the copy is consistent.
+ */
+export function backupDatabase(destinationPath: string): { ok: boolean; error?: string } {
+  try {
+    const database = openDatabase()
+    // Flush WAL to main DB file so the copy is consistent
+    try { database.exec('PRAGMA wal_checkpoint(TRUNCATE);') } catch { /* ignore */ }
+    copyFileSync(dbPath(), destinationPath)
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+function backupFileName(label: string): string {
+  const stamp = new Date()
+    .toISOString()
+    .replace(/[:.]/g, '-')
+    .replace('T', '_')
+    .replace('Z', '')
+  const safeLabel = label.replace(/[^a-z0-9_-]/gi, '').slice(0, 24) || 'backup'
+  return `shift-pos-backup-${stamp}-${safeLabel}.sqlite`
+}
+
+export function backupDatabaseToDirectory(
+  destinationDirectory: string,
+  label = 'manual'
+): { ok: boolean; path?: string; error?: string } {
+  try {
+    if (!destinationDirectory.trim()) return { ok: false, error: 'Backup directory is not set' }
+    mkdirSync(destinationDirectory, { recursive: true })
+    const destinationPath = join(destinationDirectory, backupFileName(label))
+    const result = backupDatabase(destinationPath)
+    return result.ok ? { ok: true, path: destinationPath } : result
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export function pruneBackupDirectory(
+  destinationDirectory: string,
+  retentionDays: number
+): { ok: boolean; deleted: number; error?: string } {
+  try {
+    if (retentionDays <= 0) return { ok: true, deleted: 0 } // 0 = keep forever
+    if (!destinationDirectory.trim() || !existsSync(destinationDirectory)) {
+      return { ok: true, deleted: 0 }
+    }
+    const cutoff = Date.now() - retentionDays * DAY_MS
+    let deleted = 0
+    for (const file of readdirSync(destinationDirectory)) {
+      if (!/^shift-pos-backup-.+\.sqlite$/i.test(file)) continue
+      const path = join(destinationDirectory, file)
+      const stats = statSync(path)
+      if (stats.isFile() && stats.mtimeMs < cutoff) {
+        unlinkSync(path)
+        deleted += 1
+      }
+    }
+    return { ok: true, deleted }
+  } catch (e) {
+    return { ok: false, deleted: 0, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export function runConfiguredBackup(
+  reason: 'scheduled' | 'close' | 'manual',
+  options: { force?: boolean } = {}
+): { ok: boolean; skipped?: boolean; path?: string; error?: string } {
+  const settings = readBackupSettings()
+  const dirs = settings.allDirectories
+
+  if (dirs.length === 0) return { ok: false, skipped: true, error: 'Backup directory is not set' }
+  if (reason === 'scheduled' && !settings.autoBackupEnabled) return { ok: true, skipped: true }
+  if (reason === 'close' && !settings.autoBackupOnClose) return { ok: true, skipped: true }
+
+  const intervalMs = clampDays(settings.autoBackupIntervalDays, 1) * DAY_MS
+  if (
+    reason === 'scheduled' &&
+    !options.force &&
+    settings.lastAutoBackupAt &&
+    Date.now() - settings.lastAutoBackupAt < intervalMs
+  ) {
+    return { ok: true, skipped: true }
+  }
+
+  let lastResult: { ok: boolean; path?: string; error?: string } = { ok: false, error: 'No directories' }
+
+  for (const dir of dirs) {
+    const result = backupDatabaseToDirectory(dir, reason)
+    if (result.ok) {
+      // Prune old backups in this directory only if retention > 0
+      if (settings.backupRetentionDays > 0) {
+        pruneBackupDirectory(dir, settings.backupRetentionDays)
+      }
+      lastResult = result
+    } else {
+      // Log failure but continue with other directories
+      console.warn(`[backup] Failed to backup to ${dir}:`, result.error)
+      if (!lastResult.ok) lastResult = result
+    }
+  }
+
+  if (lastResult.ok) {
+    updateSettingsPatch({ lastAutoBackupAt: Date.now() })
+  }
+  return lastResult
+}
+
+/**
+ * Replace the live SQLite file with a backup copy.
+ * The current DB connection is closed first so the file can be replaced.
+ * The app MUST restart after this call.
+ */
+export function restoreDatabase(sourcePath: string): { ok: boolean; error?: string } {
+  if (!existsSync(sourcePath)) {
+    return { ok: false, error: 'ملف النسخ الاحتياطي غير موجود' }
+  }
+  try {
+    // Close the connection so we can replace the file
+    db = null
+    copyFileSync(sourcePath, dbPath())
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 /**
  * DEV ONLY — wipe all cached_documents and sync_outbox rows.

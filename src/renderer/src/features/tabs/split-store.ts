@@ -57,6 +57,15 @@ interface SplitState {
 
   /** Get the tab that should be rendered as "current" for a pane */
   getActiveTab: (paneId: string) => AppTab | null
+
+  /** Reset all tab/pane state — call on logout so the next user starts clean */
+  reset: () => void
+
+  /** Reorder tabs within a pane by moving tabId to a new index position */
+  reorderTab: (paneId: string, tabId: string, toIndex: number) => void
+
+  /** Move a tab from one pane to another */
+  moveTabToPane: (fromPaneId: string, tabId: string, toPaneId: string, toIndex?: number) => void
 }
 
 let _paneSeq = 0
@@ -225,5 +234,68 @@ export const useSplitStore = create<SplitState>((set, get) => ({
     const pane = get().panes.find((p) => p.id === paneId)
     if (!pane) return null
     return pane.tabs.find((t) => t.id === pane.activeTabId) ?? pane.tabs[0] ?? null
+  },
+
+  reset() {
+    // Wipe all panes and tabs so the next user starts with a blank slate
+    set({ panes: [], focusedPaneId: null, splitRatio: 50 })
+  },
+
+  reorderTab(paneId, tabId, toIndex) {
+    set((s) => ({
+      panes: s.panes.map((pane) => {
+        if (pane.id !== paneId) return pane
+        const fromIndex = pane.tabs.findIndex((t) => t.id === tabId)
+        if (fromIndex === -1 || fromIndex === toIndex) return pane
+        const tabs = [...pane.tabs]
+        const [moved] = tabs.splice(fromIndex, 1)
+        tabs.splice(toIndex, 0, moved!)
+        return { ...pane, tabs }
+      })
+    }))
+  },
+
+  moveTabToPane(fromPaneId, tabId, toPaneId, toIndex) {
+    const { panes } = get()
+    if (fromPaneId === toPaneId) {
+      // Same pane — just reorder
+      if (toIndex !== undefined) get().reorderTab(fromPaneId, tabId, toIndex)
+      return
+    }
+    const sourcePane = panes.find((p) => p.id === fromPaneId)
+    const targetPane = panes.find((p) => p.id === toPaneId)
+    if (!sourcePane || !targetPane) return
+
+    const tab = sourcePane.tabs.find((t) => t.id === tabId)
+    if (!tab) return
+
+    // Can't leave a pane with 0 tabs (would close the pane — use splitTab instead)
+    if (sourcePane.tabs.length <= 1) return
+
+    set((s) => ({
+      panes: s.panes.map((pane) => {
+        if (pane.id === fromPaneId) {
+          const remaining = pane.tabs.filter((t) => t.id !== tabId)
+          const newActive = pane.activeTabId === tabId
+            ? (remaining[remaining.length - 1]?.id ?? null)
+            : pane.activeTabId
+          return { ...pane, tabs: remaining, activeTabId: newActive }
+        }
+        if (pane.id === toPaneId) {
+          // Don't duplicate same path
+          if (pane.tabs.some((t) => t.path === tab.path)) {
+            return { ...pane, activeTabId: pane.tabs.find((t) => t.path === tab.path)!.id }
+          }
+          const insertAt = toIndex !== undefined
+            ? Math.min(toIndex, pane.tabs.length)
+            : pane.tabs.length
+          const tabs = [...pane.tabs]
+          tabs.splice(insertAt, 0, tab)
+          return { ...pane, tabs, activeTabId: tab.id }
+        }
+        return pane
+      }),
+      focusedPaneId: toPaneId
+    }))
   }
 }))

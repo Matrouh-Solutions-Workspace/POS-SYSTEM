@@ -4,14 +4,24 @@ import { logoutUser } from '@renderer/features/auth/auth-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { SyncStatusBadge } from '@renderer/features/sync/SyncStatusBadge'
 import { MdLogout, type NavItem } from '@renderer/config/navigation'
-import { MdSystemUpdate, MdClose, MdExpandMore, MdExpandLess, MdLock } from 'react-icons/md'
+import {
+  MdSystemUpdate, MdClose, MdExpandMore, MdExpandLess,
+  MdLock, MdNewReleases, MdChevronLeft, MdChevronRight
+} from 'react-icons/md'
 import { triggerCheckNow, useUpdateState } from '@renderer/components/UpdateNotification'
+import { openWhatsNew } from '@renderer/components/WhatsNewModal'
 import { usePinStore } from '@renderer/features/auth/pin-store'
 import { getUnarchivedShiftCount } from '@renderer/features/shifts/shift-service'
 import { getSettings } from '@renderer/features/orders/order-service'
 import { RESTAURANT_NAME_AR } from '@shared/constants/branding'
 import { SplitView, initSplitStore } from '@renderer/features/tabs/SplitView'
 import { useSplitStore, mkTabId } from '@renderer/features/tabs/split-store'
+import { useGlobalKeyboardShortcuts } from '@renderer/features/keyboard/use-keyboard-shortcuts'
+import { useTabShortcuts } from '@renderer/features/keyboard/use-tab-shortcuts'
+import { useKeyboardStore } from '@renderer/features/keyboard/keyboard-store'
+
+const SIDEBAR_COLLAPSE_PREF_KEY = 'abdokofta.sidebarCollapsePreference'
+type SidebarCollapsePreference = 'expanded' | 'collapsed'
 
 interface AppShellProps {
   nav: NavItem[]
@@ -34,6 +44,46 @@ export function AppShell({ nav, children }: AppShellProps): React.ReactElement {
 
   const panes = useSplitStore((s) => s.panes)
   const focusedPaneId = useSplitStore((s) => s.focusedPaneId)
+
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
+  useGlobalKeyboardShortcuts()
+  useTabShortcuts()
+
+  // Load persisted shortcut chords from settings on mount
+  useEffect(() => {
+    void getSettings().then((s) => {
+      useKeyboardStore.getState().loadChords(s.keyboardShortcuts)
+    }).catch(() => {})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── Sidebar collapse ──────────────────────────────────────────────────────
+  const isSplitActive = panes.length >= 2
+
+  const [sidebarCollapsePreference, setSidebarCollapsePreference] = useState<SidebarCollapsePreference | null>(() => {
+    try {
+      const stored = localStorage.getItem(SIDEBAR_COLLAPSE_PREF_KEY)
+      return stored === 'expanded' || stored === 'collapsed' ? stored : null
+    } catch {
+      return null
+    }
+  })
+
+  // Default behavior is still the same in split mode:
+  // if no explicit preference is saved, split view starts collapsed.
+  const sidebarCollapsed =
+    sidebarCollapsePreference === 'collapsed' ||
+    (sidebarCollapsePreference !== 'expanded' && isSplitActive)
+
+  function toggleSidebarCollapse(): void {
+    const nextPreference: SidebarCollapsePreference = sidebarCollapsed ? 'expanded' : 'collapsed'
+    setSidebarCollapsePreference(nextPreference)
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSE_PREF_KEY, nextPreference)
+    } catch {
+      /* ignore */
+    }
+  }
 
   // Build a flat map of path → nav item for tab sync
   const allNavItems = nav.flatMap((item) =>
@@ -122,7 +172,10 @@ export function AppShell({ nav, children }: AppShellProps): React.ReactElement {
   }
 
   async function handleLogout(): Promise<void> {
-    await logoutUser()
+    const user = useAuthStore.getState().user
+    await logoutUser(user ? { id: user.id, displayName: user.displayName } : undefined)
+    // Clear tab state so the next user doesn't see the previous user's tabs
+    useSplitStore.getState().reset()
     useAuthStore.getState().setUser(null)
     navigate('/login')
   }
@@ -143,23 +196,41 @@ export function AppShell({ nav, children }: AppShellProps): React.ReactElement {
     || location.pathname === '/manager/purchases'
     || location.pathname === '/manager/items'
     || location.pathname === '/manager/cashiers'
+    || location.pathname === '/manager/tables'
   const primaryPane = panes[0]
-  const focusedPane = panes.find((p) => p.id === focusedPaneId) ?? primaryPane
   // Use router location as source of truth for sidebar active state
   const focusedActivePath = location.pathname
 
   return (
     <div className="app-shell">
       {/* ── Sidebar ── */}
-      <aside className="app-sidebar" aria-label="القائمة الرئيسية">
-        <div className="app-sidebar__brand">{brandName}</div>
+      <aside
+        className={`app-sidebar${sidebarCollapsed ? ' app-sidebar--collapsed' : ''}`}
+        aria-label="القائمة الرئيسية"
+      >
+        {/* Brand / toggle row */}
+        <div className="app-sidebar__brand-row">
+          {!sidebarCollapsed && (
+            <span className="app-sidebar__brand-text">{brandName}</span>
+          )}
+          <button
+            type="button"
+            className="app-sidebar__toggle"
+            onClick={toggleSidebarCollapse}
+            title={sidebarCollapsed ? 'توسيع الشريط الجانبي' : 'طي الشريط الجانبي'}
+            aria-label={sidebarCollapsed ? 'توسيع' : 'طي'}
+          >
+            {/* In RTL: chevron-right = expand (points inward), chevron-left = collapse */}
+            {sidebarCollapsed ? <MdChevronLeft /> : <MdChevronRight />}
+          </button>
+        </div>
 
         <nav className="app-sidebar__nav">
           {nav.map((item) => {
             const Icon = item.icon
 
             if (item.children) {
-              const isOpen = openDropdown === item.to
+              const isOpen = openDropdown === item.to && !sidebarCollapsed
               const isAnyChildActive = item.children.some(
                 (c) => focusedActivePath === c.to
               )
@@ -168,17 +239,20 @@ export function AppShell({ nav, children }: AppShellProps): React.ReactElement {
                   <button
                     type="button"
                     className={`app-sidebar__link app-sidebar__dropdown-trigger${isAnyChildActive ? ' app-sidebar__link--active' : ''}`}
-                    onClick={() => setOpenDropdown(isOpen ? null : item.to)}
+                    onClick={() => sidebarCollapsed ? undefined : setOpenDropdown(isOpen ? null : item.to)}
                     aria-expanded={isOpen}
+                    title={sidebarCollapsed ? item.label : undefined}
                   >
                     <span className="app-sidebar__link-row">
                       <Icon className="app-sidebar__link-icon" aria-hidden="true" />
-                      <span className="app-sidebar__link-label">{item.label}</span>
-                      <span className="app-sidebar__dropdown-arrow">
-                        {isOpen ? <MdExpandLess /> : <MdExpandMore />}
-                      </span>
+                      {!sidebarCollapsed && <span className="app-sidebar__link-label">{item.label}</span>}
+                      {!sidebarCollapsed && (
+                        <span className="app-sidebar__dropdown-arrow">
+                          {isOpen ? <MdExpandLess /> : <MdExpandMore />}
+                        </span>
+                      )}
                     </span>
-                    {item.hint && <span className="app-sidebar__link-hint">{item.hint}</span>}
+                    {!sidebarCollapsed && item.hint && <span className="app-sidebar__link-hint">{item.hint}</span>}
                   </button>
 
                   {isOpen && (
@@ -207,60 +281,121 @@ export function AppShell({ nav, children }: AppShellProps): React.ReactElement {
                 type="button"
                 className={`app-sidebar__link${focusedActivePath === item.to ? ' app-sidebar__link--active' : ''}`}
                 onClick={() => handleNavClick(item)}
+                title={sidebarCollapsed ? item.label : undefined}
               >
                 <span className="app-sidebar__link-row">
                   <Icon className="app-sidebar__link-icon" aria-hidden="true" />
-                  <span className="app-sidebar__link-label">{item.label}</span>
-                  {item.to === '/manager/shifts' && shiftBadge > 0 && (
+                  {!sidebarCollapsed && <span className="app-sidebar__link-label">{item.label}</span>}
+                  {!sidebarCollapsed && item.to === '/manager/shifts' && shiftBadge > 0 && (
                     <span className="app-sidebar__badge">{shiftBadge}</span>
                   )}
                 </span>
-                {item.hint && <span className="app-sidebar__link-hint">{item.hint}</span>}
+                {!sidebarCollapsed && item.hint && <span className="app-sidebar__link-hint">{item.hint}</span>}
+                {/* Badge visible even when collapsed */}
+                {sidebarCollapsed && item.to === '/manager/shifts' && shiftBadge > 0 && (
+                  <span className="app-sidebar__badge app-sidebar__badge--collapsed">{shiftBadge}</span>
+                )}
               </button>
             )
           })}
         </nav>
 
         <div className="app-sidebar__footer">
-          <SyncStatusBadge />
-          {displayName && <span className="app-sidebar__user" title={displayName}>{displayName}</span>}
+          {!sidebarCollapsed && <SyncStatusBadge />}
+          {!sidebarCollapsed && displayName && (
+            <span className="app-sidebar__user" title={displayName}>{displayName}</span>
+          )}
 
-          {pinEnabled && userRole === 'cashier' && (
+          {!sidebarCollapsed && pinEnabled && userRole === 'cashier' && (
             <button type="button" className="btn btn--secondary btn--sm app-sidebar__lock-btn" onClick={lockApp}>
               <MdLock aria-hidden="true" /> قفل الشاشة
             </button>
           )}
-
-          <div className="app-sidebar__update-wrap">
-            <button type="button" className="btn btn--secondary btn--sm app-sidebar__update-btn" onClick={handleCheckUpdate}>
-              <MdSystemUpdate aria-hidden="true" /> تحديث
+          {sidebarCollapsed && pinEnabled && userRole === 'cashier' && (
+            <button
+              type="button"
+              className="app-sidebar__icon-btn"
+              onClick={lockApp}
+              title="قفل الشاشة"
+            >
+              <MdLock />
             </button>
+          )}
 
-            {showPopup && (
-              <div className="version-popup">
-                <button type="button" className="version-popup__close" onClick={() => setShowPopup(false)} aria-label="إغلاق"><MdClose /></button>
-                <div className="version-popup__row">
-                  <span className="version-popup__label">الإصدار الحالي</span>
-                  <span className="version-popup__value">v{currentVersion}</span>
-                </div>
-                <div className="version-popup__row">
-                  <span className="version-popup__label">أحدث إصدار</span>
-                  <span className="version-popup__value">
-                    {updateState.phase === 'checking' && <span className="version-popup__checking">جارٍ التحقق…</span>}
-                    {updateState.phase === 'error'    && <span className="version-popup__error">تعذّر الاتصال</span>}
-                    {latestVersion && <span className={updateState.phase === 'uptodate' ? 'version-popup__same' : 'version-popup__newer'}>v{latestVersion}</span>}
-                    {updateState.phase === 'idle'     && <span className="version-popup__checking">جارٍ التحقق…</span>}
-                  </span>
-                </div>
-                {updateState.phase === 'uptodate' && <div className="version-popup__status version-popup__status--ok">✓ التطبيق محدّث</div>}
-                {(updateState.phase === 'available' || updateState.phase === 'downloading' || updateState.phase === 'ready') && <div className="version-popup__status version-popup__status--new">↑ يتوفر تحديث جديد</div>}
-                {updateState.phase === 'error' && <div className="version-popup__status version-popup__status--err">{updateState.message}</div>}
-              </div>
-            )}
-          </div>
+          {!sidebarCollapsed && (
+            <div className="app-sidebar__update-wrap">
+              <button type="button" className="btn btn--secondary btn--sm app-sidebar__update-btn" onClick={handleCheckUpdate}>
+                <MdSystemUpdate aria-hidden="true" /> تحديث
+              </button>
+              <button type="button" className="btn btn--secondary btn--sm app-sidebar__update-btn" onClick={openWhatsNew} title="ما الجديد في هذا الإصدار؟">
+                <MdNewReleases aria-hidden="true" /> ما الجديد؟
+              </button>
 
-          <button type="button" className="btn btn--secondary btn--sm app-sidebar__logout" onClick={() => void handleLogout()}>
-            <MdLogout aria-hidden="true" /> خروج
+              {showPopup && (
+                <div className="version-popup">
+                  <button type="button" className="version-popup__close" onClick={() => setShowPopup(false)} aria-label="إغلاق"><MdClose /></button>
+                  <div className="version-popup__row">
+                    <span className="version-popup__label">الإصدار الحالي</span>
+                    <span className="version-popup__value">v{currentVersion}</span>
+                  </div>
+                  <div className="version-popup__row">
+                    <span className="version-popup__label">أحدث إصدار</span>
+                    <span className="version-popup__value">
+                      {updateState.phase === 'checking' && <span className="version-popup__checking">جارٍ التحقق…</span>}
+                      {updateState.phase === 'error'    && <span className="version-popup__error">تعذّر التحقق</span>}
+                      {latestVersion && <span className={updateState.phase === 'uptodate' ? 'version-popup__same' : 'version-popup__newer'}>v{latestVersion}</span>}
+                      {updateState.phase === 'idle'     && <span className="version-popup__checking">جارٍ التحقق…</span>}
+                    </span>
+                  </div>
+                  {updateState.phase === 'uptodate' && <div className="version-popup__status version-popup__status--ok">✓ التطبيق محدّث</div>}
+                  {(updateState.phase === 'available' || updateState.phase === 'downloading' || updateState.phase === 'ready') && <div className="version-popup__status version-popup__status--new">↑ يتوفر تحديث جديد</div>}
+                  {updateState.phase === 'error' && (
+                    <div className="version-popup__status version-popup__status--err">
+                      {typeof navigator !== 'undefined' && !navigator.onLine
+                        ? '📶 لا يوجد اتصال بالإنترنت — تعذّر التحقق من التحديثات'
+                        : (updateState.message.includes('getaddrinfo')
+                            || updateState.message.includes('ENOTFOUND')
+                            || updateState.message.includes('ENETUNREACH')
+                            || updateState.message.includes('internet disconnected')
+                            ? '📶 لا يوجد اتصال بالإنترنت — تعذّر التحقق من التحديثات'
+                            : updateState.message || 'تعذّر التحقق من التحديثات'
+                          )
+                      }
+                    </div>
+                  )}
+                  {updateState.phase === 'error' && (
+                    <button
+                      type="button"
+                      className="btn btn--secondary btn--sm"
+                      style={{ marginTop: 6, width: '100%' }}
+                      onClick={handleCheckUpdate}
+                    >
+                      إعادة المحاولة
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {sidebarCollapsed && (
+            <button
+              type="button"
+              className="app-sidebar__icon-btn"
+              onClick={handleCheckUpdate}
+              title="تحديث"
+            >
+              <MdSystemUpdate />
+            </button>
+          )}
+
+          <button
+            type="button"
+            className={sidebarCollapsed ? 'app-sidebar__icon-btn' : 'btn btn--secondary btn--sm app-sidebar__logout'}
+            onClick={() => void handleLogout()}
+            title={sidebarCollapsed ? 'خروج' : undefined}
+          >
+            <MdLogout aria-hidden="true" />
+            {!sidebarCollapsed && ' خروج'}
           </button>
         </div>
       </aside>

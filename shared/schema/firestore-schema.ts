@@ -12,12 +12,16 @@ import type {
   OrderItem,
   Payment,
   DiningTable,
+  Floor,
   Recipe,
   AppSettings,
   Shift,
   CashDrawerTransaction,
   Supplier,
-  SupplierTransaction
+  SupplierTransaction,
+  ItemSize,
+  ItemAddon,
+  KitchenPrinter
 } from '../types'
 
 export type FirestoreDoc<T> = T
@@ -33,11 +37,15 @@ export interface FirestoreSchema {
   order_items: FirestoreDoc<OrderItem>
   payments: FirestoreDoc<Payment>
   dining_tables: FirestoreDoc<DiningTable>
+  floors: FirestoreDoc<Floor>
   shifts: FirestoreDoc<Shift>
   cash_drawer_transactions: FirestoreDoc<CashDrawerTransaction>
   suppliers: FirestoreDoc<Supplier>
   supplier_transactions: FirestoreDoc<SupplierTransaction>
   settings: FirestoreDoc<AppSettings>
+  item_sizes: FirestoreDoc<ItemSize>
+  item_addons: FirestoreDoc<ItemAddon>
+  kitchen_printers: FirestoreDoc<KitchenPrinter>
 }
 
 /** Default settings document id */

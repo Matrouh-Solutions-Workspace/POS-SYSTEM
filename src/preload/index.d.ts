@@ -1,6 +1,80 @@
 export interface ElectronAPI {
   // Receipt printing
-  printReceipt: (html: string) => Promise<boolean>
+  printReceipt: (html: string) => Promise<{ ok: boolean; error?: string; code?: string }>
+  listPrinters: () => Promise<Array<{
+    name: string
+    displayName: string
+    description?: string
+    isDefault?: boolean
+    status?: number
+  }>>
+  printKitchenBatch: (jobs: Array<{
+    printerId: string
+    printerName: string
+    deviceName: string
+    copies?: number
+    html: string
+  }>) => Promise<{
+    ok: boolean
+    printed: number
+    failed: Array<{ printerName: string; error: string }>
+  }>
+  getDefaultReceiptPrinter: () => Promise<{
+    deviceName: string
+    displayName: string
+    updatedAt: number
+  } | null>
+  setDefaultReceiptPrinter: (printer: {
+    deviceName: string
+    displayName?: string
+  } | null) => Promise<{
+    ok: boolean
+    printer: {
+      deviceName: string
+      displayName: string
+      updatedAt: number
+    } | null
+  }>
+  getDefaultReportPrinter: () => Promise<{
+    deviceName: string
+    displayName: string
+    updatedAt: number
+    options?: {
+      pageSize: 'A4' | 'Letter'
+      orientation: 'portrait' | 'landscape'
+      copies: number
+    }
+  } | null>
+  setDefaultReportPrinter: (printer: {
+    deviceName: string
+    displayName?: string
+    options?: {
+      pageSize: 'A4' | 'Letter'
+      orientation: 'portrait' | 'landscape'
+      copies: number
+    }
+  } | null) => Promise<{
+    ok: boolean
+    printer: {
+      deviceName: string
+      displayName: string
+      updatedAt: number
+      options?: {
+        pageSize: 'A4' | 'Letter'
+        orientation: 'portrait' | 'landscape'
+        copies: number
+      }
+    } | null
+  }>
+  testDefaultPrinter: (kind: 'receipt' | 'report') => Promise<{ ok: boolean; error?: string; code?: string }>
+  printReport: (
+    html: string,
+    options?: {
+      pageSize: 'A4' | 'Letter'
+      orientation: 'portrait' | 'landscape'
+      copies: number
+    }
+  ) => Promise<{ ok: boolean; error?: string; code?: string }>
   // Auth admin
   deleteAuthUser: (uid: string) => Promise<{ ok: boolean; error?: string }>
   resetAuthUserPassword: (uid: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>
@@ -43,6 +117,15 @@ export interface ElectronAPI {
     error?: string
   }>
   activateMasterKey: (key: string) => Promise<{ ok: boolean; error?: string }>
+  getNetworkStatus: () => Promise<unknown>
+  pairSideDevice: (params: { masterUrl: string; deviceName: string; code: string }) => Promise<{ ok: boolean; error?: string }>
+  clearSideConnection: () => Promise<{ ok: boolean }>
+  getMasterNetworkStatus: () => Promise<unknown>
+  refreshMasterServer: () => Promise<unknown>
+  resetMasterPairingCode: () => Promise<{ code: string }>
+  revokeMasterDevice: (deviceId: string) => Promise<{ ok: boolean }>
+  authLoginLocal: (username: string, passwordHash: string) => Promise<{ ok: boolean; user?: unknown; error?: string }>
+  authStoreCredential: (username: string, passwordHash: string, user: unknown) => Promise<{ ok: boolean; error?: string }>
   getLocalStoreStatus: () => Promise<{
     ok: boolean
     path: string
@@ -56,6 +139,19 @@ export interface ElectronAPI {
   getCachedDocuments: (collectionName: string) => Promise<unknown[]>
   getCachedDocument: (collectionName: string, documentId: string) => Promise<unknown | null>
   deleteCachedDocument: (collectionName: string, documentId: string) => Promise<{ ok: boolean; deleted: boolean }>
+
+  // Atomic batch — all ops in one SQLite transaction, also enqueues to outbox
+  executeBatch: (operations: Array<{ collection: string; id: string; data: unknown; op: 'set' | 'delete' }>) => Promise<{ ok: boolean; error?: string }>
+
+  // Database backup & restore — REQ-8
+  backupDatabase: () => Promise<{ ok: boolean; error?: string }>
+  chooseBackupDirectory: () => Promise<{ ok: boolean; path?: string; error?: string }>
+  backupDatabaseToDirectory: (directory: string) => Promise<{ ok: boolean; path?: string; error?: string }>
+  restoreDatabase: () => Promise<{ ok: boolean; error?: string }>
+  exportReportPdf: (html: string, suggestedName: string) => Promise<{ ok: boolean; path?: string; error?: string }>
+
+  // Materialized stock reads — REQ-11
+  getIngredientStocks: () => Promise<Array<{ ingredient_id: string; quantity: number }>>
 
   // Sync outbox
   outboxGetPending: () => Promise<unknown[]>

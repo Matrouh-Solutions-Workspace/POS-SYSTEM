@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { RESTAURANT_NAME_AR } from '@shared/constants/branding'
 import { PasswordInput } from '@renderer/components/PasswordInput'
@@ -23,6 +23,18 @@ export function LoginPage(): React.ReactElement {
   const [localSetupMode, setLocalSetupMode] = useState(
     () => !hasOfflineAuthUsers() && !navigator.onLine
   )
+  const [isSideDevice, setIsSideDevice] = useState(false)
+
+  useEffect(() => {
+    let disposed = false
+    void window.electronAPI.getNetworkStatus().then((status) => {
+      const side = (status as { mode?: string } | null)?.mode === 'side'
+      if (disposed) return
+      setIsSideDevice(side)
+      if (side) setLocalSetupMode(false)
+    }).catch(() => {})
+    return () => { disposed = true }
+  }, [])
 
   if (user) {
     return <Navigate to={homeFor(user)} replace />
@@ -33,7 +45,7 @@ export function LoginPage(): React.ReactElement {
     setError('')
     setLoading(true)
     try {
-      const appUser = localSetupMode
+      const appUser = localSetupMode && !isSideDevice
         ? await createFirstOfflineManager({
             username: username.trim(),
             password,
@@ -55,7 +67,7 @@ export function LoginPage(): React.ReactElement {
       <div className="login-card">
         <div className="login-card__bar" />
         <h1 className="login-card__title">{RESTAURANT_NAME_AR}</h1>
-        {localSetupMode && (
+        {localSetupMode && !isSideDevice && (
           <p className="muted">إنشاء أول حساب مدير محلي للعمل بدون إنترنت من أول تشغيل.</p>
         )}
         <form onSubmit={(e) => void handleSubmit(e)} className="login-form">
@@ -79,11 +91,11 @@ export function LoginPage(): React.ReactElement {
           <button type="submit" className="btn btn--primary btn--lg" disabled={loading}>
             {loading
               ? 'جاري التنفيذ...'
-              : localSetupMode
+              : localSetupMode && !isSideDevice
                 ? 'إنشاء المدير المحلي'
                 : 'تسجيل الدخول'}
           </button>
-          {!localSetupMode && !hasOfflineAuthUsers() && (
+          {!isSideDevice && !localSetupMode && !hasOfflineAuthUsers() && (
             <button
               type="button"
               className="btn btn--ghost btn--lg"
@@ -95,7 +107,7 @@ export function LoginPage(): React.ReactElement {
               إنشاء أول مدير محلي
             </button>
           )}
-          {localSetupMode && hasOfflineAuthUsers() && (
+          {!isSideDevice && localSetupMode && hasOfflineAuthUsers() && (
             <button
               type="button"
               className="btn btn--ghost btn--lg"

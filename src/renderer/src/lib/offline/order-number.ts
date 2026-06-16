@@ -1,5 +1,8 @@
+/**
+ * REQ-13: Removed unused global order counter (LAST_ORDER_KEY / nextLocalOrderReference).
+ * Only per-shift sequential order references are used.
+ */
 const TERMINAL_KEY = 'abdokofta.terminalId'
-const LAST_ORDER_KEY = 'abdokofta.lastLocalOrderNumber'
 const SHIFT_ORDER_PREFIX = 'abdokofta.shiftOrderNumber.'
 
 function randomTerminalId(): string {
@@ -11,26 +14,9 @@ function randomTerminalId(): string {
 export function getTerminalId(): string {
   const existing = localStorage.getItem(TERMINAL_KEY)
   if (existing) return existing
-
   const terminalId = randomTerminalId()
   localStorage.setItem(TERMINAL_KEY, terminalId)
   return terminalId
-}
-
-export function nextLocalOrderReference(prefix?: string): {
-  orderNumber: number
-  orderCode: string
-} {
-  const last = Number(localStorage.getItem(LAST_ORDER_KEY) ?? '0')
-  const base = Date.now() * 100
-  const orderNumber = Math.max(base, last + 1)
-  localStorage.setItem(LAST_ORDER_KEY, String(orderNumber))
-
-  const terminalId = (prefix?.trim() || getTerminalId()).toUpperCase()
-  return {
-    orderNumber,
-    orderCode: `${terminalId}-${orderNumber}`
-  }
 }
 
 export function orderCodeForSequence(prefix: string | undefined, orderNumber: number): string {

@@ -84,7 +84,7 @@ async function main(): Promise<void> {
   await db.collection(COLLECTIONS.settings).doc(SETTINGS_DOC_ID).set(
     {
       id: SETTINGS_DOC_ID,
-      restaurantNameAr: 'عبده كفتة',
+      restaurantNameAr: 'SHIFT',
       currencySymbol: 'ج.م',
       phoneNumber: '01000000000',
       receiptFooterAr: 'شكراً لزيارتكم — نتمنى لكم وجبة شهية',

@@ -1,8 +1,24 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  printReceipt: (html: string): Promise<boolean> =>
+  printReceipt: (html: string): Promise<{ ok: boolean; error?: string; code?: string }> =>
     ipcRenderer.invoke('print:receipt', html),
+  listPrinters: (): Promise<Array<{ name: string; displayName: string; description?: string; isDefault?: boolean; status?: number }>> =>
+    ipcRenderer.invoke('print:list-printers'),
+  printKitchenBatch: (jobs: Array<{ printerId: string; printerName: string; deviceName: string; copies?: number; html: string }>): Promise<{ ok: boolean; printed: number; failed: Array<{ printerName: string; error: string }> }> =>
+    ipcRenderer.invoke('print:kitchen-batch', jobs),
+  getDefaultReceiptPrinter: (): Promise<{ deviceName: string; displayName: string; updatedAt: number } | null> =>
+    ipcRenderer.invoke('print:get-default-receipt-printer'),
+  setDefaultReceiptPrinter: (printer: { deviceName: string; displayName?: string } | null): Promise<{ ok: boolean; printer: { deviceName: string; displayName: string; updatedAt: number } | null }> =>
+    ipcRenderer.invoke('print:set-default-receipt-printer', printer),
+  getDefaultReportPrinter: (): Promise<{ deviceName: string; displayName: string; updatedAt: number; options?: { pageSize: 'A4' | 'Letter'; orientation: 'portrait' | 'landscape'; copies: number } } | null> =>
+    ipcRenderer.invoke('print:get-default-report-printer'),
+  setDefaultReportPrinter: (printer: { deviceName: string; displayName?: string; options?: { pageSize: 'A4' | 'Letter'; orientation: 'portrait' | 'landscape'; copies: number } } | null): Promise<{ ok: boolean; printer: { deviceName: string; displayName: string; updatedAt: number; options?: { pageSize: 'A4' | 'Letter'; orientation: 'portrait' | 'landscape'; copies: number } } | null }> =>
+    ipcRenderer.invoke('print:set-default-report-printer', printer),
+  testDefaultPrinter: (kind: 'receipt' | 'report'): Promise<{ ok: boolean; error?: string; code?: string }> =>
+    ipcRenderer.invoke('print:test-default-printer', kind),
+  printReport: (html: string, options?: { pageSize: 'A4' | 'Letter'; orientation: 'portrait' | 'landscape'; copies: number }): Promise<{ ok: boolean; error?: string; code?: string }> =>
+    ipcRenderer.invoke('print:report', html, options),
   deleteAuthUser: (uid: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('auth:delete-user', uid),
   resetAuthUserPassword: (uid: string, newPassword: string): Promise<{ ok: boolean; error?: string }> =>
@@ -32,6 +48,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('license:import-license'),
   activateMasterKey: (key: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('license:activate-master-key', key),
+  getNetworkStatus: (): Promise<unknown> =>
+    ipcRenderer.invoke('network:get-status'),
+  pairSideDevice: (params: { masterUrl: string; deviceName: string; code: string }): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('network:pair-side', params),
+  clearSideConnection: (): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('network:clear-side'),
+  getMasterNetworkStatus: (): Promise<unknown> =>
+    ipcRenderer.invoke('network:master-status'),
+  refreshMasterServer: (): Promise<unknown> =>
+    ipcRenderer.invoke('network:master-refresh'),
+  resetMasterPairingCode: (): Promise<{ code: string }> =>
+    ipcRenderer.invoke('network:master-reset-pairing-code'),
+  revokeMasterDevice: (deviceId: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('network:master-revoke-device', deviceId),
+  authLoginLocal: (username: string, passwordHash: string): Promise<{ ok: boolean; user?: unknown; error?: string }> =>
+    ipcRenderer.invoke('auth:login-local', username, passwordHash),
+  authStoreCredential: (username: string, passwordHash: string, user: unknown): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('auth:store-credential', username, passwordHash, user),
   getLocalStoreStatus: (): Promise<{ ok: boolean; path: string; pendingOutbox: number; error?: string }> =>
     ipcRenderer.invoke('local-store:get-status'),
   cacheDocuments: (
@@ -45,6 +79,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('local-cache:get-document', collectionName, documentId),
   deleteCachedDocument: (collectionName: string, documentId: string): Promise<{ ok: boolean; deleted: boolean }> =>
     ipcRenderer.invoke('local-cache:delete-document', collectionName, documentId),
+
+  // Atomic batch — all ops execute in one SQLite transaction
+  executeBatch: (operations: Array<{ collection: string; id: string; data: unknown; op: 'set' | 'delete' }>): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('local-cache:execute-batch', operations),
+
+  // Database backup & restore — REQ-8
+  backupDatabase: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('local-store:backup'),
+  chooseBackupDirectory: (): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('local-store:choose-backup-directory'),
+  backupDatabaseToDirectory: (directory: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('local-store:backup-directory-now', directory),
+  restoreDatabase: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('local-store:restore'),
+  exportReportPdf: (html: string, suggestedName: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('print:pdf-report', html, suggestedName),
+
+  // Materialized stock reads — REQ-11
+  getIngredientStocks: (): Promise<Array<{ ingredient_id: string; quantity: number }>> =>
+    ipcRenderer.invoke('local-store:get-stocks'),
 
   // Sync outbox
   outboxGetPending: (): Promise<unknown[]> =>
