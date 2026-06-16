@@ -397,6 +397,10 @@ function ReceiptDesigner({
       {message && <p className={`form-message ${message.includes('فشل') ? 'form-message--error' : 'form-message--ok'}`}>{message}</p>}
       <div className="receipt-designer__workspace">
         <div className="receipt-designer__controls">
+          <div className="receipt-designer__preview">
+            <iframe title="POS receipt preview" srcDoc={previewHtml} />
+          </div>
+
           <div className="receipt-designer-panel">
             <h3 className="card__title"><MdDragIndicator /> ترتيب ومحتوى الإيصال</h3>
             <div className="receipt-section-list">
@@ -546,10 +550,6 @@ function ReceiptDesigner({
               <MdSave /> {saving ? 'جار الحفظ...' : 'حفظ تصميم الإيصال'}
             </button>
           </div>
-        </div>
-
-        <div className="receipt-designer__preview">
-          <iframe title="POS receipt preview" srcDoc={previewHtml} />
         </div>
       </div>
     </div>
