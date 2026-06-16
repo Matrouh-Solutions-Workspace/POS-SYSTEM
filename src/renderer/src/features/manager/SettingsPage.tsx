@@ -54,6 +54,7 @@ const LOCK_OPTIONS = [
 function ShortcutsTab(): React.ReactElement {
   const storeChords = useKeyboardStore((s) => s.chords)
   const setChord    = useKeyboardStore((s) => s.setChord)
+  const setCapturingShortcut = useKeyboardStore((s) => s.setCapturingShortcut)
 
   // Local draft so the user can edit without immediately affecting behaviour
   const [draft, setDraft] = useState<Record<string, string>>(() => ({ ...storeChords }))
@@ -69,10 +70,12 @@ function ShortcutsTab(): React.ReactElement {
 
   // Capture a keydown while in recording mode
   useEffect(() => {
-    if (!recording) return
+    setCapturingShortcut(Boolean(recording))
+    if (!recording) return () => setCapturingShortcut(false)
     function capture(e: KeyboardEvent): void {
       e.preventDefault()
       e.stopPropagation()
+      e.stopImmediatePropagation()
       // Escape cancels recording without changing the chord
       if (e.key === 'Escape') { setRecording(null); return }
       const chord = eventToChord(e)
@@ -82,8 +85,11 @@ function ShortcutsTab(): React.ReactElement {
       setRecording(null)
     }
     window.addEventListener('keydown', capture, { capture: true })
-    return () => window.removeEventListener('keydown', capture, { capture: true })
-  }, [recording])
+    return () => {
+      window.removeEventListener('keydown', capture, { capture: true })
+      setCapturingShortcut(false)
+    }
+  }, [recording, setCapturingShortcut])
 
   // Detect conflicts in draft
   function conflictFor(actionId: string): string | null {

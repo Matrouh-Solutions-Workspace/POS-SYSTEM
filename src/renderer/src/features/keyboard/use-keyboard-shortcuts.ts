@@ -16,6 +16,8 @@ export function useGlobalKeyboardShortcuts(): void {
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent): void {
+      if (useKeyboardStore.getState().isCapturingShortcut) return
+
       const target = e.target as HTMLElement | null
       // Don't intercept typing in form fields
       if (target) {

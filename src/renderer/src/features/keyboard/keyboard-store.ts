@@ -119,6 +119,7 @@ interface KeyboardState {
   chords: Record<string, string>
   /** Runtime handler registry: action id → handler function */
   handlers: Map<string, Handler>
+  isCapturingShortcut: boolean
 
   /** Load chords from persisted settings */
   loadChords: (saved: Record<string, string> | undefined) => void
@@ -128,6 +129,7 @@ interface KeyboardState {
 
   /** Register a runtime handler for an action */
   registerHandler: (actionId: string, handler: Handler) => () => void
+  setCapturingShortcut: (capturing: boolean) => void
 
   /** Dispatch: find action matching chord, call its handler */
   dispatch: (chord: string) => boolean
@@ -136,6 +138,7 @@ interface KeyboardState {
 export const useKeyboardStore = create<KeyboardState>((set, get) => ({
   chords: resolveChords({}),
   handlers: new Map(),
+  isCapturingShortcut: false,
 
   loadChords(saved) {
     set({ chords: resolveChords(saved) })
@@ -153,7 +156,12 @@ export const useKeyboardStore = create<KeyboardState>((set, get) => ({
     }
   },
 
+  setCapturingShortcut(capturing) {
+    set({ isCapturingShortcut: capturing })
+  },
+
   dispatch(chord) {
+    if (get().isCapturingShortcut) return false
     if (!chord) return false
     const { chords, handlers } = get()
     for (const [actionId, bound] of Object.entries(chords)) {

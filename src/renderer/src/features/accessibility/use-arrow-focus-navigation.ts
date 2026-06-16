@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useKeyboardStore } from '@renderer/features/keyboard/keyboard-store'
 
 const FOCUSABLE_SELECTOR = [
   'button:not(:disabled)',
@@ -32,6 +33,7 @@ const SCOPE_SELECTOR = [
 export function useArrowFocusNavigation(): void {
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
+      if (useKeyboardStore.getState().isCapturingShortcut) return
       if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return
       if (event.altKey || event.ctrlKey || event.metaKey) return
 
