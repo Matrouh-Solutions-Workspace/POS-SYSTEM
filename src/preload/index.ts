@@ -7,6 +7,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('print:list-printers'),
   printKitchenBatch: (jobs: Array<{ printerId: string; printerName: string; deviceName: string; copies?: number; html: string }>): Promise<{ ok: boolean; printed: number; failed: Array<{ printerName: string; error: string }> }> =>
     ipcRenderer.invoke('print:kitchen-batch', jobs),
+  getDefaultReceiptPrinter: (): Promise<{ deviceName: string; displayName: string; updatedAt: number } | null> =>
+    ipcRenderer.invoke('print:get-default-receipt-printer'),
+  setDefaultReceiptPrinter: (printer: { deviceName: string; displayName?: string } | null): Promise<{ ok: boolean; printer: { deviceName: string; displayName: string; updatedAt: number } | null }> =>
+    ipcRenderer.invoke('print:set-default-receipt-printer', printer),
   deleteAuthUser: (uid: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('auth:delete-user', uid),
   resetAuthUserPassword: (uid: string, newPassword: string): Promise<{ ok: boolean; error?: string }> =>

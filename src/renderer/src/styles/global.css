@@ -3783,6 +3783,118 @@ select.inline-edit-input {
 
 /* ── Accounts page ───────────────────────────────────────────────────────── */
 
+.receipt-designer {
+  border-top: 2px solid var(--color-border);
+  padding-top: 18px;
+}
+
+.receipt-designer__workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.receipt-designer__controls {
+  display: grid;
+  gap: 14px;
+}
+
+.receipt-designer-panel {
+  border: 2px solid var(--color-border);
+  background: var(--color-surface);
+  padding: 14px;
+}
+
+.receipt-section-list,
+.receipt-preview-items {
+  display: grid;
+  gap: 8px;
+}
+
+.receipt-section-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  padding: 6px 8px;
+  cursor: grab;
+}
+
+.receipt-section-row--hidden {
+  opacity: 0.58;
+}
+
+.receipt-section-row__label {
+  min-width: 0;
+}
+
+.receipt-preview-item {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 74px 86px minmax(100px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.receipt-preview-item input {
+  min-width: 0;
+}
+
+.receipt-designer__preview {
+  position: sticky;
+  top: 12px;
+  border: 2px solid var(--color-border);
+  background: #f3f4f6;
+  padding: 12px;
+}
+
+.receipt-designer__preview iframe {
+  display: block;
+  width: 100%;
+  min-height: 680px;
+  border: 1px solid var(--color-border);
+  background: #fff;
+}
+
+.receipt-ascii-preview {
+  max-height: 180px;
+  overflow: auto;
+  direction: ltr;
+  text-align: left;
+  font-family: "Courier New", monospace;
+  font-size: 7px;
+  line-height: 0.95;
+  color: #111827;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  padding: 8px;
+  margin: 10px 0 0;
+  white-space: pre;
+}
+
+@media (max-width: 1000px) {
+  .receipt-designer__workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .receipt-designer__preview {
+    position: static;
+  }
+}
+
+@media (max-width: 760px) {
+  .receipt-preview-item {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .receipt-preview-item .btn {
+    grid-column: 1 / -1;
+  }
+}
+
 .accounts-form-card {
   margin-bottom: 16px;
   border-color: var(--color-primary);

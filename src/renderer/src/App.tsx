@@ -15,6 +15,7 @@ import { applyThemeColor } from '@renderer/features/theme/theme-store'
 import { getSettings } from '@renderer/features/orders/order-service'
 import { CASHIER_NAV, MANAGER_NAV, SUPERVISOR_NAV } from '@renderer/config/navigation'
 import { ErrorBoundary } from '@renderer/components/ErrorBoundary'
+import { useArrowFocusNavigation } from '@renderer/features/accessibility/use-arrow-focus-navigation'
 
 const LoginPage = lazy(() =>
   import('@renderer/features/auth/LoginPage').then((m) => ({ default: m.LoginPage }))
@@ -132,6 +133,7 @@ export default function App(): React.ReactElement {
   useUpdaterBootstrap()
   useWhatsNewBootstrap()
   usePinBootstrap()
+  useArrowFocusNavigation()
 
   useEffect(() => {
     void getSettings().then((s) => {

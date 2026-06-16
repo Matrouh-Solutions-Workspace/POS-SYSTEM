@@ -19,6 +19,22 @@ export interface ElectronAPI {
     printed: number
     failed: Array<{ printerName: string; error: string }>
   }>
+  getDefaultReceiptPrinter: () => Promise<{
+    deviceName: string
+    displayName: string
+    updatedAt: number
+  } | null>
+  setDefaultReceiptPrinter: (printer: {
+    deviceName: string
+    displayName?: string
+  } | null) => Promise<{
+    ok: boolean
+    printer: {
+      deviceName: string
+      displayName: string
+      updatedAt: number
+    } | null
+  }>
   // Auth admin
   deleteAuthUser: (uid: string) => Promise<{ ok: boolean; error?: string }>
   resetAuthUserPassword: (uid: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>

@@ -54,6 +54,15 @@ export async function getSettings(): Promise<AppSettings> {
     masterServerPort: 47831,
     sideDisconnectPolicy: 'block_actions',
     receiptPrintRoute: 'side',
+    receiptSectionOrder: ['logo', 'restaurant', 'orderMeta', 'customer', 'items', 'totals', 'payment', 'footer'],
+    receiptHiddenSections: [],
+    receiptShowItemNotes: true,
+    receiptCompactMode: false,
+    receiptLogoEnabled: false,
+    receiptLogoMode: 'image',
+    receiptLogoThreshold: 150,
+    receiptLogoWidth: 42,
+    receiptLogoInvert: false,
     autoBackupEnabled: false,
     autoBackupIntervalDays: 1,
     autoBackupOnClose: false,
@@ -83,6 +92,17 @@ export async function updateSettings(
       | 'masterServerPort'
       | 'sideDisconnectPolicy'
       | 'receiptPrintRoute'
+      | 'receiptSectionOrder'
+      | 'receiptHiddenSections'
+      | 'receiptShowItemNotes'
+      | 'receiptCompactMode'
+      | 'receiptLogoEnabled'
+      | 'receiptLogoDataUrl'
+      | 'receiptLogoAscii'
+      | 'receiptLogoMode'
+      | 'receiptLogoThreshold'
+      | 'receiptLogoWidth'
+      | 'receiptLogoInvert'
       | 'backupDirectory'
       | 'backupDirectories'
       | 'autoBackupEnabled'

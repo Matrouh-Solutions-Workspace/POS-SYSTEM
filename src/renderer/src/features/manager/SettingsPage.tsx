@@ -1,10 +1,10 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import type { AppSettings, KitchenPrinter, KitchenPrinterVisibility, SystemPrinter } from '@shared/types'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import type { AppSettings, KitchenPrinter, KitchenPrinterVisibility, Order, OrderItem, ReceiptSectionId, SystemPrinter } from '@shared/types'
 import { getSettings, updateSettings } from '@renderer/features/orders/order-service'
 import { applyThemeColor, DEFAULT_PRIMARY } from '@renderer/features/theme/theme-store'
 import { listUsersByRole, updateUserProfile } from '@renderer/features/auth/auth-service'
 import { hashPin } from '@renderer/features/auth/pin-store'
-import { MdSave, MdPalette, MdLock, MdPerson, MdBackup, MdRestorePage, MdKeyboard, MdDevices, MdFolderOpen, MdPrint, MdRefresh, MdDelete, MdVisibility } from 'react-icons/md'
+import { MdAdd, MdArrowDownward, MdArrowUpward, MdBackup, MdDelete, MdDevices, MdDragIndicator, MdFolderOpen, MdImage, MdKeyboard, MdLock, MdPalette, MdPerson, MdPrint, MdRefresh, MdRestorePage, MdSave, MdVisibility } from 'react-icons/md'
 import type { AppUser } from '@shared/types'
 import {
   createKitchenPrinter,
@@ -15,6 +15,11 @@ import {
   updateKitchenPrinter
 } from '@renderer/features/printers/printer-service'
 import { buildKitchenTicketHtml } from '@renderer/features/printers/kitchen-printing'
+import {
+  buildReceiptHtml,
+  normalizeReceiptSections,
+  receiptSectionLabel
+} from '@renderer/features/receipt/receipt-builder'
 import {
   SHORTCUT_ACTIONS,
   chordToDisplay,
@@ -213,6 +218,373 @@ function ShortcutsTab(): React.ReactElement {
   )
 }
 
+type ReceiptPreviewItem = {
+  id: string
+  nameAr: string
+  quantity: number
+  unitPrice: number
+  noteAr?: string
+}
+
+function ReceiptDesigner({
+  settings,
+  onSettingsSaved
+}: {
+  settings: AppSettings
+  onSettingsSaved: (settings: AppSettings) => void
+}): React.ReactElement {
+  const [sectionOrder, setSectionOrder] = useState<ReceiptSectionId[]>(() => normalizeReceiptSections(settings.receiptSectionOrder))
+  const [hiddenSections, setHiddenSections] = useState<ReceiptSectionId[]>(settings.receiptHiddenSections ?? [])
+  const [showItemNotes, setShowItemNotes] = useState(settings.receiptShowItemNotes !== false)
+  const [compactMode, setCompactMode] = useState(Boolean(settings.receiptCompactMode))
+  const [logoEnabled, setLogoEnabled] = useState(Boolean(settings.receiptLogoEnabled))
+  const [logoDataUrl, setLogoDataUrl] = useState(settings.receiptLogoDataUrl ?? '')
+  const [logoAscii, setLogoAscii] = useState(settings.receiptLogoAscii ?? '')
+  const [logoMode, setLogoMode] = useState<AppSettings['receiptLogoMode']>(settings.receiptLogoMode ?? 'image')
+  const [logoThreshold, setLogoThreshold] = useState(settings.receiptLogoThreshold ?? 150)
+  const [logoWidth, setLogoWidth] = useState(settings.receiptLogoWidth ?? 42)
+  const [logoInvert, setLogoInvert] = useState(Boolean(settings.receiptLogoInvert))
+  const [draggingSection, setDraggingSection] = useState<ReceiptSectionId | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [previewItems, setPreviewItems] = useState<ReceiptPreviewItem[]>([
+    { id: 'preview-1', nameAr: 'وجبة كفتة', quantity: 2, unitPrice: 95, noteAr: 'زيادة صوص' },
+    { id: 'preview-2', nameAr: 'بطاطس', quantity: 1, unitPrice: 25 },
+    { id: 'preview-3', nameAr: 'مشروب', quantity: 2, unitPrice: 18 }
+  ])
+
+  const previewSettings = useMemo<AppSettings>(() => ({
+    ...settings,
+    receiptSectionOrder: sectionOrder,
+    receiptHiddenSections: hiddenSections,
+    receiptShowItemNotes: showItemNotes,
+    receiptCompactMode: compactMode,
+    receiptLogoEnabled: logoEnabled,
+    receiptLogoDataUrl: logoDataUrl || undefined,
+    receiptLogoAscii: logoAscii || undefined,
+    receiptLogoMode: logoMode,
+    receiptLogoThreshold: logoThreshold,
+    receiptLogoWidth: logoWidth,
+    receiptLogoInvert: logoInvert
+  }), [compactMode, hiddenSections, logoAscii, logoDataUrl, logoEnabled, logoInvert, logoMode, logoThreshold, logoWidth, sectionOrder, settings, showItemNotes])
+
+  const previewHtml = useMemo(() => {
+    const subtotal = previewItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
+    const taxAmount = Math.round(subtotal * 0.14 * 100) / 100
+    const order: Order = {
+      id: 'receipt-preview',
+      orderNumber: 128,
+      orderCode: 'A-128',
+      status: 'completed',
+      orderType: 'dine_in',
+      paymentStatus: 'paid',
+      tableNameAr: 'ترابيزة 5',
+      tableCategoryAr: 'الصالة',
+      cashierId: 'preview',
+      cashierName: 'كاشير تجريبي',
+      subtotal,
+      taxRate: 14,
+      taxAmount,
+      total: subtotal + taxAmount,
+      noteAr: 'ملاحظة تظهر في المعاينة',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      completedAt: Date.now()
+    }
+    const items: OrderItem[] = previewItems.map((item) => ({
+      id: item.id,
+      orderId: order.id,
+      menuItemId: item.id,
+      nameAr: item.nameAr,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      lineTotal: item.quantity * item.unitPrice,
+      noteAr: item.noteAr
+    }))
+    return buildReceiptHtml(order, items, previewSettings)
+  }, [previewItems, previewSettings])
+
+  function moveSection(section: ReceiptSectionId, direction: -1 | 1): void {
+    setSectionOrder((current) => {
+      const index = current.indexOf(section)
+      const nextIndex = index + direction
+      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current
+      const next = [...current]
+      const [removed] = next.splice(index, 1)
+      next.splice(nextIndex, 0, removed!)
+      return next
+    })
+  }
+
+  function dropSection(target: ReceiptSectionId): void {
+    if (!draggingSection || draggingSection === target) return
+    setSectionOrder((current) => {
+      const without = current.filter((id) => id !== draggingSection)
+      const targetIndex = without.indexOf(target)
+      without.splice(targetIndex, 0, draggingSection)
+      return without
+    })
+    setDraggingSection(null)
+  }
+
+  async function handleLogoFile(file: File | undefined): Promise<void> {
+    if (!file) return
+    const dataUrl = await readFileAsDataUrl(file)
+    setLogoDataUrl(dataUrl)
+    setLogoEnabled(true)
+    setLogoAscii(await imageToAscii(dataUrl, logoWidth, logoThreshold, logoInvert))
+  }
+
+  async function regenerateAscii(next?: { width?: number; threshold?: number; invert?: boolean }): Promise<void> {
+    if (!logoDataUrl) return
+    setLogoAscii(await imageToAscii(
+      logoDataUrl,
+      next?.width ?? logoWidth,
+      next?.threshold ?? logoThreshold,
+      next?.invert ?? logoInvert
+    ))
+  }
+
+  function updatePreviewItem(id: string, patch: Partial<ReceiptPreviewItem>): void {
+    setPreviewItems((items) => items.map((item) => (
+      item.id === id ? { ...item, ...patch } : item
+    )))
+  }
+
+  async function saveDesigner(): Promise<void> {
+    setSaving(true)
+    setMessage(null)
+    const patch: Partial<AppSettings> = {
+      receiptSectionOrder: sectionOrder,
+      receiptHiddenSections: hiddenSections,
+      receiptShowItemNotes: showItemNotes,
+      receiptCompactMode: compactMode,
+      receiptLogoEnabled: logoEnabled,
+      receiptLogoDataUrl: logoDataUrl || undefined,
+      receiptLogoAscii: logoAscii || undefined,
+      receiptLogoMode: logoMode,
+      receiptLogoThreshold: logoThreshold,
+      receiptLogoWidth: logoWidth,
+      receiptLogoInvert: logoInvert
+    }
+    try {
+      await updateSettings(patch)
+      onSettingsSaved({ ...settings, ...patch, updatedAt: Date.now() })
+      setMessage('تم حفظ تصميم الإيصال')
+    } catch {
+      setMessage('فشل حفظ تصميم الإيصال')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="receipt-designer">
+      {message && <p className={`form-message ${message.includes('فشل') ? 'form-message--error' : 'form-message--ok'}`}>{message}</p>}
+      <div className="receipt-designer__workspace">
+        <div className="receipt-designer__controls">
+          <div className="receipt-designer-panel">
+            <h3 className="card__title"><MdDragIndicator /> ترتيب ومحتوى الإيصال</h3>
+            <div className="receipt-section-list">
+              {sectionOrder.map((section, index) => {
+                const hidden = hiddenSections.includes(section)
+                return (
+                  <div
+                    key={section}
+                    className={`receipt-section-row${hidden ? ' receipt-section-row--hidden' : ''}`}
+                    draggable
+                    onDragStart={() => setDraggingSection(section)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => dropSection(section)}
+                  >
+                    <MdDragIndicator aria-hidden="true" />
+                    <label className="field--checkbox receipt-section-row__label">
+                      <input
+                        type="checkbox"
+                        checked={!hidden}
+                        onChange={(e) => setHiddenSections((current) => (
+                          e.target.checked
+                            ? current.filter((id) => id !== section)
+                            : [...new Set([...current, section])]
+                        ))}
+                      />
+                      <span>{receiptSectionLabel(section)}</span>
+                    </label>
+                    <div className="table-actions">
+                      <button type="button" className="btn btn--secondary btn--sm" disabled={index === 0} onClick={() => moveSection(section, -1)} aria-label="Move up">
+                        <MdArrowUpward />
+                      </button>
+                      <button type="button" className="btn btn--secondary btn--sm" disabled={index === sectionOrder.length - 1} onClick={() => moveSection(section, 1)} aria-label="Move down">
+                        <MdArrowDownward />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="settings-form-grid" style={{ marginTop: 12 }}>
+              <label className="field--checkbox">
+                <input type="checkbox" checked={showItemNotes} onChange={(e) => setShowItemNotes(e.target.checked)} />
+                <span>إظهار ملاحظات الأصناف</span>
+              </label>
+              <label className="field--checkbox">
+                <input type="checkbox" checked={compactMode} onChange={(e) => setCompactMode(e.target.checked)} />
+                <span>نسخة مضغوطة للورق الحراري</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="receipt-designer-panel">
+            <h3 className="card__title"><MdImage /> شعار المطعم ومعالجة الصورة</h3>
+            <div className="settings-form-grid">
+              <label className="field--checkbox">
+                <input type="checkbox" checked={logoEnabled} onChange={(e) => setLogoEnabled(e.target.checked)} />
+                <span>استخدام الشعار في الإيصال</span>
+              </label>
+              <label className="field">
+                <span>رفع الشعار</span>
+                <input type="file" accept="image/*" onChange={(e) => void handleLogoFile(e.target.files?.[0])} />
+              </label>
+              <label className="field">
+                <span>طريقة العرض</span>
+                <select value={logoMode} onChange={(e) => setLogoMode(e.target.value as AppSettings['receiptLogoMode'])}>
+                  <option value="image">صورة عادية</option>
+                  <option value="mono">أبيض وأسود ESC/POS</option>
+                  <option value="ascii">ASCII Art للطابعات الضعيفة</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>عرض المعالجة</span>
+                <input
+                  type="range"
+                  min="24"
+                  max="72"
+                  value={logoWidth}
+                  onChange={(e) => {
+                    const width = Number(e.target.value)
+                    setLogoWidth(width)
+                    void regenerateAscii({ width })
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span>حد الأبيض والأسود</span>
+                <input
+                  type="range"
+                  min="40"
+                  max="230"
+                  value={logoThreshold}
+                  onChange={(e) => {
+                    const threshold = Number(e.target.value)
+                    setLogoThreshold(threshold)
+                    void regenerateAscii({ threshold })
+                  }}
+                />
+              </label>
+              <label className="field--checkbox">
+                <input
+                  type="checkbox"
+                  checked={logoInvert}
+                  onChange={(e) => {
+                    setLogoInvert(e.target.checked)
+                    void regenerateAscii({ invert: e.target.checked })
+                  }}
+                />
+                <span>عكس الأبيض والأسود</span>
+              </label>
+            </div>
+            {logoAscii && (
+              <pre className="receipt-ascii-preview" dir="ltr">{logoAscii}</pre>
+            )}
+          </div>
+
+          <div className="receipt-designer-panel">
+            <h3 className="card__title"><MdAdd /> أصناف تجريبية للمعاينة</h3>
+            <div className="receipt-preview-items">
+              {previewItems.map((item) => (
+                <div key={item.id} className="receipt-preview-item">
+                  <input value={item.nameAr} onChange={(e) => updatePreviewItem(item.id, { nameAr: e.target.value })} />
+                  <input type="number" min="0.001" step="0.5" value={item.quantity} onChange={(e) => updatePreviewItem(item.id, { quantity: Number(e.target.value) || 1 })} />
+                  <input type="number" min="0" step="1" value={item.unitPrice} onChange={(e) => updatePreviewItem(item.id, { unitPrice: Number(e.target.value) || 0 })} />
+                  <input value={item.noteAr ?? ''} onChange={(e) => updatePreviewItem(item.id, { noteAr: e.target.value })} placeholder="ملاحظة" />
+                  <button type="button" className="btn btn--danger btn--sm" onClick={() => setPreviewItems((items) => items.filter((x) => x.id !== item.id))}>
+                    <MdDelete />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => setPreviewItems((items) => [...items, { id: `preview-${Date.now()}`, nameAr: 'صنف جديد', quantity: 1, unitPrice: 0 }])}
+              >
+                <MdAdd /> إضافة صنف للمعاينة
+              </button>
+            </div>
+          </div>
+
+          <div className="form-actions">
+            <button type="button" className="btn btn--primary" onClick={() => void saveDesigner()} disabled={saving}>
+              <MdSave /> {saving ? 'جار الحفظ...' : 'حفظ تصميم الإيصال'}
+            </button>
+          </div>
+        </div>
+
+        <div className="receipt-designer__preview">
+          <iframe title="POS receipt preview" srcDoc={previewHtml} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read image'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function imageToAscii(dataUrl: string, width: number, threshold: number, invert: boolean): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => {
+      const safeWidth = Math.max(24, Math.min(72, width))
+      const ratio = image.height / Math.max(1, image.width)
+      const height = Math.max(6, Math.round(safeWidth * ratio * 0.45))
+      const canvas = document.createElement('canvas')
+      canvas.width = safeWidth
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { resolve(''); return }
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(0, 0, safeWidth, height)
+      ctx.drawImage(image, 0, 0, safeWidth, height)
+      const pixels = ctx.getImageData(0, 0, safeWidth, height).data
+      const chars = invert ? ' .:-=+*#%@' : '@%#*+=-:. '
+      const lines: string[] = []
+      for (let y = 0; y < height; y += 1) {
+        let line = ''
+        for (let x = 0; x < safeWidth; x += 1) {
+          const offset = (y * safeWidth + x) * 4
+          const alpha = pixels[offset + 3] / 255
+          const luminance = (pixels[offset] * 0.299 + pixels[offset + 1] * 0.587 + pixels[offset + 2] * 0.114) * alpha + 255 * (1 - alpha)
+          const adjusted = luminance < threshold ? luminance * 0.7 : luminance
+          const index = Math.max(0, Math.min(chars.length - 1, Math.round((adjusted / 255) * (chars.length - 1))))
+          line += chars[index]
+        }
+        lines.push(line.replace(/\s+$/g, ''))
+      }
+      resolve(lines.join('\n'))
+    }
+    image.onerror = () => reject(new Error('Failed to process image'))
+    image.src = dataUrl
+  })
+}
+
 function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElement {
   const [systemPrinters, setSystemPrinters] = useState<SystemPrinter[]>([])
   const [kitchenPrinters, setKitchenPrinters] = useState<KitchenPrinter[]>([])
@@ -223,14 +595,18 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [previewHtml, setPreviewHtml] = useState<string | null>(null)
+  const [defaultReceiptDeviceName, setDefaultReceiptDeviceName] = useState('')
+  const [defaultReceiptSaving, setDefaultReceiptSaving] = useState(false)
 
   async function load(): Promise<void> {
-    const [system, saved] = await Promise.all([
+    const [system, saved, defaultReceiptPrinter] = await Promise.all([
       listSystemPrinters().catch(() => []),
-      listKitchenPrinters()
+      listKitchenPrinters(),
+      window.electronAPI.getDefaultReceiptPrinter().catch(() => null)
     ])
     setSystemPrinters(system)
     setKitchenPrinters(saved)
+    setDefaultReceiptDeviceName(defaultReceiptPrinter?.deviceName ?? '')
     if (!selectedDeviceName && system[0]) {
       setSelectedDeviceName(system.find((printer) => printer.isDefault)?.name ?? system[0].name)
     }
@@ -271,6 +647,23 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
     void updateKitchenPrinter(printer.id, {
       visibility: { ...printer.visibility, [key]: checked }
     }).then(load)
+  }
+
+  async function saveDefaultReceiptPrinter(): Promise<void> {
+    setDefaultReceiptSaving(true)
+    setMessage(null)
+    try {
+      const printer = systemPrinters.find((p) => p.name === defaultReceiptDeviceName)
+      await window.electronAPI.setDefaultReceiptPrinter(printer ? {
+        deviceName: printer.name,
+        displayName: printer.displayName || printer.name
+      } : null)
+      setMessage(printer ? 'تم حفظ طابعة فواتير هذا الجهاز' : 'تم الرجوع لاختيار الطابعة وقت الطباعة')
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'فشل حفظ طابعة الفواتير')
+    } finally {
+      setDefaultReceiptSaving(false)
+    }
   }
 
   function openPreview(printer: KitchenPrinter): void {
@@ -331,6 +724,34 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
         أضف الطابعات المتاحة من النظام، ثم اربط كل صنف بطابعة أو أكثر من صفحة الأصناف. عند الطلب يتم تجميع كل أصناف الطابعة في إيصال تجهيز واحد.
       </p>
       {message && <p className={`form-message ${message.includes('فشل') || message.includes('اختر') ? 'form-message--error' : 'form-message--ok'}`}>{message}</p>}
+
+      <div className="receipt-designer-panel" style={{ marginBottom: 18 }}>
+        <h3 className="card__title">طابعة فواتير هذا الجهاز</h3>
+        <div className="settings-form-grid">
+          <label className="field">
+            <span>الطابعة الافتراضية لفواتير العملاء</span>
+            <select value={defaultReceiptDeviceName} onChange={(e) => setDefaultReceiptDeviceName(e.target.value)}>
+              <option value="">اختيار وقت الطباعة</option>
+              {systemPrinters.map((printer) => (
+                <option key={printer.name} value={printer.name}>
+                  {printer.displayName || printer.name}{printer.isDefault ? ' (افتراضية في النظام)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="form-actions" style={{ alignSelf: 'end' }}>
+            <button type="button" className="btn btn--primary" disabled={defaultReceiptSaving} onClick={() => void saveDefaultReceiptPrinter()}>
+              <MdSave /> {defaultReceiptSaving ? 'جار الحفظ...' : 'حفظ طابعة الفواتير'}
+            </button>
+            <button type="button" className="btn btn--secondary" onClick={() => void load()}>
+              <MdRefresh /> تحديث
+            </button>
+          </div>
+        </div>
+        <p style={{ fontSize: '0.82rem', color: 'var(--color-muted)', margin: '8px 0 0' }}>
+          في وضع الجهاز الجانبي: إذا كانت طباعة الفاتورة على الجهاز الجانبي فسيستخدم هذه الطابعة. إذا كانت على الماستر فسيستخدم طابعة الفواتير الافتراضية المحفوظة على الماستر.
+        </p>
+      </div>
 
       <form onSubmit={(e) => void handleAddPrinter(e)} className="settings-form-grid" style={{ marginBottom: 18 }}>
         <label className="field">
@@ -847,6 +1268,9 @@ export function SettingsPage(): React.ReactElement {
                 </button>
               </div>
             </form>
+            <div style={{ marginTop: 18 }}>
+              <ReceiptDesigner settings={settings} onSettingsSaved={setSettings} />
+            </div>
           </div>
         )}
 

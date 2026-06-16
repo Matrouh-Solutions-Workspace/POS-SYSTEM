@@ -28,6 +28,28 @@ export interface AppSettings {
   sideDisconnectPolicy?: 'block_actions'
   /** Where receipts should print when side terminals submit orders. */
   receiptPrintRoute?: 'side' | 'master'
+  /** POS receipt section order. Missing sections are appended automatically. */
+  receiptSectionOrder?: ReceiptSectionId[]
+  /** POS receipt sections hidden by manager. */
+  receiptHiddenSections?: ReceiptSectionId[]
+  /** Show item notes under item rows on POS receipts. */
+  receiptShowItemNotes?: boolean
+  /** Use tighter spacing and smaller rows for narrow thermal paper. */
+  receiptCompactMode?: boolean
+  /** Show restaurant logo/image on POS receipt. */
+  receiptLogoEnabled?: boolean
+  /** Original restaurant logo/image as a data URL. */
+  receiptLogoDataUrl?: string
+  /** ESC/POS-friendly processed text art derived from the logo. */
+  receiptLogoAscii?: string
+  /** How logo/images are rendered for receipt preview and print. */
+  receiptLogoMode?: 'image' | 'mono' | 'ascii'
+  /** Black/white conversion threshold used for logo processing. */
+  receiptLogoThreshold?: number
+  /** Character width used for ASCII/logo processing. */
+  receiptLogoWidth?: number
+  /** Invert the processed logo output. */
+  receiptLogoInvert?: boolean
   /** Directory used for automatic and quick backups. */
   backupDirectory?: string
   /** Additional backup directories (up to 2 extra). Written to alongside backupDirectory. */
@@ -44,3 +66,13 @@ export interface AppSettings {
   lastAutoBackupAt?: number
   updatedAt: number
 }
+
+export type ReceiptSectionId =
+  | 'logo'
+  | 'restaurant'
+  | 'orderMeta'
+  | 'customer'
+  | 'items'
+  | 'totals'
+  | 'payment'
+  | 'footer'

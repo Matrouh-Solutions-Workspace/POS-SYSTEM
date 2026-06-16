@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, globalShortcut, Menu } from 'electron'
-import { join } from 'path'
-import { writeFileSync } from 'node:fs'
+import { dirname, join } from 'path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { callMaster, callMasterWithConfig } from './master-client'
 import {
   clearSideConnection,
@@ -123,6 +123,48 @@ interface TargetedPrintJob {
   html: string
 }
 
+interface DefaultReceiptPrinter {
+  deviceName: string
+  displayName: string
+  updatedAt: number
+}
+
+function receiptPrinterConfigPath(): string {
+  return join(app.getPath('userData'), 'receipt-printer.json')
+}
+
+function readDefaultReceiptPrinter(): DefaultReceiptPrinter | null {
+  try {
+    const path = receiptPrinterConfigPath()
+    if (!existsSync(path)) return null
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<DefaultReceiptPrinter>
+    if (!parsed.deviceName) return null
+    return {
+      deviceName: parsed.deviceName,
+      displayName: parsed.displayName || parsed.deviceName,
+      updatedAt: parsed.updatedAt || 0
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeDefaultReceiptPrinter(printer: { deviceName: string; displayName?: string } | null): DefaultReceiptPrinter | null {
+  const path = receiptPrinterConfigPath()
+  mkdirSync(dirname(path), { recursive: true })
+  if (!printer?.deviceName) {
+    writeFileSync(path, JSON.stringify(null, null, 2), 'utf8')
+    return null
+  }
+  const value: DefaultReceiptPrinter = {
+    deviceName: printer.deviceName,
+    displayName: printer.displayName || printer.deviceName,
+    updatedAt: Date.now()
+  }
+  writeFileSync(path, JSON.stringify(value, null, 2), 'utf8')
+  return value
+}
+
 async function printHtmlToDevice(html: string, deviceName: string, copies = 1): Promise<boolean> {
   const printWindow = new BrowserWindow({
     width: 380,
@@ -164,6 +206,16 @@ async function printHtmlToDevice(html: string, deviceName: string, copies = 1): 
   } finally {
     if (!printWindow.isDestroyed()) printWindow.close()
   }
+}
+
+async function printReceiptUsingDefault(html: string): Promise<boolean> {
+  const defaultPrinter = readDefaultReceiptPrinter()
+  if (defaultPrinter?.deviceName) {
+    const ok = await printHtmlToDevice(html, defaultPrinter.deviceName, 1)
+    if (ok) return true
+    console.warn('[receipt-print]', `Default receipt printer failed: ${defaultPrinter.displayName}`)
+  }
+  return printReceiptHtml(html)
 }
 
 async function printKitchenBatch(jobs: TargetedPrintJob[]): Promise<{
@@ -282,35 +334,13 @@ app.whenReady().then(() => {
   if (!isSideMode() && getLicenseStatus().valid) {
     initLocalStore()
     startBackupScheduler()
-    void syncMasterServerWithSettings({ printReceiptHtml, printKitchenBatch }).catch((e) => {
+    void syncMasterServerWithSettings({ printReceiptHtml: printReceiptUsingDefault, printKitchenBatch }).catch((e) => {
       console.error('[master-server]', e)
     })
   }
 
   ipcMain.handle('app:get-version', () => app.getVersion())
-  ipcMain.handle('license:get-status', async () => {
-    const side = readSideConnection()
-    if (!side) return getLicenseStatus()
-    try {
-      const health = await callMasterWithConfig<{
-        license: { valid: boolean; reason?: string; license?: unknown }
-      }>(side, '/health', undefined, { method: 'GET', auth: false })
-      return {
-        valid: health.license.valid,
-        reason: health.license.reason,
-        license: health.license.license,
-        hwid: `side:${side.deviceName}`,
-        licensePath: `${side.masterUrl} (master license)`
-      }
-    } catch (e) {
-      return {
-        valid: false,
-        reason: `Cannot connect to master: ${e instanceof Error ? e.message : String(e)}`,
-        hwid: `side:${side.deviceName}`,
-        licensePath: `${side.masterUrl} (master license)`
-      }
-    }
-  })
+  ipcMain.handle('license:get-status', async () => getLicenseStatus())
   ipcMain.handle('license:create-activation-request', () => createActivationRequestFile())
   ipcMain.handle('license:import-license', () => importLicenseFile())
   ipcMain.handle('license:activate-master-key', (_event, key: string) => {
@@ -330,6 +360,10 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('network:pair-side', async (_, params: { masterUrl: string; deviceName: string; code: string }) => {
     try {
+      const localLicense = getLicenseStatus()
+      if (!localLicense.valid) {
+        return { ok: false as const, error: localLicense.reason ?? 'Activate this side device license before pairing' }
+      }
       const masterUrl = normalizeMasterUrl(params.masterUrl)
       const result = await callMasterWithConfig<{
         token: string
@@ -357,7 +391,7 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('network:master-status', () => getMasterServerStatus())
   ipcMain.handle('network:master-refresh', async () => {
-    await syncMasterServerWithSettings({ printReceiptHtml, printKitchenBatch })
+    await syncMasterServerWithSettings({ printReceiptHtml: printReceiptUsingDefault, printKitchenBatch })
     return getMasterServerStatus()
   })
   ipcMain.handle('network:master-reset-pairing-code', () => ({ code: resetMasterPairingCode() }))
@@ -392,7 +426,7 @@ app.whenReady().then(() => {
     if (isSideMode()) return callMaster('/db/save', { collectionName, documents })
     cacheDocuments(collectionName, documents)
     if (collectionName === 'settings') {
-      void syncMasterServerWithSettings({ printReceiptHtml, printKitchenBatch }).catch((e) => console.error('[master-server]', e))
+      void syncMasterServerWithSettings({ printReceiptHtml: printReceiptUsingDefault, printKitchenBatch }).catch((e) => console.error('[master-server]', e))
     }
     return { ok: true as const }
   })
@@ -418,7 +452,7 @@ app.whenReady().then(() => {
     if (isSideMode()) return callMaster('/db/batch', { operations })
     const result = executeBatch(operations)
     if (operations.some((op) => op.collection === 'settings')) {
-      void syncMasterServerWithSettings({ printReceiptHtml, printKitchenBatch }).catch((e) => console.error('[master-server]', e))
+      void syncMasterServerWithSettings({ printReceiptHtml: printReceiptUsingDefault, printKitchenBatch }).catch((e) => console.error('[master-server]', e))
     }
     return result
   })
@@ -538,7 +572,7 @@ app.whenReady().then(() => {
         console.warn('[print-route]', e)
       }
     }
-    return printReceiptHtml(html)
+    return printReceiptUsingDefault(html)
   })
 
   ipcMain.handle('print:list-printers', async () => {
@@ -553,6 +587,14 @@ app.whenReady().then(() => {
         status: details.status
       }
     })
+  })
+
+  ipcMain.handle('print:get-default-receipt-printer', () => {
+    return readDefaultReceiptPrinter()
+  })
+
+  ipcMain.handle('print:set-default-receipt-printer', (_, printer: { deviceName: string; displayName?: string } | null) => {
+    return { ok: true as const, printer: writeDefaultReceiptPrinter(printer) }
   })
 
   ipcMain.handle('print:kitchen-batch', async (_, jobs: TargetedPrintJob[]) => {

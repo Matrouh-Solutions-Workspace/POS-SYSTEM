@@ -1,5 +1,46 @@
-import type { Order, OrderItem, AppSettings } from '@shared/types'
+import type { Order, OrderItem, AppSettings, ReceiptSectionId } from '@shared/types'
 import { orderReference } from '@shared/services/order-reference'
+
+export const DEFAULT_RECEIPT_SECTIONS: ReceiptSectionId[] = [
+  'logo',
+  'restaurant',
+  'orderMeta',
+  'customer',
+  'items',
+  'totals',
+  'payment',
+  'footer'
+]
+
+const SECTION_LABELS: Record<ReceiptSectionId, string> = {
+  logo: 'الشعار',
+  restaurant: 'بيانات المطعم',
+  orderMeta: 'بيانات الطلب',
+  customer: 'بيانات العميل',
+  items: 'الأصناف',
+  totals: 'الإجماليات',
+  payment: 'الدفع',
+  footer: 'التذييل'
+}
+
+export function receiptSectionLabel(section: ReceiptSectionId): string {
+  return SECTION_LABELS[section]
+}
+
+export function normalizeReceiptSections(order?: ReceiptSectionId[]): ReceiptSectionId[] {
+  const seen = new Set<ReceiptSectionId>()
+  const normalized: ReceiptSectionId[] = []
+  for (const id of order ?? []) {
+    if (DEFAULT_RECEIPT_SECTIONS.includes(id) && !seen.has(id)) {
+      seen.add(id)
+      normalized.push(id)
+    }
+  }
+  for (const id of DEFAULT_RECEIPT_SECTIONS) {
+    if (!seen.has(id)) normalized.push(id)
+  }
+  return normalized
+}
 
 export function buildReceiptHtml(
   order: Order,
@@ -8,58 +49,14 @@ export function buildReceiptHtml(
   options?: { isCopy?: boolean; label?: string }
 ): string {
   const cur = settings.currencySymbol
-
-  const rows = items
-    .map((item) => `
-    <tr>
-      <td>${escapeHtml(item.nameAr)}${item.sizeLabelAr ? `<br/><small>${escapeHtml(item.sizeLabelAr)}</small>` : ''}${item.noteAr ? `<br/><small style="color:#888">${escapeHtml(item.noteAr)}</small>` : ''}</td>
-      <td style="text-align:center">${item.unitLabel ? item.quantity.toFixed(3) : item.quantity}</td>
-      <td>${fm(item.unitPrice, cur)}</td>
-      <td>${fm(item.lineTotal, cur)}</td>
-    </tr>`)
-    .join('')
-
-  // Build totals section
-  const totalsRows: string[] = []
-  totalsRows.push(`<div><span>المجموع الفرعي</span><span>${fm(order.subtotal, cur)}</span></div>`)
-
-  if (order.discountAmount && order.discountAmount > 0) {
-    const discLabel = order.discountType === 'percent'
-      ? `خصم (${order.discountValue}%)`
-      : 'خصم'
-    totalsRows.push(`<div style="color:#c0392b"><span>${discLabel}</span><span>- ${fm(order.discountAmount, cur)}</span></div>`)
-  }
-
-  if (order.taxAmount && order.taxAmount > 0) {
-    totalsRows.push(`<div><span>ضريبة القيمة المضافة (${order.taxRate}%)</span><span>${fm(order.taxAmount, cur)}</span></div>`)
-  }
-
-  if (order.deliveryFee && order.deliveryFee > 0) {
-    totalsRows.push(`<div><span>رسوم التوصيل</span><span>${fm(order.deliveryFee, cur)}</span></div>`)
-  }
-
-  totalsRows.push(`<div class="grand-total"><strong>الإجمالي</strong><strong>${fm(order.total, cur)}</strong></div>`)
-
-  // Payment method
-  let paymentRow = ''
-  if (order.paymentStatus === 'split') {
-    paymentRow = `<div><span>الدفع</span><span>نقدي + بطاقة</span></div>`
-  } else if (order.paymentStatus === 'paid') {
-    paymentRow = `<div><span>الدفع</span><span>مدفوع</span></div>`
-  }
-
-  // Delivery info
-  let deliveryInfo = ''
-  if (order.orderType === 'delivery') {
-    const parts = [
-      order.customerName && `<p>العميل: ${escapeHtml(order.customerName)}</p>`,
-      order.customerPhone && `<p>الهاتف: ${escapeHtml(order.customerPhone)}</p>`,
-      order.customerAddress && `<p>العنوان: ${escapeHtml(order.customerAddress)}</p>`
-    ].filter(Boolean)
-    if (parts.length) {
-      deliveryInfo = `<hr/>${parts.join('')}`
-    }
-  }
+  const hidden = new Set(settings.receiptHiddenSections ?? [])
+  const sections = normalizeReceiptSections(settings.receiptSectionOrder)
+  const compact = Boolean(settings.receiptCompactMode)
+  const sectionHtml = sections
+    .filter((section) => !hidden.has(section))
+    .map((section) => renderSection(section, order, items, settings, cur, options))
+    .filter(Boolean)
+    .join('\n')
 
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -67,43 +64,131 @@ export function buildReceiptHtml(
   <meta charset="UTF-8" />
   <style>
     * { box-sizing: border-box; }
-    body { font-family: 'Cairo', Tahoma, sans-serif; font-size: 12px; margin: 8px; direction: rtl; }
-    h1 { font-size: 16px; text-align: center; margin: 0 0 2px; font-weight: 900; }
-    .sub { text-align: center; font-size: 11px; color: #555; margin: 2px 0; }
-    table { width: 100%; border-collapse: collapse; margin: 8px 0; }
-    th, td { padding: 3px 4px; text-align: right; border-bottom: 1px dashed #ddd; font-size: 11px; }
-    th { font-weight: 800; background: #f5f5f5; }
-    small { color: #666; font-size: 10px; }
-    .totals { margin: 8px 0; }
-    .totals div { display: flex; justify-content: space-between; padding: 2px 0; font-size: 11px; }
+    body {
+      font-family: 'Cairo', Tahoma, Arial, sans-serif;
+      font-size: ${compact ? '11px' : '12px'};
+      margin: ${compact ? '5px' : '8px'};
+      direction: rtl;
+      color: #000;
+      background: #fff;
+    }
+    h1 { font-size: ${compact ? '15px' : '17px'}; text-align: center; margin: 0 0 2px; font-weight: 900; }
+    .sub { text-align: center; font-size: 11px; color: #333; margin: 2px 0; }
+    .receipt-logo { display: block; max-width: 72%; max-height: 92px; margin: 0 auto 6px; object-fit: contain; }
+    .receipt-logo--mono { filter: grayscale(1) contrast(1.7); }
+    .receipt-ascii { direction: ltr; text-align: center; font-family: 'Courier New', monospace; font-size: 6px; line-height: 0.92; white-space: pre; margin: 0 0 6px; }
+    table { width: 100%; border-collapse: collapse; margin: ${compact ? '5px' : '8px'} 0; }
+    th, td { padding: ${compact ? '2px 3px' : '3px 4px'}; text-align: right; border-bottom: 1px dashed #bdbdbd; font-size: ${compact ? '10px' : '11px'}; vertical-align: top; }
+    th { font-weight: 900; background: #f5f5f5; }
+    small { color: #444; font-size: 10px; }
+    .totals { margin: ${compact ? '5px' : '8px'} 0; }
+    .totals div { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; font-size: 11px; }
     .grand-total { border-top: 2px solid #000; margin-top: 4px; padding-top: 4px; font-size: 13px; }
-    .footer { text-align: center; margin-top: 12px; font-size: 10px; color: #888; }
-    hr { border: none; border-top: 1px dashed #ccc; margin: 6px 0; }
-    .order-type { background: #000; color: #fff; text-align: center; padding: 3px; font-weight: 800; margin: 4px 0; }
+    .footer { text-align: center; margin-top: 10px; font-size: 10px; color: #333; white-space: pre-wrap; }
+    hr { border: none; border-top: 1px dashed #999; margin: ${compact ? '5px' : '7px'} 0; }
+    .order-type { background: #000; color: #fff; text-align: center; padding: 3px; font-weight: 900; margin: 4px 0; }
+    .copy-label { text-align: center; font-weight: 900; border: 2px solid #000; padding: 2px 8px; margin: 4px auto; display: table; }
+    .meta-line { margin: 2px 0; font-size: 11px; }
   </style>
 </head>
 <body>
-  <h1>${escapeHtml(settings.restaurantNameAr)}</h1>
-  ${settings.phoneNumber ? `<p class="sub">${escapeHtml(settings.phoneNumber)}</p>` : ''}
-  ${options?.isCopy ? `<p style="text-align:center;font-weight:900;border:2px solid #000;padding:2px 8px;margin:4px auto;display:inline-block">${escapeHtml(options.label ?? '— نسخة —')}</p>` : ''}
-  <hr/>
-  <div class="order-type">${escapeHtml(orderTypeLabel(order))}</div>
-  <p style="margin:4px 0"><strong>طلب رقم:</strong> ${escapeHtml(orderReference(order))}</p>
-  <p style="margin:2px 0;font-size:11px">${new Date(order.completedAt ?? order.createdAt).toLocaleString('ar-EG')}</p>
-  <p style="margin:2px 0;font-size:11px">الكاشير: ${escapeHtml(order.cashierName)}</p>
-  ${order.noteAr ? `<p style="margin:2px 0;font-size:11px;color:#555">ملاحظة: ${escapeHtml(order.noteAr)}</p>` : ''}
-  ${deliveryInfo}
-  <table>
-    <thead><tr><th>الصنف</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>
-  <div class="totals">
-    ${totalsRows.join('')}
-    ${paymentRow}
-  </div>
-  ${settings.receiptFooterAr ? `<hr/><p class="footer">${escapeHtml(settings.receiptFooterAr)}</p>` : ''}
+  ${sectionHtml}
 </body>
 </html>`
+}
+
+function renderSection(
+  section: ReceiptSectionId,
+  order: Order,
+  items: OrderItem[],
+  settings: AppSettings,
+  cur: string,
+  options?: { isCopy?: boolean; label?: string }
+): string {
+  if (section === 'logo') return renderLogo(settings)
+  if (section === 'restaurant') {
+    return `
+      <h1>${escapeHtml(settings.restaurantNameAr)}</h1>
+      ${settings.phoneNumber ? `<p class="sub">${escapeHtml(settings.phoneNumber)}</p>` : ''}
+      ${options?.isCopy ? `<p class="copy-label">${escapeHtml(options.label ?? 'نسخة')}</p>` : ''}
+      <hr/>`
+  }
+  if (section === 'orderMeta') {
+    return `
+      <div class="order-type">${escapeHtml(orderTypeLabel(order))}</div>
+      <p class="meta-line"><strong>طلب رقم:</strong> ${escapeHtml(orderReference(order))}</p>
+      <p class="meta-line">${new Date(order.completedAt ?? order.createdAt).toLocaleString('ar-EG')}</p>
+      <p class="meta-line">الكاشير: ${escapeHtml(order.cashierName)}</p>
+      ${order.noteAr ? `<p class="meta-line">ملاحظة: ${escapeHtml(order.noteAr)}</p>` : ''}`
+  }
+  if (section === 'customer') return renderCustomer(order)
+  if (section === 'items') return renderItems(items, settings, cur)
+  if (section === 'totals') return `<div class="totals">${renderTotals(order, cur)}</div>`
+  if (section === 'payment') return renderPayment(order)
+  if (section === 'footer') return settings.receiptFooterAr ? `<hr/><p class="footer">${escapeHtml(settings.receiptFooterAr)}</p>` : ''
+  return ''
+}
+
+function renderLogo(settings: AppSettings): string {
+  if (!settings.receiptLogoEnabled) return ''
+  if (settings.receiptLogoMode === 'ascii' && settings.receiptLogoAscii) {
+    return `<pre class="receipt-ascii">${escapeHtml(settings.receiptLogoAscii)}</pre>`
+  }
+  if (!settings.receiptLogoDataUrl) return ''
+  const className = settings.receiptLogoMode === 'mono' ? 'receipt-logo receipt-logo--mono' : 'receipt-logo'
+  return `<img class="${className}" src="${escapeAttribute(settings.receiptLogoDataUrl)}" alt="Restaurant logo" />`
+}
+
+function renderCustomer(order: Order): string {
+  if (order.orderType !== 'delivery') return ''
+  const parts = [
+    order.customerName && `<p class="meta-line">العميل: ${escapeHtml(order.customerName)}</p>`,
+    order.customerPhone && `<p class="meta-line">الهاتف: ${escapeHtml(order.customerPhone)}</p>`,
+    order.customerAddress && `<p class="meta-line">العنوان: ${escapeHtml(order.customerAddress)}</p>`
+  ].filter(Boolean)
+  return parts.length ? `<hr/>${parts.join('')}` : ''
+}
+
+function renderItems(items: OrderItem[], settings: AppSettings, cur: string): string {
+  const showNotes = settings.receiptShowItemNotes !== false
+  const rows = items
+    .map((item) => `
+      <tr>
+        <td>${escapeHtml(item.nameAr)}${item.sizeLabelAr ? `<br/><small>${escapeHtml(item.sizeLabelAr)}</small>` : ''}${showNotes && item.noteAr ? `<br/><small>${escapeHtml(item.noteAr)}</small>` : ''}</td>
+        <td style="text-align:center">${item.unitLabel ? item.quantity.toFixed(3) : item.quantity}</td>
+        <td>${fm(item.unitPrice, cur)}</td>
+        <td>${fm(item.lineTotal, cur)}</td>
+      </tr>`)
+    .join('')
+
+  return `
+    <table>
+      <thead><tr><th>الصنف</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`
+}
+
+function renderTotals(order: Order, cur: string): string {
+  const rows: string[] = []
+  rows.push(`<div><span>المجموع الفرعي</span><span>${fm(order.subtotal, cur)}</span></div>`)
+  if (order.discountAmount && order.discountAmount > 0) {
+    const label = order.discountType === 'percent' ? `خصم (${order.discountValue}%)` : 'خصم'
+    rows.push(`<div><span>${escapeHtml(label)}</span><span>- ${fm(order.discountAmount, cur)}</span></div>`)
+  }
+  if (order.taxAmount && order.taxAmount > 0) {
+    rows.push(`<div><span>ضريبة القيمة المضافة (${order.taxRate}%)</span><span>${fm(order.taxAmount, cur)}</span></div>`)
+  }
+  if (order.deliveryFee && order.deliveryFee > 0) {
+    rows.push(`<div><span>رسوم التوصيل</span><span>${fm(order.deliveryFee, cur)}</span></div>`)
+  }
+  rows.push(`<div class="grand-total"><strong>الإجمالي</strong><strong>${fm(order.total, cur)}</strong></div>`)
+  return rows.join('')
+}
+
+function renderPayment(order: Order): string {
+  if (order.paymentStatus === 'split') return `<div class="totals"><div><span>الدفع</span><span>نقدي + بطاقة</span></div></div>`
+  if (order.paymentStatus === 'paid') return `<div class="totals"><div><span>الدفع</span><span>مدفوع</span></div></div>`
+  return ''
 }
 
 function fm(amount: number, cur: string): string {
@@ -113,7 +198,7 @@ function fm(amount: number, cur: string): string {
 function orderTypeLabel(order: Order): string {
   if (order.orderType === 'dine_in') {
     return order.tableNameAr
-      ? `صالة — ${order.tableNameAr}${order.tableCategoryAr ? ` / ${order.tableCategoryAr}` : ''}`
+      ? `صالة - ${order.tableNameAr}${order.tableCategoryAr ? ` / ${order.tableCategoryAr}` : ''}`
       : 'صالة'
   }
   if (order.orderType === 'delivery') return 'دليفري'
@@ -122,6 +207,10 @@ function orderTypeLabel(order: Order): string {
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function escapeAttribute(s: string): string {
+  return escapeHtml(s).replace(/"/g, '&quot;')
 }
 
 export async function printReceipt(
