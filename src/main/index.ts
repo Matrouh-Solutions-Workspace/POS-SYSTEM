@@ -422,6 +422,7 @@ app.whenReady().then(() => {
     if (side) {
       try {
         const health = await callMasterWithConfig(side, '/health', undefined, { method: 'GET', auth: false })
+        await callMasterWithConfig(side, '/pairing-status', undefined, { method: 'GET' })
         return { mode: 'side' as const, side, connected: true, health }
       } catch (e) {
         return { mode: 'side' as const, side, connected: false, error: e instanceof Error ? e.message : String(e) }

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { HashRouter, Navigate, Route, Routes, Outlet } from 'react-router-dom'
 import { useAuthBootstrap } from '@renderer/features/auth/use-auth-bootstrap'
 import { useSyncListener } from '@renderer/features/sync/use-sync-listener'
@@ -126,8 +126,23 @@ function LazyPage({ children }: { children: React.ReactNode }): React.ReactEleme
   )
 }
 
+type SideNetworkStatus = {
+  mode?: string
+  connected?: boolean
+  side?: {
+    masterUrl?: string
+    deviceName?: string
+  }
+  error?: string
+}
+
 export default function App(): React.ReactElement {
-  const [sideDisconnected, setSideDisconnected] = useState(false)
+  const [sideNetwork, setSideNetwork] = useState<SideNetworkStatus | null>(null)
+  const [repairMasterUrl, setRepairMasterUrl] = useState('')
+  const [repairDeviceName, setRepairDeviceName] = useState('')
+  const [repairPairingCode, setRepairPairingCode] = useState('')
+  const [repairBusy, setRepairBusy] = useState(false)
+  const [repairMessage, setRepairMessage] = useState<string | null>(null)
   useAuthBootstrap()
   useSyncListener()
   useUpdaterBootstrap()
@@ -141,13 +156,22 @@ export default function App(): React.ReactElement {
     })
   }, [])
 
+  const refreshSideNetwork = useCallback(async (): Promise<void> => {
+    const status = await window.electronAPI.getNetworkStatus().catch(() => null) as SideNetworkStatus | null
+    const disconnected = status?.mode === 'side' && status.connected === false
+    if (!disconnected) {
+      setSideNetwork(null)
+      return
+    }
+    setSideNetwork(status)
+    setRepairMasterUrl((current) => current || status.side?.masterUrl || '')
+    setRepairDeviceName((current) => current || status.side?.deviceName || `POS-${Math.floor(Math.random() * 900 + 100)}`)
+  }, [])
+
   useEffect(() => {
     let disposed = false
     async function checkNetwork(): Promise<void> {
-      const status = await window.electronAPI.getNetworkStatus().catch(() => null) as
-        | { mode?: string; connected?: boolean }
-        | null
-      if (!disposed) setSideDisconnected(status?.mode === 'side' && status.connected === false)
+      if (!disposed) await refreshSideNetwork()
     }
     void checkNetwork()
     const timer = window.setInterval(() => { void checkNetwork() }, 5000)
@@ -155,7 +179,38 @@ export default function App(): React.ReactElement {
       disposed = true
       window.clearInterval(timer)
     }
-  }, [])
+  }, [refreshSideNetwork])
+
+  async function repairSidePairing(): Promise<void> {
+    setRepairBusy(true)
+    setRepairMessage(null)
+    try {
+      const result = await window.electronAPI.pairSideDevice({
+        masterUrl: repairMasterUrl,
+        deviceName: repairDeviceName || 'Side device',
+        code: repairPairingCode
+      })
+      if (!result.ok) {
+        setRepairMessage(result.error ?? 'فشل إعادة ربط الجهاز بالماستر')
+        return
+      }
+      setRepairPairingCode('')
+      setRepairMessage('تم إعادة الربط بالماستر')
+      await refreshSideNetwork()
+    } finally {
+      setRepairBusy(false)
+    }
+  }
+
+  async function clearSidePairingAndRestart(): Promise<void> {
+    setRepairBusy(true)
+    try {
+      await window.electronAPI.clearSideConnection()
+      window.location.reload()
+    } finally {
+      setRepairBusy(false)
+    }
+  }
 
   return (
     <HashRouter>
@@ -163,11 +218,40 @@ export default function App(): React.ReactElement {
       <UpdateNotification />
       <WhatsNewModal />
       <SyncProgressNotification />
-      {sideDisconnected && (
+      {sideNetwork && (
         <div className="modal-overlay" style={{ zIndex: 99998 }}>
-          <div className="modal" style={{ maxWidth: 420, textAlign: 'center' }}>
-            <h2 className="order-details__title">الاتصال بالماستر مقطوع</h2>
-            <p className="muted">تم إيقاف العمليات مؤقتا حتى يعود الاتصال بجهاز الماستر.</p>
+          <div className="modal" style={{ maxWidth: 520 }}>
+            <h2 className="order-details__title">الاتصال بالماستر غير صالح</h2>
+            <p className="muted">
+              إذا تم فصل هذا الجهاز من الماستر، اطلب من المدير إنشاء كود ربط جديد ثم أعد ربط الجهاز من هنا.
+            </p>
+            {sideNetwork.error && <p className="form-message form-message--error">{sideNetwork.error}</p>}
+            {repairMessage && <p className={`form-message ${repairMessage.includes('فشل') ? 'form-message--error' : 'form-message--ok'}`}>{repairMessage}</p>}
+            <div className="settings-form-grid" style={{ marginTop: 12, textAlign: 'right' }}>
+              <label className="field">
+                <span>عنوان الماستر</span>
+                <input dir="ltr" value={repairMasterUrl} onChange={(e) => setRepairMasterUrl(e.target.value)} placeholder="http://192.168.1.10:47831" />
+              </label>
+              <label className="field">
+                <span>اسم هذا الجهاز</span>
+                <input value={repairDeviceName} onChange={(e) => setRepairDeviceName(e.target.value)} />
+              </label>
+              <label className="field">
+                <span>كود الربط الجديد</span>
+                <input dir="ltr" value={repairPairingCode} onChange={(e) => setRepairPairingCode(e.target.value)} placeholder="123456" />
+              </label>
+            </div>
+            <div className="form-actions" style={{ justifyContent: 'center', marginTop: 14 }}>
+              <button type="button" className="btn btn--primary" disabled={repairBusy || !repairMasterUrl || !repairPairingCode} onClick={() => void repairSidePairing()}>
+                إعادة الربط
+              </button>
+              <button type="button" className="btn btn--secondary" disabled={repairBusy} onClick={() => void refreshSideNetwork()}>
+                إعادة المحاولة
+              </button>
+              <button type="button" className="btn btn--danger" disabled={repairBusy} onClick={() => void clearSidePairingAndRestart()}>
+                إلغاء ربط هذا الجهاز
+              </button>
+            </div>
           </div>
         </div>
       )}

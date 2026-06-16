@@ -190,6 +190,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
     if (!requireDevice(req, res)) return
 
+    if (req.method === 'GET' && url.pathname === '/pairing-status') {
+      ok(res, { paired: true, serverTime: Date.now() })
+      return
+    }
+
     if (req.method === 'GET' && (url.pathname === '/updates' || url.pathname === '/updates/latest.yml')) {
       const latest = readLatestUpdateYml()
       if (!latest) {
