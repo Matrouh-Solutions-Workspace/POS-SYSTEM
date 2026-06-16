@@ -1268,7 +1268,7 @@ export function SettingsPage(): React.ReactElement {
     setReceiptSaving(true)
     setReceiptMsg(null)
     try {
-      await updateSettings({
+      const patch: Partial<AppSettings> = {
         restaurantNameAr: receiptForm.restaurantNameAr.trim(),
         currencySymbol: receiptForm.currencySymbol.trim(),
         phoneNumber: receiptForm.phoneNumber.trim() || undefined,
@@ -1276,7 +1276,9 @@ export function SettingsPage(): React.ReactElement {
         taxRate: receiptForm.taxRate ? Number(receiptForm.taxRate) : 0,
         defaultDeliveryFee: receiptForm.defaultDeliveryFee ? Number(receiptForm.defaultDeliveryFee) : 0,
         maxCashierDiscountPct: receiptForm.maxCashierDiscountPct ? Number(receiptForm.maxCashierDiscountPct) : undefined
-      })
+      }
+      await updateSettings(patch)
+      setSettings((current) => current ? { ...current, ...patch, updatedAt: Date.now() } : current)
       setReceiptMsg('تم حفظ إعدادات الإيصال')
     } catch { setReceiptMsg('فشل الحفظ') }
     finally { setReceiptSaving(false) }
