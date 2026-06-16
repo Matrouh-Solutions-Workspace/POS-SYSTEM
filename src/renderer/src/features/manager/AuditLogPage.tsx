@@ -1,8 +1,8 @@
 /**
- * Audit Log — REQ-7
+ * Audit Log - REQ-7
  * Read-only view of all system actions. Manager access only.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { listAuditEntries, type AuditDateRange } from '@renderer/features/audit/audit-service'
 import type { AuditEntry, AuditAction } from '@shared/types'
 
@@ -17,7 +17,7 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   login:                     'تسجيل دخول',
   logout:                    'تسجيل خروج',
   order_cancelled:           'إلغاء طلب',
-  discount_applied:          'خصم مُطبَّق',
+  discount_applied:          'خصم مطبق',
   manager_override_discount: 'تجاوز خصم بموافقة مدير',
   order_refunded:            'استرداد طلب',
   account_created:           'إنشاء حساب',
@@ -28,6 +28,14 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   shift_closed:              'إغلاق شيفت',
   cash_in:                   'إضافة نقدية',
   cash_out:                  'سحب نقدي'
+}
+
+const TARGET_LABELS: Record<NonNullable<AuditEntry['targetType']>, string> = {
+  order: 'طلب',
+  user: 'مستخدم',
+  shift: 'شيفت',
+  settings: 'إعدادات',
+  cash: 'نقدية'
 }
 
 const ACTION_BADGE: Record<AuditAction, string> = {
@@ -52,6 +60,9 @@ export function AuditLogPage(): React.ReactElement {
   const [range, setRange] = useState<AuditDateRange>('today')
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [actionFilter, setActionFilter] = useState<'all' | AuditAction>('all')
+  const [actorFilter, setActorFilter] = useState('all')
+  const [targetFilter, setTargetFilter] = useState<'all' | NonNullable<AuditEntry['targetType']>>('all')
 
   useEffect(() => {
     setLoading(true)
@@ -61,24 +72,43 @@ export function AuditLogPage(): React.ReactElement {
     })
   }, [range])
 
-  const filtered = search.trim()
-    ? entries.filter(
-        (e) =>
-          e.actorName.includes(search) ||
-          e.detailAr.includes(search) ||
-          ACTION_LABELS[e.action].includes(search)
-      )
-    : entries
+  const actors = useMemo(() => {
+    return Array.from(new Set(entries.map((e) => e.actorName).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ar'))
+  }, [entries])
+
+  const availableTargets = useMemo(() => {
+    return Array.from(new Set(entries.map((e) => e.targetType).filter(Boolean))) as Array<NonNullable<AuditEntry['targetType']>>
+  }, [entries])
+
+  const filtered = entries.filter((entry) => {
+    const q = search.trim()
+    const matchesText = !q ||
+      entry.actorName.includes(q) ||
+      entry.detailAr.includes(q) ||
+      entry.targetId?.includes(q) ||
+      ACTION_LABELS[entry.action].includes(q)
+    const matchesAction = actionFilter === 'all' || entry.action === actionFilter
+    const matchesActor = actorFilter === 'all' || entry.actorName === actorFilter
+    const matchesTarget = targetFilter === 'all' || entry.targetType === targetFilter
+    return matchesText && matchesAction && matchesActor && matchesTarget
+  })
+
+  function resetFilters(): void {
+    setSearch('')
+    setActionFilter('all')
+    setActorFilter('all')
+    setTargetFilter('all')
+  }
 
   return (
     <div className="unified-page">
       <div className="page-toolbar" style={{ marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
-        {/* Date range filter */}
-        <div className="reports-filter__options">
+        <div className="reports-filter__options" aria-label="اختيار فترة سجل الأحداث">
           {RANGE_OPTIONS.map((opt) => (
             <button
               key={opt.value}
               type="button"
+              aria-pressed={range === opt.value}
               className={`reports-filter__btn${range === opt.value ? ' reports-filter__btn--active' : ''}`}
               onClick={() => setRange(opt.value)}
             >
@@ -86,14 +116,46 @@ export function AuditLogPage(): React.ReactElement {
             </button>
           ))}
         </div>
-        {/* Search */}
         <input
           className="pos-search"
           style={{ maxWidth: 260, flex: 1 }}
-          placeholder="بحث في الأحداث..."
+          placeholder="بحث في سجل الأحداث..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+      </div>
+
+      <div className="settings-form-grid" style={{ marginBottom: 16 }}>
+        <label className="field">
+          <span>نوع الحدث</span>
+          <select value={actionFilter} onChange={(e) => setActionFilter(e.target.value as typeof actionFilter)}>
+            <option value="all">كل الأحداث</option>
+            {(Object.keys(ACTION_LABELS) as AuditAction[]).map((action) => (
+              <option key={action} value={action}>{ACTION_LABELS[action]}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>المستخدم</span>
+          <select value={actorFilter} onChange={(e) => setActorFilter(e.target.value)}>
+            <option value="all">كل المستخدمين</option>
+            {actors.map((actor) => <option key={actor} value={actor}>{actor}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span>العنصر المتأثر</span>
+          <select value={targetFilter} onChange={(e) => setTargetFilter(e.target.value as typeof targetFilter)}>
+            <option value="all">الكل</option>
+            {availableTargets.map((target) => (
+              <option key={target} value={target}>{TARGET_LABELS[target]}</option>
+            ))}
+          </select>
+        </label>
+        <div className="field" style={{ justifyContent: 'end' }}>
+          <button type="button" className="btn btn--secondary" onClick={resetFilters}>
+            إعادة ضبط الفلاتر
+          </button>
+        </div>
       </div>
 
       <div className="card">
@@ -107,7 +169,7 @@ export function AuditLogPage(): React.ReactElement {
         {loading ? (
           <p className="app-loading">جارٍ التحميل…</p>
         ) : filtered.length === 0 ? (
-          <p className="report-empty">لا توجد أحداث في هذه الفترة</p>
+          <p className="report-empty">لا توجد أحداث مطابقة للفلاتر الحالية</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table className="data-table">
@@ -116,6 +178,7 @@ export function AuditLogPage(): React.ReactElement {
                   <th>الوقت</th>
                   <th>المستخدم</th>
                   <th>الحدث</th>
+                  <th>العنصر</th>
                   <th>التفاصيل</th>
                 </tr>
               </thead>
@@ -135,6 +198,10 @@ export function AuditLogPage(): React.ReactElement {
                       >
                         {ACTION_LABELS[entry.action] ?? entry.action}
                       </span>
+                    </td>
+                    <td style={{ fontSize: '0.82rem', color: 'var(--color-muted)' }}>
+                      {entry.targetType ? TARGET_LABELS[entry.targetType] : '-'}
+                      {entry.targetId ? <code dir="ltr" style={{ display: 'block', marginTop: 4 }}>{entry.targetId}</code> : null}
                     </td>
                     <td style={{ fontSize: '0.85rem', color: 'var(--color-muted)', maxWidth: 320, wordBreak: 'break-word' }}>
                       {entry.detailAr}

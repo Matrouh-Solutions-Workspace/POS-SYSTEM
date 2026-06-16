@@ -71,7 +71,10 @@ export interface ElectronAPI {
 
   // Database backup & restore — REQ-8
   backupDatabase: () => Promise<{ ok: boolean; error?: string }>
+  chooseBackupDirectory: () => Promise<{ ok: boolean; path?: string; error?: string }>
+  backupDatabaseToDirectory: (directory: string) => Promise<{ ok: boolean; path?: string; error?: string }>
   restoreDatabase: () => Promise<{ ok: boolean; error?: string }>
+  exportReportPdf: (html: string, suggestedName: string) => Promise<{ ok: boolean; path?: string; error?: string }>
 
   // Materialized stock reads — REQ-11
   getIngredientStocks: () => Promise<Array<{ ingredient_id: string; quantity: number }>>

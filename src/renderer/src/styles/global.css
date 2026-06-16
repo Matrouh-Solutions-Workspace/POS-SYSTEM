@@ -2246,6 +2246,13 @@ textarea {
   flex-wrap: wrap;
 }
 
+.report-export-actions {
+  display: flex;
+  gap: 8px;
+  margin-inline-start: auto;
+  flex-wrap: wrap;
+}
+
 .reports-filter__label {
   font-weight: 700;
   font-size: 0.85rem;

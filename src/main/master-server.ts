@@ -15,7 +15,9 @@ import {
   readCachedDocument,
   readCachedDocuments,
   readIngredientStocks,
-  verifyAuthCredential
+  verifyAuthCredential,
+  storeAuthCredential,
+  deleteAuthCredentialForUser
 } from './local-store'
 import { getLicenseStatus } from './license'
 
@@ -146,6 +148,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return
     }
 
+    if (req.method === 'POST' && url.pathname === '/auth/store-credential') {
+      const body = await readBody(req) as { username?: string; passwordHash?: string; user?: unknown }
+      ok(res, storeAuthCredential(body.username ?? '', body.passwordHash ?? '', body.user))
+      return
+    }
+
     if (req.method === 'POST' && url.pathname === '/db/get-all') {
       const body = await readBody(req) as { collectionName?: string }
       ok(res, readCachedDocuments(body.collectionName ?? ''))
@@ -171,6 +179,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (req.method === 'POST' && url.pathname === '/db/delete') {
       const body = await readBody(req) as { collectionName?: string; documentId?: string }
       const deleted = deleteCachedDocument(body.collectionName ?? '', body.documentId ?? '')
+      if (body.collectionName === 'users' && body.documentId) deleteAuthCredentialForUser(body.documentId)
       ok(res, { ok: true, deleted })
       return
     }

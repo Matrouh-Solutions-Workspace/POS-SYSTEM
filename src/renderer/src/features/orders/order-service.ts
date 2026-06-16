@@ -54,6 +54,10 @@ export async function getSettings(): Promise<AppSettings> {
     masterServerPort: 47831,
     sideDisconnectPolicy: 'block_actions',
     receiptPrintRoute: 'side',
+    autoBackupEnabled: false,
+    autoBackupIntervalDays: 1,
+    autoBackupOnClose: false,
+    backupRetentionDays: 7,
     updatedAt: Date.now()
   }
   const cached = await getCachedDoc<AppSettings>(COLLECTIONS.settings, SETTINGS_DOC_ID)
@@ -79,6 +83,12 @@ export async function updateSettings(
       | 'masterServerPort'
       | 'sideDisconnectPolicy'
       | 'receiptPrintRoute'
+      | 'backupDirectory'
+      | 'autoBackupEnabled'
+      | 'autoBackupIntervalDays'
+      | 'autoBackupOnClose'
+      | 'backupRetentionDays'
+      | 'lastAutoBackupAt'
     >
   >
 ): Promise<void> {

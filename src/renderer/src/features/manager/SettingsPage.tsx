@@ -4,7 +4,7 @@ import { getSettings, updateSettings } from '@renderer/features/orders/order-ser
 import { applyThemeColor, DEFAULT_PRIMARY } from '@renderer/features/theme/theme-store'
 import { listUsersByRole, updateUserProfile } from '@renderer/features/auth/auth-service'
 import { hashPin } from '@renderer/features/auth/pin-store'
-import { MdSave, MdPalette, MdLock, MdPerson, MdBackup, MdRestorePage, MdKeyboard, MdDevices } from 'react-icons/md'
+import { MdSave, MdPalette, MdLock, MdPerson, MdBackup, MdRestorePage, MdKeyboard, MdDevices, MdFolderOpen } from 'react-icons/md'
 import type { AppUser } from '@shared/types'
 import {
   SHORTCUT_ACTIONS,
@@ -240,6 +240,12 @@ export function SettingsPage(): React.ReactElement {
     pairedDevices?: Array<{ id: string; name: string; pairedAt: number; lastSeenAt?: number }>
     lastError?: string
   } | null>(null)
+  const [backupDirectory, setBackupDirectory] = useState('')
+  const [autoBackupEnabled, setAutoBackupEnabled] = useState(false)
+  const [autoBackupIntervalDays, setAutoBackupIntervalDays] = useState(1)
+  const [autoBackupOnClose, setAutoBackupOnClose] = useState(false)
+  const [backupRetentionDays, setBackupRetentionDays] = useState(7)
+  const [backupSaving, setBackupSaving] = useState(false)
 
   useEffect(() => {
     void Promise.all([getSettings(), listUsersByRole('cashier')]).then(([s, c]) => {
@@ -261,6 +267,11 @@ export function SettingsPage(): React.ReactElement {
       setNetworkMode(s.networkMode ?? 'standalone')
       setMasterServerPort(s.masterServerPort ?? 47831)
       setReceiptPrintRoute(s.receiptPrintRoute === 'master' ? 'master' : 'side')
+      setBackupDirectory(s.backupDirectory ?? '')
+      setAutoBackupEnabled(s.autoBackupEnabled ?? false)
+      setAutoBackupIntervalDays(s.autoBackupIntervalDays ?? 1)
+      setAutoBackupOnClose(s.autoBackupOnClose ?? false)
+      setBackupRetentionDays(s.backupRetentionDays ?? 7)
       setCashiers(c)
     })
   }, [])
@@ -383,6 +394,52 @@ export function SettingsPage(): React.ReactElement {
     }
   }
 
+  async function handleChooseBackupDirectory(): Promise<void> {
+    setBackupMsg(null)
+    const result = await window.electronAPI.chooseBackupDirectory()
+    if (result.ok && result.path) {
+      setBackupDirectory(result.path)
+    } else if (result.error && result.error !== 'Cancelled') {
+      setBackupMsg(`فشل اختيار المجلد: ${result.error}`)
+    }
+  }
+
+  async function handleBackupDirectoryNow(): Promise<void> {
+    if (!backupDirectory.trim()) {
+      setBackupMsg('اختر مجلد النسخ الاحتياطي أولاً')
+      return
+    }
+    setBackupLoading(true)
+    setBackupMsg(null)
+    try {
+      const result = await window.electronAPI.backupDatabaseToDirectory(backupDirectory.trim())
+      setBackupMsg(result.ok ? `تم حفظ النسخة في: ${result.path ?? backupDirectory}` : `فشل النسخ: ${result.error ?? ''}`)
+    } catch (e) {
+      setBackupMsg(`فشل: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setBackupLoading(false)
+    }
+  }
+
+  async function handleBackupSettingsSave(): Promise<void> {
+    setBackupSaving(true)
+    setBackupMsg(null)
+    try {
+      await updateSettings({
+        backupDirectory: backupDirectory.trim() || undefined,
+        autoBackupEnabled,
+        autoBackupIntervalDays: Math.max(1, Math.min(7, autoBackupIntervalDays)) as AppSettings['autoBackupIntervalDays'],
+        autoBackupOnClose,
+        backupRetentionDays: Math.max(1, Math.min(7, backupRetentionDays)) as AppSettings['backupRetentionDays']
+      })
+      setBackupMsg('تم حفظ إعدادات النسخ الاحتياطي')
+    } catch (e) {
+      setBackupMsg(e instanceof Error ? e.message : 'فشل حفظ إعدادات النسخ الاحتياطي')
+    } finally {
+      setBackupSaving(false)
+    }
+  }
+
   async function handleRestore(): Promise<void> {
     setRestoreConfirmOpen(false)
     setBackupLoading(true)
@@ -415,16 +472,29 @@ export function SettingsPage(): React.ReactElement {
     { key: 'network', labelAr: 'Network', icon: <MdDevices /> },
   ]
 
+  function handleSettingsTabKeyDown(e: React.KeyboardEvent<HTMLDivElement>): void {
+    const currentIndex = settingsTabs.findIndex((t) => t.key === activeSettingsTab)
+    let nextIndex = currentIndex
+    if (e.key === 'ArrowRight') nextIndex = (currentIndex + 1) % settingsTabs.length
+    else if (e.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + settingsTabs.length) % settingsTabs.length
+    else if (e.key === 'Home') nextIndex = 0
+    else if (e.key === 'End') nextIndex = settingsTabs.length - 1
+    else return
+    e.preventDefault()
+    setActiveSettingsTab(settingsTabs[nextIndex]!.key)
+  }
+
   return (
     <div className="unified-page">
       {/* ── Inner tab strip ── */}
-      <div className="inner-tabs" role="tablist">
+      <div className="inner-tabs" role="tablist" onKeyDown={handleSettingsTabKeyDown}>
         {settingsTabs.map((t) => (
           <button
             key={t.key}
             type="button"
             role="tab"
             aria-selected={activeSettingsTab === t.key}
+            tabIndex={activeSettingsTab === t.key ? 0 : -1}
             className={`inner-tab${activeSettingsTab === t.key ? ' inner-tab--active' : ''}`}
             onClick={() => setActiveSettingsTab(t.key)}
           >
@@ -682,7 +752,69 @@ export function SettingsPage(): React.ReactElement {
             {backupMsg && (
               <p className={`form-message ${backupMsg.includes('فشل') ? 'form-message--error' : 'form-message--ok'}`}>{backupMsg}</p>
             )}
+            <div className="settings-form-grid" style={{ marginBottom: 16 }}>
+              <label className="field settings-form-grid__full">
+                <span>مجلد النسخ الاحتياطي التلقائي</span>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    value={backupDirectory}
+                    onChange={(e) => setBackupDirectory(e.target.value)}
+                    placeholder="اختر مكان حفظ النسخ الاحتياطية"
+                    dir="ltr"
+                  />
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={() => void handleChooseBackupDirectory()}
+                    title="اختيار مجلد"
+                    aria-label="اختيار مجلد النسخ الاحتياطي"
+                  >
+                    <MdFolderOpen />
+                  </button>
+                </div>
+              </label>
+              <label className="pin-toggle-label">
+                <input
+                  type="checkbox"
+                  className="pin-toggle-checkbox"
+                  checked={autoBackupEnabled}
+                  onChange={(e) => setAutoBackupEnabled(e.target.checked)}
+                />
+                <span className="pin-toggle-text">تشغيل النسخ التلقائي أثناء عمل التطبيق</span>
+              </label>
+              <label className="pin-toggle-label">
+                <input
+                  type="checkbox"
+                  className="pin-toggle-checkbox"
+                  checked={autoBackupOnClose}
+                  onChange={(e) => setAutoBackupOnClose(e.target.checked)}
+                />
+                <span className="pin-toggle-text">عمل نسخة تلقائية عند إغلاق التطبيق</span>
+              </label>
+              <label className="field">
+                <span>تكرار النسخ التلقائي</span>
+                <select value={autoBackupIntervalDays} onChange={(e) => setAutoBackupIntervalDays(Number(e.target.value))}>
+                  {[1, 2, 3, 4, 5, 6, 7].map((days) => (
+                    <option key={days} value={days}>كل {days} يوم</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>الاحتفاظ بالنسخ لمدة</span>
+                <select value={backupRetentionDays} onChange={(e) => setBackupRetentionDays(Number(e.target.value))}>
+                  {[1, 2, 3, 4, 5, 6, 7].map((days) => (
+                    <option key={days} value={days}>{days} يوم</option>
+                  ))}
+                </select>
+              </label>
+            </div>
             <div className="form-actions" style={{ gap: 12 }}>
+              <button type="button" className="btn btn--primary" onClick={() => void handleBackupSettingsSave()} disabled={backupSaving}>
+                <MdSave /> {backupSaving ? 'جارٍ الحفظ…' : 'حفظ إعدادات النسخ'}
+              </button>
+              <button type="button" className="btn btn--secondary" onClick={() => void handleBackupDirectoryNow()} disabled={backupLoading || !backupDirectory.trim()}>
+                <MdBackup /> {backupLoading ? 'جارٍ…' : 'نسخ الآن للمجلد'}
+              </button>
               <button type="button" className="btn btn--primary" onClick={() => void handleBackup()} disabled={backupLoading}>
                 <MdBackup /> {backupLoading ? 'جارٍ…' : 'تصدير قاعدة البيانات'}
               </button>

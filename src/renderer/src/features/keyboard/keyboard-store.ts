@@ -55,6 +55,12 @@ export const SHORTCUT_ACTIONS: ShortcutAction[] = [
     groupAr: 'تنقل التبويبات',
     defaultChord: 'ctrl+shift+arrowleft'
   },
+  ...Array.from({ length: 9 }, (_, i) => ({
+    id: `tab.select${i + 1}`,
+    labelAr: `اختيار التبويب رقم ${i + 1}`,
+    groupAr: 'تنقل التبويبات',
+    defaultChord: `alt+${i + 1}`
+  })),
 ]
 
 /** Merge saved overrides onto defaults */

@@ -28,5 +28,17 @@ export interface AppSettings {
   sideDisconnectPolicy?: 'block_actions'
   /** Where receipts should print when side terminals submit orders. */
   receiptPrintRoute?: 'side' | 'master'
+  /** Directory used for automatic and quick backups. */
+  backupDirectory?: string
+  /** Enables scheduled automatic backups while the app is running. */
+  autoBackupEnabled?: boolean
+  /** Scheduled backup cadence in days. */
+  autoBackupIntervalDays?: 1 | 2 | 3 | 4 | 5 | 6 | 7
+  /** Run an extra backup when the app closes. */
+  autoBackupOnClose?: boolean
+  /** Delete automatic backups older than this many days. */
+  backupRetentionDays?: 1 | 2 | 3 | 4 | 5 | 6 | 7
+  /** Timestamp of the last successful automatic backup. */
+  lastAutoBackupAt?: number
   updatedAt: number
 }

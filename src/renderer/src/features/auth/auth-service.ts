@@ -75,16 +75,25 @@ function normalizeUsername(username: string): string {
   return username.toLowerCase().trim()
 }
 
+async function isLanSideDevice(): Promise<boolean> {
+  const network = await window.electronAPI.getNetworkStatus().catch(() => null) as { mode?: string } | null
+  return network?.mode === 'side'
+}
+
 async function storeLocalCredential(user: AppUser, password: string): Promise<void> {
+  const side = await isLanSideDevice()
   const username = normalizeUsername(user.username)
   const passwordHash = await sha256(`${username}:${password}`)
-  const existing = readAuthCache().filter((e) => e.username !== username)
-  existing.push({ username, passwordHash, userId: user.id, updatedAt: Date.now() })
-  writeAuthCache(existing)
+  if (!side) {
+    const existing = readAuthCache().filter((e) => e.username !== username)
+    existing.push({ username, passwordHash, userId: user.id, updatedAt: Date.now() })
+    writeAuthCache(existing)
+  }
   await window.electronAPI.authStoreCredential(username, passwordHash, user)
 }
 
 async function verifyLocalCredential(username: string, password: string): Promise<string | null> {
+  if (await isLanSideDevice()) return null
   const norm = normalizeUsername(username)
   const hash = await sha256(`${norm}:${password}`)
   const match = readAuthCache().find((e) => e.username === norm && e.passwordHash === hash)
@@ -120,6 +129,9 @@ export async function loginAndLoadUser(username: string, password: string): Prom
       logAudit({ action: 'login', actorId: user.id, actorName: user.displayName, detailAr: `ØªØ³Ø¬ÙŠÙ„ Ø¯Ø®ÙˆÙ„: ${user.displayName}` })
     )
     return user
+  }
+  if (await isLanSideDevice()) {
+    throw new Error(mainAuth?.error ?? 'لا يمكن تسجيل الدخول على الجهاز الجانبي بدون اتصال صحيح بالماستر')
   }
 
   const userId = await verifyLocalCredential(username, password)
@@ -157,6 +169,9 @@ export async function createFirstOfflineManager(params: {
   password: string
   displayName?: string
 }): Promise<AppUser> {
+  if (await isLanSideDevice()) {
+    throw new Error('لا يمكن إنشاء مدير محلي على جهاز جانبي. سجّل الدخول بحساب موجود على الماستر.')
+  }
   if (hasOfflineAuthUsers()) {
     throw new Error('يوجد حساب محلي بالفعل')
   }
@@ -331,7 +346,7 @@ export async function deleteAccount(userId: string, currentUserId: string): Prom
 
   const cached = await getCachedDoc<AppUser>(COLLECTIONS.users, userId)
   if (cached) {
-    await cacheDocs(COLLECTIONS.users, [{ ...cached, active: false, updatedAt: Date.now() }])
+    await dbDelete(COLLECTIONS.users, userId)
     void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
       logAudit({
         action: 'account_deleted',

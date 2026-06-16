@@ -71,8 +71,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Database backup & restore — REQ-8
   backupDatabase: (): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('local-store:backup'),
+  chooseBackupDirectory: (): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('local-store:choose-backup-directory'),
+  backupDatabaseToDirectory: (directory: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('local-store:backup-directory-now', directory),
   restoreDatabase: (): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('local-store:restore'),
+  exportReportPdf: (html: string, suggestedName: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('print:pdf-report', html, suggestedName),
 
   // Materialized stock reads — REQ-11
   getIngredientStocks: (): Promise<Array<{ ingredient_id: string; quantity: number }>> =>

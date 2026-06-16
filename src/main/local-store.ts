@@ -1,7 +1,14 @@
 import { app } from 'electron'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
-import { copyFileSync, existsSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+  unlinkSync
+} from 'node:fs'
 const require = createRequire(import.meta.url)
 
 type DatabaseSync = {
@@ -22,6 +29,19 @@ export interface LocalStoreStatus {
   pendingOutbox: number
   error?: string
 }
+
+export interface BackupSettings {
+  backupDirectory?: string
+  autoBackupEnabled: boolean
+  autoBackupIntervalDays: number
+  autoBackupOnClose: boolean
+  backupRetentionDays: number
+  lastAutoBackupAt?: number
+}
+
+const SETTINGS_COLLECTION = 'settings'
+const SETTINGS_DOC_ID = 'app'
+const DAY_MS = 86_400_000
 
 function dbPath(): string {
   return join(app.getPath('userData'), 'offline-pos.sqlite')
@@ -101,6 +121,53 @@ function readSettingsNetworkMode(): string {
 
 function shouldEnqueueOutbox(): boolean {
   return readSettingsNetworkMode() !== 'master'
+}
+
+function readSettingsDocument(): Record<string, unknown> | null {
+  try {
+    const database = openDatabase()
+    const row = database.prepare(`
+      SELECT payload_json
+      FROM cached_documents
+      WHERE collection_name = ? AND document_id = ?
+    `).get(SETTINGS_COLLECTION, SETTINGS_DOC_ID) as { payload_json?: string } | undefined
+    return row?.payload_json ? JSON.parse(row.payload_json) as Record<string, unknown> : null
+  } catch {
+    return null
+  }
+}
+
+function clampDays(value: unknown, fallback: number): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.max(1, Math.min(7, Math.round(n)))
+}
+
+export function readBackupSettings(): BackupSettings {
+  const settings = readSettingsDocument()
+  return {
+    backupDirectory: typeof settings?.backupDirectory === 'string' ? settings.backupDirectory : undefined,
+    autoBackupEnabled: settings?.autoBackupEnabled === true,
+    autoBackupIntervalDays: clampDays(settings?.autoBackupIntervalDays, 1),
+    autoBackupOnClose: settings?.autoBackupOnClose === true,
+    backupRetentionDays: clampDays(settings?.backupRetentionDays, 7),
+    lastAutoBackupAt: typeof settings?.lastAutoBackupAt === 'number' ? settings.lastAutoBackupAt : undefined
+  }
+}
+
+function updateSettingsPatch(patch: Record<string, unknown>): void {
+  const current = readSettingsDocument() ?? {
+    id: SETTINGS_DOC_ID,
+    restaurantNameAr: '',
+    currencySymbol: 'ج.م',
+    pinEnabled: false,
+    autoLockMinutes: 5,
+    nextOrderNumber: 1
+  }
+  cacheDocuments(SETTINGS_COLLECTION, [{
+    id: SETTINGS_DOC_ID,
+    data: { ...current, ...patch, updatedAt: Date.now() }
+  }])
 }
 
 export function initLocalStore(): LocalStoreStatus {
@@ -467,6 +534,82 @@ export function backupDatabase(destinationPath: string): { ok: boolean; error?: 
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
+}
+
+function backupFileName(label: string): string {
+  const stamp = new Date()
+    .toISOString()
+    .replace(/[:.]/g, '-')
+    .replace('T', '_')
+    .replace('Z', '')
+  const safeLabel = label.replace(/[^a-z0-9_-]/gi, '').slice(0, 24) || 'backup'
+  return `shift-pos-backup-${stamp}-${safeLabel}.sqlite`
+}
+
+export function backupDatabaseToDirectory(
+  destinationDirectory: string,
+  label = 'manual'
+): { ok: boolean; path?: string; error?: string } {
+  try {
+    if (!destinationDirectory.trim()) return { ok: false, error: 'Backup directory is not set' }
+    mkdirSync(destinationDirectory, { recursive: true })
+    const destinationPath = join(destinationDirectory, backupFileName(label))
+    const result = backupDatabase(destinationPath)
+    return result.ok ? { ok: true, path: destinationPath } : result
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export function pruneBackupDirectory(
+  destinationDirectory: string,
+  retentionDays: number
+): { ok: boolean; deleted: number; error?: string } {
+  try {
+    if (!destinationDirectory.trim() || !existsSync(destinationDirectory)) {
+      return { ok: true, deleted: 0 }
+    }
+    const cutoff = Date.now() - clampDays(retentionDays, 7) * DAY_MS
+    let deleted = 0
+    for (const file of readdirSync(destinationDirectory)) {
+      if (!/^shift-pos-backup-.+\.sqlite$/i.test(file)) continue
+      const path = join(destinationDirectory, file)
+      const stats = statSync(path)
+      if (stats.isFile() && stats.mtimeMs < cutoff) {
+        unlinkSync(path)
+        deleted += 1
+      }
+    }
+    return { ok: true, deleted }
+  } catch (e) {
+    return { ok: false, deleted: 0, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export function runConfiguredBackup(
+  reason: 'scheduled' | 'close' | 'manual',
+  options: { force?: boolean } = {}
+): { ok: boolean; skipped?: boolean; path?: string; error?: string } {
+  const settings = readBackupSettings()
+  if (!settings.backupDirectory) return { ok: false, skipped: true, error: 'Backup directory is not set' }
+  if (reason === 'scheduled' && !settings.autoBackupEnabled) return { ok: true, skipped: true }
+  if (reason === 'close' && !settings.autoBackupOnClose) return { ok: true, skipped: true }
+
+  const intervalMs = clampDays(settings.autoBackupIntervalDays, 1) * DAY_MS
+  if (
+    reason === 'scheduled' &&
+    !options.force &&
+    settings.lastAutoBackupAt &&
+    Date.now() - settings.lastAutoBackupAt < intervalMs
+  ) {
+    return { ok: true, skipped: true }
+  }
+
+  const result = backupDatabaseToDirectory(settings.backupDirectory, reason)
+  if (!result.ok) return result
+  pruneBackupDirectory(settings.backupDirectory, settings.backupRetentionDays)
+  updateSettingsPatch({ lastAutoBackupAt: Date.now() })
+  return result
 }
 
 /**

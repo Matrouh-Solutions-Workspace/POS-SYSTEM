@@ -512,15 +512,28 @@ export function AccountsPage(): React.ReactElement {
     { key: 'roles',    label: 'دليل الصلاحيات',     icon: <MdShield /> }
   ]
 
+  function handleAccountsTabKeyDown(e: React.KeyboardEvent<HTMLDivElement>): void {
+    const currentIndex = tabs.findIndex((t) => t.key === activeTab)
+    let nextIndex = currentIndex
+    if (e.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length
+    else if (e.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
+    else if (e.key === 'Home') nextIndex = 0
+    else if (e.key === 'End') nextIndex = tabs.length - 1
+    else return
+    e.preventDefault()
+    setActiveTab(tabs[nextIndex]!.key)
+  }
+
   return (
     <div className="unified-page">
-      <div className="inner-tabs" role="tablist">
+      <div className="inner-tabs" role="tablist" onKeyDown={handleAccountsTabKeyDown}>
         {tabs.map((t) => (
           <button
             key={t.key}
             type="button"
             role="tab"
             aria-selected={activeTab === t.key}
+            tabIndex={activeTab === t.key ? 0 : -1}
             className={`inner-tab${activeTab === t.key ? ' inner-tab--active' : ''}`}
             onClick={() => setActiveTab(t.key)}
           >

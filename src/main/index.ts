@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, globalShortcut, Menu } from 'electron'
 import { join } from 'path'
+import { writeFileSync } from 'node:fs'
 import { callMaster, callMasterWithConfig } from './master-client'
 import {
   clearSideConnection,
@@ -19,6 +20,7 @@ import {
 const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
 
 let mainWindow: BrowserWindow | null = null
+let backupScheduler: ReturnType<typeof setInterval> | null = null
 
 function toggleDevTools(win: BrowserWindow | null = mainWindow): void {
   if (!isDev || !win) return
@@ -113,6 +115,49 @@ async function printReceiptHtml(html: string): Promise<boolean> {
   }
 }
 
+async function exportHtmlToPdf(html: string, suggestedName: string): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const { dialog } = await import('electron')
+  const result = await dialog.showSaveDialog({
+    title: 'Save PDF report',
+    defaultPath: suggestedName.endsWith('.pdf') ? suggestedName : `${suggestedName}.pdf`,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }]
+  })
+  if (result.canceled || !result.filePath) return { ok: false, error: 'Cancelled' }
+
+  const pdfWindow = new BrowserWindow({
+    width: 1000,
+    height: 1200,
+    show: false,
+    webPreferences: { nodeIntegration: false, contextIsolation: true }
+  })
+
+  try {
+    await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+    await new Promise<void>((resolve) => setTimeout(resolve, 250))
+    const pdf = await pdfWindow.webContents.printToPDF({
+      printBackground: true,
+      pageSize: 'A4',
+      margins: { marginType: 'default' }
+    })
+    writeFileSync(result.filePath, pdf)
+    return { ok: true, path: result.filePath }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  } finally {
+    if (!pdfWindow.isDestroyed()) pdfWindow.close()
+  }
+}
+
+function startBackupScheduler(): void {
+  if (backupScheduler || isSideMode()) return
+  const tick = (): void => {
+    const result = runConfiguredBackup('scheduled')
+    if (!result.ok && !result.skipped) console.warn('[backup]', result.error)
+  }
+  tick()
+  backupScheduler = setInterval(tick, 60 * 60 * 1000)
+}
+
 import {
   deleteAuthUser,
   ensureAuthUser,
@@ -136,6 +181,7 @@ import {
   enqueueOutbox,
   executeBatch,
   backupDatabase,
+  backupDatabaseToDirectory,
   restoreDatabase,
   readIngredientStocks,
   getLocalStoreStatus,
@@ -147,6 +193,8 @@ import {
   readPendingOutbox,
   resetDatabase,
   resetFailedOutbox,
+  runConfiguredBackup,
+  deleteAuthCredentialForUser,
   storeAuthCredential,
   verifyAuthCredential
 } from './local-store'
@@ -161,6 +209,7 @@ app.whenReady().then(() => {
   initAutoUpdater()
   if (!isSideMode() && getLicenseStatus().valid) {
     initLocalStore()
+    startBackupScheduler()
     void syncMasterServerWithSettings({ printReceiptHtml }).catch((e) => {
       console.error('[master-server]', e)
     })
@@ -248,7 +297,7 @@ app.whenReady().then(() => {
     return verifyAuthCredential(username, passwordHash)
   })
   ipcMain.handle('auth:store-credential', (_, username: string, passwordHash: string, user: unknown) => {
-    if (isSideMode()) return { ok: true as const }
+    if (isSideMode()) return callMaster('/auth/store-credential', { username, passwordHash, user })
     return storeAuthCredential(username, passwordHash, user)
   })
   ipcMain.handle('local-store:get-status', async () => {
@@ -288,6 +337,7 @@ app.whenReady().then(() => {
   ipcMain.handle('local-cache:delete-document', async (_, collectionName: string, documentId: string) => {
     if (isSideMode()) return callMaster('/db/delete', { collectionName, documentId })
     const deleted = deleteCachedDocument(collectionName, documentId)
+    if (collectionName === 'users') deleteAuthCredentialForUser(documentId)
     return { ok: true as const, deleted }
   })
 
@@ -308,7 +358,8 @@ app.whenReady().then(() => {
   })
 
   // Database backup — copy SQLite file to user-chosen location
-  ipcMain.handle('local-store:backup', async () => {    const { dialog } = await import('electron')
+  ipcMain.handle('local-store:backup', async () => {
+    const { dialog } = await import('electron')
     if (isSideMode()) return { ok: false, error: 'Backup is available on the master device only' }
     const today = new Date().toISOString().slice(0, 10)
     const result = await dialog.showSaveDialog({
@@ -318,6 +369,22 @@ app.whenReady().then(() => {
     })
     if (result.canceled || !result.filePath) return { ok: false, error: 'تم الإلغاء' }
     return backupDatabase(result.filePath)
+  })
+
+  ipcMain.handle('local-store:choose-backup-directory', async () => {
+    if (isSideMode()) return { ok: false, error: 'Backup is available on the master device only' }
+    const { dialog } = await import('electron')
+    const result = await dialog.showOpenDialog({
+      title: 'Choose backup directory',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (result.canceled || result.filePaths.length === 0) return { ok: false, error: 'Cancelled' }
+    return { ok: true, path: result.filePaths[0] }
+  })
+
+  ipcMain.handle('local-store:backup-directory-now', async (_, directory: string) => {
+    if (isSideMode()) return { ok: false, error: 'Backup is available on the master device only' }
+    return backupDatabaseToDirectory(directory, 'manual')
   })
 
   // Database restore — pick a backup file and replace the current DB
@@ -400,6 +467,10 @@ app.whenReady().then(() => {
       }
     }
     return printReceiptHtml(html)
+  })
+
+  ipcMain.handle('print:pdf-report', async (_, html: string, suggestedName: string) => {
+    return exportHtmlToPdf(html, suggestedName)
   })
 
   ipcMain.handle('auth:delete-user', async (_, uid: string) => {
@@ -540,6 +611,14 @@ app.whenReady().then(() => {
 })
 
 app.on('will-quit', () => {
+  if (!isSideMode() && getLicenseStatus().valid) {
+    const result = runConfiguredBackup('close')
+    if (!result.ok && !result.skipped) console.warn('[backup:close]', result.error)
+  }
+  if (backupScheduler) {
+    clearInterval(backupScheduler)
+    backupScheduler = null
+  }
   globalShortcut.unregisterAll()
 })
 

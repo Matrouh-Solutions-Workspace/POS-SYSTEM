@@ -70,12 +70,24 @@ export function useTabShortcuts(): void {
       focusPane(prevPane.id)
     })
 
+    const unregSelect = Array.from({ length: 9 }, (_, i) =>
+      registerHandler(`tab.select${i + 1}`, () => {
+        const { panes, focusedPaneId, activateTab } = useSplitStore.getState()
+        const pane = panes.find((p) => p.id === focusedPaneId) ?? panes[0]
+        const targetTab = pane?.tabs[i]
+        if (!pane || !targetTab) return
+        activateTab(pane.id, targetTab.id)
+        if (pane.id === panes[0]?.id) navigate(targetTab.path)
+      })
+    )
+
     return () => {
       unregNext()
       unregPrev()
       unregClose()
       unregFocusNext()
       unregFocusPrev()
+      for (const unreg of unregSelect) unreg()
     }
   }, [navigate, registerHandler])
 }

@@ -71,6 +71,27 @@ export function TabBar({
     setCtxMenu({ x: e.clientX, y: e.clientY, tabId })
   }
 
+  function activateIndex(index: number): void {
+    const tab = pane.tabs[index]
+    if (!tab) return
+    onActivate(pane.id, tab.id)
+  }
+
+  function handleTabKeyDown(e: React.KeyboardEvent, index: number, tabId: string): void {
+    let nextIndex = index
+    if (e.key === 'ArrowRight') nextIndex = (index + 1) % pane.tabs.length
+    else if (e.key === 'ArrowLeft') nextIndex = (index - 1 + pane.tabs.length) % pane.tabs.length
+    else if (e.key === 'Home') nextIndex = 0
+    else if (e.key === 'End') nextIndex = pane.tabs.length - 1
+    else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      onActivate(pane.id, tabId)
+      return
+    } else return
+    e.preventDefault()
+    activateIndex(nextIndex)
+  }
+
   // ── Drag handlers ──────────────────────────────────────────────────────
 
   function handleDragStart(e: React.DragEvent, tabId: string): void {
@@ -180,6 +201,7 @@ export function TabBar({
                 <div
                   role="tab"
                   aria-selected={isActive}
+                  tabIndex={isActive ? 0 : -1}
                   draggable
                   className={[
                     'tab',
@@ -188,6 +210,7 @@ export function TabBar({
                   ].filter(Boolean).join(' ')}
                   onClick={() => onActivate(pane.id, tab.id)}
                   onMouseDown={(e) => handleMouseDown(e, tab.id)}
+                  onKeyDown={(e) => handleTabKeyDown(e, idx, tab.id)}
                   onContextMenu={(e) => handleContextMenu(e, tab.id)}
                   onDragStart={(e) => handleDragStart(e, tab.id)}
                   onDragEnd={handleDragEnd}
