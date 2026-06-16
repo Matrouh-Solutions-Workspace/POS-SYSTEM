@@ -25,13 +25,23 @@ const useUpdateStore = create<UpdateStore>((set) => ({
 }))
 
 const OFFLINE_UPDATE_MESSAGE = 'لا يوجد اتصال بالإنترنت حالياً، تعذّر التحقق من التحديثات'
+const MASTER_UPDATE_MESSAGE = 'لا يوجد تحديث متاح على الماستر حالياً'
+const MASTER_CONNECTION_MESSAGE = 'تعذّر الاتصال بالماستر المحلي للتحقق من التحديثات'
 
 function normalizeUpdaterMessage(message: string): string {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-    return OFFLINE_UPDATE_MESSAGE
+  const normalized = message.toLowerCase()
+  if (normalized.includes('no update package is available on this master') || normalized.includes('latest.yml')) {
+    return MASTER_UPDATE_MESSAGE
+  }
+  if (
+    normalized.includes('err_connection_refused') ||
+    normalized.includes('econnrefused') ||
+    normalized.includes('side device is not paired with this master') ||
+    normalized.includes('401')
+  ) {
+    return MASTER_CONNECTION_MESSAGE
   }
 
-  const normalized = message.toLowerCase()
   const offlineMarkers = [
     'net::err_internet_disconnected',
     'internet disconnected',
@@ -55,14 +65,6 @@ export function useUpdateState(): UpdateState {
 }
 
 export function triggerCheckNow(): void {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-    useUpdateStore.getState().set({
-      phase: 'error',
-      message: OFFLINE_UPDATE_MESSAGE
-    })
-    return
-  }
-
   useUpdateStore.getState().set({ phase: 'checking' })
   window.electronAPI?.updaterCheckNow().catch((error) => {
     useUpdateStore.getState().set({

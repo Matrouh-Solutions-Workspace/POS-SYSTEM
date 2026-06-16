@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { networkInterfaces } from 'node:os'
+import { createReadStream } from 'node:fs'
 import {
   addPairedDevice,
   DEFAULT_MASTER_PORT,
@@ -20,6 +21,7 @@ import {
   deleteAuthCredentialForUser
 } from './local-store'
 import { getLicenseStatus } from './license'
+import { readLatestUpdateYml, resolveUpdateArtifact } from './master-update-artifacts'
 
 interface MasterServerOptions {
   printReceiptHtml: (html: string) => Promise<boolean>
@@ -104,6 +106,38 @@ function routeNotFound(res: ServerResponse): void {
   fail(res, 404, 'Unknown master endpoint')
 }
 
+function sendText(res: ServerResponse, status: number, content: string, contentType: string): void {
+  res.writeHead(status, {
+    'Content-Type': contentType,
+    'Content-Length': Buffer.byteLength(content)
+  })
+  res.end(content)
+}
+
+function contentTypeFor(fileName: string): string {
+  if (fileName.endsWith('.yml') || fileName.endsWith('.yaml')) return 'text/yaml; charset=utf-8'
+  if (fileName.endsWith('.blockmap')) return 'application/octet-stream'
+  if (fileName.endsWith('.exe')) return 'application/vnd.microsoft.portable-executable'
+  return 'application/octet-stream'
+}
+
+function streamArtifact(res: ServerResponse, artifact: ReturnType<typeof resolveUpdateArtifact>): void {
+  if (!artifact) {
+    fail(res, 404, 'No update package is available on this master')
+    return
+  }
+
+  res.writeHead(200, {
+    'Content-Type': contentTypeFor(artifact.fileName),
+    'Content-Length': artifact.size,
+    'Cache-Control': 'no-store'
+  })
+  createReadStream(artifact.path).on('error', (e) => {
+    if (!res.headersSent) fail(res, 500, e instanceof Error ? e.message : String(e))
+    else res.destroy(e instanceof Error ? e : undefined)
+  }).pipe(res)
+}
+
 async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
   try {
@@ -141,6 +175,22 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
 
     if (!requireDevice(req, res)) return
+
+    if (req.method === 'GET' && (url.pathname === '/updates' || url.pathname === '/updates/latest.yml')) {
+      const latest = readLatestUpdateYml()
+      if (!latest) {
+        fail(res, 404, 'No update package is available on this master')
+        return
+      }
+      sendText(res, 200, latest.content, 'text/yaml; charset=utf-8')
+      return
+    }
+
+    if (req.method === 'GET' && url.pathname.startsWith('/updates/')) {
+      const fileName = decodeURIComponent(url.pathname.slice('/updates/'.length))
+      streamArtifact(res, resolveUpdateArtifact(fileName))
+      return
+    }
 
     if (req.method === 'POST' && url.pathname === '/auth/login') {
       const body = await readBody(req) as { username?: string; passwordHash?: string }
