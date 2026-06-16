@@ -828,7 +828,7 @@ export function PosPage(): React.ReactElement {
   function printKitchenAfterSave(order: Order, orderItems: Awaited<ReturnType<typeof getOrderItems>>, settings: Awaited<ReturnType<typeof getSettings>>, successPrefix: string): void {
     printKitchenTickets(order, orderItems, settings).then((result) => {
       if (!result.ok) {
-        setMessage(`${successPrefix}، لكن فشلت طباعة التجهيز: ${result.failed.map((f) => f.printerName).join('، ')}`)
+        setMessage(`${successPrefix}، لكن فشلت طباعة التجهيز: ${result.failed.map((f) => `${f.printerName}: ${f.error}`).join('، ')}`)
       }
     }).catch(() => {})
   }

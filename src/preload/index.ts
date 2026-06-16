@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  printReceipt: (html: string): Promise<boolean> =>
+  printReceipt: (html: string): Promise<{ ok: boolean; error?: string; code?: string }> =>
     ipcRenderer.invoke('print:receipt', html),
   listPrinters: (): Promise<Array<{ name: string; displayName: string; description?: string; isDefault?: boolean; status?: number }>> =>
     ipcRenderer.invoke('print:list-printers'),
@@ -11,6 +11,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('print:get-default-receipt-printer'),
   setDefaultReceiptPrinter: (printer: { deviceName: string; displayName?: string } | null): Promise<{ ok: boolean; printer: { deviceName: string; displayName: string; updatedAt: number } | null }> =>
     ipcRenderer.invoke('print:set-default-receipt-printer', printer),
+  getDefaultReportPrinter: (): Promise<{ deviceName: string; displayName: string; updatedAt: number; options?: { pageSize: 'A4' | 'Letter'; orientation: 'portrait' | 'landscape'; copies: number } } | null> =>
+    ipcRenderer.invoke('print:get-default-report-printer'),
+  setDefaultReportPrinter: (printer: { deviceName: string; displayName?: string; options?: { pageSize: 'A4' | 'Letter'; orientation: 'portrait' | 'landscape'; copies: number } } | null): Promise<{ ok: boolean; printer: { deviceName: string; displayName: string; updatedAt: number; options?: { pageSize: 'A4' | 'Letter'; orientation: 'portrait' | 'landscape'; copies: number } } | null }> =>
+    ipcRenderer.invoke('print:set-default-report-printer', printer),
+  testDefaultPrinter: (kind: 'receipt' | 'report'): Promise<{ ok: boolean; error?: string; code?: string }> =>
+    ipcRenderer.invoke('print:test-default-printer', kind),
+  printReport: (html: string, options?: { pageSize: 'A4' | 'Letter'; orientation: 'portrait' | 'landscape'; copies: number }): Promise<{ ok: boolean; error?: string; code?: string }> =>
+    ipcRenderer.invoke('print:report', html, options),
   deleteAuthUser: (uid: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('auth:delete-user', uid),
   resetAuthUserPassword: (uid: string, newPassword: string): Promise<{ ok: boolean; error?: string }> =>

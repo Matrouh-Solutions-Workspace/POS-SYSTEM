@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { MdPictureAsPdf, MdTableChart } from 'react-icons/md'
+import { MdPictureAsPdf, MdPrint, MdTableChart } from 'react-icons/md'
 import {
   getFullReport,
   type ReportData,
@@ -162,6 +162,14 @@ export function ReportsPage(): React.ReactElement {
     setExportMsg(result.ok ? `تم حفظ PDF: ${result.path ?? ''}` : `فشل تصدير PDF: ${result.error ?? ''}`)
   }
 
+  async function printReport(): Promise<void> {
+    if (!data) return
+    setExportMsg(null)
+    const html = buildReportHtml(data, tab, rangeLabel, cur)
+    const result = await window.electronAPI.printReport(html)
+    setExportMsg(result.ok ? 'تم إرسال التقرير للطباعة' : result.error ?? 'فشلت طباعة التقرير')
+  }
+
   return (
     <div className="reports-page">
       <div className="reports-filter">
@@ -185,6 +193,9 @@ export function ReportsPage(): React.ReactElement {
           </button>
           <button type="button" className="btn btn--secondary" onClick={() => void exportPdf()} disabled={!data || loading}>
             <MdPictureAsPdf /> PDF
+          </button>
+          <button type="button" className="btn btn--secondary" onClick={() => void printReport()} disabled={!data || loading}>
+            <MdPrint /> طباعة
           </button>
         </div>
       </div>

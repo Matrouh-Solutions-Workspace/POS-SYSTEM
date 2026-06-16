@@ -1,6 +1,6 @@
 export interface ElectronAPI {
   // Receipt printing
-  printReceipt: (html: string) => Promise<boolean>
+  printReceipt: (html: string) => Promise<{ ok: boolean; error?: string; code?: string }>
   listPrinters: () => Promise<Array<{
     name: string
     displayName: string
@@ -35,6 +35,46 @@ export interface ElectronAPI {
       updatedAt: number
     } | null
   }>
+  getDefaultReportPrinter: () => Promise<{
+    deviceName: string
+    displayName: string
+    updatedAt: number
+    options?: {
+      pageSize: 'A4' | 'Letter'
+      orientation: 'portrait' | 'landscape'
+      copies: number
+    }
+  } | null>
+  setDefaultReportPrinter: (printer: {
+    deviceName: string
+    displayName?: string
+    options?: {
+      pageSize: 'A4' | 'Letter'
+      orientation: 'portrait' | 'landscape'
+      copies: number
+    }
+  } | null) => Promise<{
+    ok: boolean
+    printer: {
+      deviceName: string
+      displayName: string
+      updatedAt: number
+      options?: {
+        pageSize: 'A4' | 'Letter'
+        orientation: 'portrait' | 'landscape'
+        copies: number
+      }
+    } | null
+  }>
+  testDefaultPrinter: (kind: 'receipt' | 'report') => Promise<{ ok: boolean; error?: string; code?: string }>
+  printReport: (
+    html: string,
+    options?: {
+      pageSize: 'A4' | 'Letter'
+      orientation: 'portrait' | 'landscape'
+      copies: number
+    }
+  ) => Promise<{ ok: boolean; error?: string; code?: string }>
   // Auth admin
   deleteAuthUser: (uid: string) => Promise<{ ok: boolean; error?: string }>
   resetAuthUserPassword: (uid: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>

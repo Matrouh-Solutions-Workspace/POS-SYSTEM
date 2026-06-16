@@ -221,7 +221,11 @@ export async function printReceipt(
 ): Promise<boolean> {
   const html = buildReceiptHtml(order, items, settings, options)
   if (window.electronAPI?.printReceipt) {
-    return window.electronAPI.printReceipt(html)
+    const result = await window.electronAPI.printReceipt(html)
+    if (!result.ok) {
+      window.alert(result.error ?? 'فشلت الطباعة. راجع إعدادات الطابعة في إعدادات المدير.')
+    }
+    return result.ok
   }
   const receiptWindow = window.open('', '_blank', 'width=400,height=600')
   if (!receiptWindow) return false

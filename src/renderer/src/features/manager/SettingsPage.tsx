@@ -678,16 +678,26 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
   const [previewHtml, setPreviewHtml] = useState<string | null>(null)
   const [defaultReceiptDeviceName, setDefaultReceiptDeviceName] = useState('')
   const [defaultReceiptSaving, setDefaultReceiptSaving] = useState(false)
+  const [defaultReportDeviceName, setDefaultReportDeviceName] = useState('')
+  const [reportPageSize, setReportPageSize] = useState<'A4' | 'Letter'>('A4')
+  const [reportOrientation, setReportOrientation] = useState<'portrait' | 'landscape'>('portrait')
+  const [reportCopies, setReportCopies] = useState(1)
+  const [defaultReportSaving, setDefaultReportSaving] = useState(false)
 
   async function load(): Promise<void> {
-    const [system, saved, defaultReceiptPrinter] = await Promise.all([
+    const [system, saved, defaultReceiptPrinter, defaultReportPrinter] = await Promise.all([
       listSystemPrinters().catch(() => []),
       listKitchenPrinters(),
-      window.electronAPI.getDefaultReceiptPrinter().catch(() => null)
+      window.electronAPI.getDefaultReceiptPrinter().catch(() => null),
+      window.electronAPI.getDefaultReportPrinter().catch(() => null)
     ])
     setSystemPrinters(system)
     setKitchenPrinters(saved)
     setDefaultReceiptDeviceName(defaultReceiptPrinter?.deviceName ?? '')
+    setDefaultReportDeviceName(defaultReportPrinter?.deviceName ?? '')
+    setReportPageSize(defaultReportPrinter?.options?.pageSize ?? 'A4')
+    setReportOrientation(defaultReportPrinter?.options?.orientation ?? 'portrait')
+    setReportCopies(defaultReportPrinter?.options?.copies ?? 1)
     if (!selectedDeviceName && system[0]) {
       setSelectedDeviceName(system.find((printer) => printer.isDefault)?.name ?? system[0].name)
     }
@@ -744,6 +754,38 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
       setMessage(e instanceof Error ? e.message : 'فشل حفظ طابعة الفواتير')
     } finally {
       setDefaultReceiptSaving(false)
+    }
+  }
+
+  async function testDefaultPrinter(kind: 'receipt' | 'report'): Promise<void> {
+    setMessage(null)
+    const result = await window.electronAPI.testDefaultPrinter(kind)
+    if (result.ok) {
+      setMessage(kind === 'receipt' ? 'تم إرسال اختبار طباعة الفواتير' : 'تم إرسال اختبار طباعة التقارير')
+    } else {
+      setMessage(result.error ?? 'فشل اختبار الطباعة')
+    }
+  }
+
+  async function saveDefaultReportPrinter(): Promise<void> {
+    setDefaultReportSaving(true)
+    setMessage(null)
+    try {
+      const printer = systemPrinters.find((p) => p.name === defaultReportDeviceName)
+      await window.electronAPI.setDefaultReportPrinter(printer ? {
+        deviceName: printer.name,
+        displayName: printer.displayName || printer.name,
+        options: {
+          pageSize: reportPageSize,
+          orientation: reportOrientation,
+          copies: reportCopies
+        }
+      } : null)
+      setMessage(printer ? 'تم حفظ طابعة التقارير لهذا الجهاز' : 'تم مسح طابعة التقارير لهذا الجهاز')
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'فشل حفظ طابعة التقارير')
+    } finally {
+      setDefaultReportSaving(false)
     }
   }
 
@@ -827,10 +869,59 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
             <button type="button" className="btn btn--secondary" onClick={() => void load()}>
               <MdRefresh /> تحديث
             </button>
+            <button type="button" className="btn btn--secondary" onClick={() => void testDefaultPrinter('receipt')}>
+              <MdPrint /> اختبار طباعة
+            </button>
           </div>
         </div>
         <p style={{ fontSize: '0.82rem', color: 'var(--color-muted)', margin: '8px 0 0' }}>
           في وضع الجهاز الجانبي: إذا كانت طباعة الفاتورة على الجهاز الجانبي فسيستخدم هذه الطابعة. إذا كانت على الماستر فسيستخدم طابعة الفواتير الافتراضية المحفوظة على الماستر.
+        </p>
+      </div>
+
+      <div className="receipt-designer-panel" style={{ marginBottom: 18 }}>
+        <h3 className="card__title">طابعة تقارير هذا الجهاز</h3>
+        <div className="settings-form-grid">
+          <label className="field">
+            <span>الطابعة الافتراضية للتقارير</span>
+            <select value={defaultReportDeviceName} onChange={(e) => setDefaultReportDeviceName(e.target.value)}>
+              <option value="">اختيار الطابعة</option>
+              {systemPrinters.map((printer) => (
+                <option key={printer.name} value={printer.name}>
+                  {printer.displayName || printer.name}{printer.isDefault ? ' (افتراضية في النظام)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>مقاس الورق</span>
+            <select value={reportPageSize} onChange={(e) => setReportPageSize(e.target.value as typeof reportPageSize)}>
+              <option value="A4">A4</option>
+              <option value="Letter">Letter</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>الاتجاه</span>
+            <select value={reportOrientation} onChange={(e) => setReportOrientation(e.target.value as typeof reportOrientation)}>
+              <option value="portrait">رأسي</option>
+              <option value="landscape">أفقي</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>عدد النسخ</span>
+            <input type="number" min="1" max="5" value={reportCopies} onChange={(e) => setReportCopies(Math.max(1, Math.min(5, Number(e.target.value) || 1)))} />
+          </label>
+          <div className="form-actions settings-form-grid__full">
+            <button type="button" className="btn btn--primary" disabled={defaultReportSaving} onClick={() => void saveDefaultReportPrinter()}>
+              <MdSave /> {defaultReportSaving ? 'جار الحفظ...' : 'حفظ طابعة التقارير'}
+            </button>
+            <button type="button" className="btn btn--secondary" onClick={() => void testDefaultPrinter('report')}>
+              <MdPrint /> اختبار طباعة
+            </button>
+          </div>
+        </div>
+        <p style={{ fontSize: '0.82rem', color: 'var(--color-muted)', margin: '8px 0 0' }}>
+          التقارير تستخدم هذه الطابعة والخيارات عند الضغط على طباعة من صفحة التقارير.
         </p>
       </div>
 

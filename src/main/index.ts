@@ -129,28 +129,51 @@ interface DefaultReceiptPrinter {
   updatedAt: number
 }
 
-function receiptPrinterConfigPath(): string {
-  return join(app.getPath('userData'), 'receipt-printer.json')
+type DefaultPrinterKind = 'receipt' | 'report'
+
+interface ReportPrintOptions {
+  pageSize: 'A4' | 'Letter'
+  orientation: 'portrait' | 'landscape'
+  copies: number
 }
 
-function readDefaultReceiptPrinter(): DefaultReceiptPrinter | null {
+interface PrintResult {
+  ok: boolean
+  error?: string
+  code?: 'NO_DEFAULT_PRINTER' | 'PRINT_FAILED'
+}
+
+function defaultPrinterInstructions(kind: DefaultPrinterKind): string {
+  const label = kind === 'receipt' ? 'الفواتير' : 'التقارير'
+  return `لم يتم تحديد طابعة ${label} الافتراضية لهذا الجهاز. افتح حساب المدير ثم الإعدادات ثم الطابعات، اختر طابعة ${label} لهذا الجهاز، اضغط حفظ، ثم اضغط اختبار الطباعة.`
+}
+
+function defaultPrinterConfigPath(kind: DefaultPrinterKind): string {
+  return join(app.getPath('userData'), kind === 'receipt' ? 'receipt-printer.json' : 'report-printer.json')
+}
+
+function readDefaultPrinter(kind: DefaultPrinterKind): (DefaultReceiptPrinter & { options?: ReportPrintOptions }) | null {
   try {
-    const path = receiptPrinterConfigPath()
+    const path = defaultPrinterConfigPath(kind)
     if (!existsSync(path)) return null
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<DefaultReceiptPrinter>
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<DefaultReceiptPrinter & { options: ReportPrintOptions }>
     if (!parsed.deviceName) return null
     return {
       deviceName: parsed.deviceName,
       displayName: parsed.displayName || parsed.deviceName,
-      updatedAt: parsed.updatedAt || 0
+      updatedAt: parsed.updatedAt || 0,
+      options: parsed.options
     }
   } catch {
     return null
   }
 }
 
-function writeDefaultReceiptPrinter(printer: { deviceName: string; displayName?: string } | null): DefaultReceiptPrinter | null {
-  const path = receiptPrinterConfigPath()
+function writeDefaultPrinter(
+  kind: DefaultPrinterKind,
+  printer: ({ deviceName: string; displayName?: string; options?: ReportPrintOptions } | null)
+): (DefaultReceiptPrinter & { options?: ReportPrintOptions }) | null {
+  const path = defaultPrinterConfigPath(kind)
   mkdirSync(dirname(path), { recursive: true })
   if (!printer?.deviceName) {
     writeFileSync(path, JSON.stringify(null, null, 2), 'utf8')
@@ -161,11 +184,36 @@ function writeDefaultReceiptPrinter(printer: { deviceName: string; displayName?:
     displayName: printer.displayName || printer.deviceName,
     updatedAt: Date.now()
   }
-  writeFileSync(path, JSON.stringify(value, null, 2), 'utf8')
+  const withOptions = kind === 'report'
+    ? { ...value, options: normalizeReportPrintOptions(printer.options) }
+    : value
+  writeFileSync(path, JSON.stringify(withOptions, null, 2), 'utf8')
+  return withOptions
+}
+
+function readDefaultReceiptPrinter(): DefaultReceiptPrinter | null {
+  return readDefaultPrinter('receipt')
+}
+
+function writeDefaultReceiptPrinter(printer: { deviceName: string; displayName?: string } | null): DefaultReceiptPrinter | null {
+  const value = writeDefaultPrinter('receipt', printer)
   return value
 }
 
-async function printHtmlToDevice(html: string, deviceName: string, copies = 1): Promise<boolean> {
+function normalizeReportPrintOptions(options?: Partial<ReportPrintOptions>): ReportPrintOptions {
+  return {
+    pageSize: options?.pageSize === 'Letter' ? 'Letter' : 'A4',
+    orientation: options?.orientation === 'landscape' ? 'landscape' : 'portrait',
+    copies: Math.max(1, Math.min(5, Number(options?.copies) || 1))
+  }
+}
+
+async function printHtmlToDevice(
+  html: string,
+  deviceName: string,
+  copies = 1,
+  options?: { pageSize?: 'A4' | 'Letter' | { width: number; height: number }; landscape?: boolean }
+): Promise<boolean> {
   const printWindow = new BrowserWindow({
     width: 380,
     height: 700,
@@ -189,7 +237,8 @@ async function printHtmlToDevice(html: string, deviceName: string, copies = 1): 
             silent: true,
             printBackground: true,
             deviceName,
-            pageSize: { width: 80000, height: 297000 }
+            pageSize: options?.pageSize ?? { width: 80000, height: 297000 },
+            landscape: options?.landscape
           },
           (success) => {
             clearTimeout(timeout)
@@ -208,14 +257,36 @@ async function printHtmlToDevice(html: string, deviceName: string, copies = 1): 
   }
 }
 
-async function printReceiptUsingDefault(html: string): Promise<boolean> {
+async function printReceiptUsingDefault(html: string): Promise<PrintResult> {
   const defaultPrinter = readDefaultReceiptPrinter()
   if (defaultPrinter?.deviceName) {
     const ok = await printHtmlToDevice(html, defaultPrinter.deviceName, 1)
-    if (ok) return true
+    if (ok) return { ok: true }
     console.warn('[receipt-print]', `Default receipt printer failed: ${defaultPrinter.displayName}`)
+    return { ok: false, code: 'PRINT_FAILED', error: `فشلت الطباعة على ${defaultPrinter.displayName}` }
   }
-  return printReceiptHtml(html)
+  return { ok: false, code: 'NO_DEFAULT_PRINTER', error: defaultPrinterInstructions('receipt') }
+}
+
+async function printReportUsingDefault(html: string, options?: Partial<ReportPrintOptions>): Promise<PrintResult> {
+  const defaultPrinter = readDefaultPrinter('report')
+  if (!defaultPrinter?.deviceName) {
+    return { ok: false, code: 'NO_DEFAULT_PRINTER', error: defaultPrinterInstructions('report') }
+  }
+  const printOptions = normalizeReportPrintOptions(options ?? defaultPrinter.options)
+  const ok = await printHtmlToDevice(html, defaultPrinter.deviceName, printOptions.copies, {
+    pageSize: printOptions.pageSize,
+    landscape: printOptions.orientation === 'landscape'
+  })
+  return ok
+    ? { ok: true }
+    : { ok: false, code: 'PRINT_FAILED', error: `فشلت طباعة التقرير على ${defaultPrinter.displayName}` }
+}
+
+async function printDefaultPrinterTest(kind: DefaultPrinterKind): Promise<PrintResult> {
+  const title = kind === 'receipt' ? 'Receipt printer test' : 'Report printer test'
+  const html = `<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"/><style>body{font-family:Arial,Tahoma,sans-serif;margin:20px;color:#111}h1{font-size:20px}p{font-size:14px}</style></head><body><h1>${title}</h1><p>اختبار طباعة ناجح من SHIFT POS</p><p>${new Date().toLocaleString('ar-EG')}</p></body></html>`
+  return kind === 'receipt' ? printReceiptUsingDefault(html) : printReportUsingDefault(html)
 }
 
 async function printKitchenBatch(jobs: TargetedPrintJob[]): Promise<{
@@ -228,7 +299,7 @@ async function printKitchenBatch(jobs: TargetedPrintJob[]): Promise<{
 
   for (const job of jobs) {
     if (!job.deviceName) {
-      failed.push({ printerName: job.printerName, error: 'Printer device name is missing' })
+      failed.push({ printerName: job.printerName, error: 'لم يتم تحديد طابعة لهذا الطلب. افتح حساب المدير ثم الإعدادات ثم الطابعات، وحدد الطابعة الافتراضية أو اربط طابعة التجهيز بطابعة فعلية.' })
       continue
     }
     const ok = await printHtmlToDevice(job.html, job.deviceName, job.copies ?? 1)
@@ -334,7 +405,7 @@ app.whenReady().then(() => {
   if (!isSideMode() && getLicenseStatus().valid) {
     initLocalStore()
     startBackupScheduler()
-    void syncMasterServerWithSettings({ printReceiptHtml: printReceiptUsingDefault, printKitchenBatch }).catch((e) => {
+    void syncMasterServerWithSettings({ printReceiptHtml: async (html) => (await printReceiptUsingDefault(html)).ok, printKitchenBatch }).catch((e) => {
       console.error('[master-server]', e)
     })
   }
@@ -391,7 +462,7 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('network:master-status', () => getMasterServerStatus())
   ipcMain.handle('network:master-refresh', async () => {
-    await syncMasterServerWithSettings({ printReceiptHtml: printReceiptUsingDefault, printKitchenBatch })
+    await syncMasterServerWithSettings({ printReceiptHtml: async (html) => (await printReceiptUsingDefault(html)).ok, printKitchenBatch })
     return getMasterServerStatus()
   })
   ipcMain.handle('network:master-reset-pairing-code', () => ({ code: resetMasterPairingCode() }))
@@ -426,7 +497,7 @@ app.whenReady().then(() => {
     if (isSideMode()) return callMaster('/db/save', { collectionName, documents })
     cacheDocuments(collectionName, documents)
     if (collectionName === 'settings') {
-      void syncMasterServerWithSettings({ printReceiptHtml: printReceiptUsingDefault, printKitchenBatch }).catch((e) => console.error('[master-server]', e))
+      void syncMasterServerWithSettings({ printReceiptHtml: async (html) => (await printReceiptUsingDefault(html)).ok, printKitchenBatch }).catch((e) => console.error('[master-server]', e))
     }
     return { ok: true as const }
   })
@@ -452,7 +523,7 @@ app.whenReady().then(() => {
     if (isSideMode()) return callMaster('/db/batch', { operations })
     const result = executeBatch(operations)
     if (operations.some((op) => op.collection === 'settings')) {
-      void syncMasterServerWithSettings({ printReceiptHtml: printReceiptUsingDefault, printKitchenBatch }).catch((e) => console.error('[master-server]', e))
+      void syncMasterServerWithSettings({ printReceiptHtml: async (html) => (await printReceiptUsingDefault(html)).ok, printKitchenBatch }).catch((e) => console.error('[master-server]', e))
     }
     return result
   })
@@ -565,8 +636,8 @@ app.whenReady().then(() => {
           { collectionName: 'settings', documentId: 'app' }
         )
         if (settings?.receiptPrintRoute === 'master') {
-          const result = await callMaster<{ printed: boolean }>('/print/receipt', { html })
-          return result.printed
+          const result = await callMaster<{ printed: boolean; error?: string }>('/print/receipt', { html })
+          return result.printed ? { ok: true as const } : { ok: false as const, error: result.error ?? defaultPrinterInstructions('receipt'), code: 'PRINT_FAILED' as const }
         }
       } catch (e) {
         console.warn('[print-route]', e)
@@ -595,6 +666,22 @@ app.whenReady().then(() => {
 
   ipcMain.handle('print:set-default-receipt-printer', (_, printer: { deviceName: string; displayName?: string } | null) => {
     return { ok: true as const, printer: writeDefaultReceiptPrinter(printer) }
+  })
+
+  ipcMain.handle('print:get-default-report-printer', () => {
+    return readDefaultPrinter('report')
+  })
+
+  ipcMain.handle('print:set-default-report-printer', (_, printer: { deviceName: string; displayName?: string; options?: ReportPrintOptions } | null) => {
+    return { ok: true as const, printer: writeDefaultPrinter('report', printer) }
+  })
+
+  ipcMain.handle('print:test-default-printer', async (_, kind: DefaultPrinterKind) => {
+    return printDefaultPrinterTest(kind)
+  })
+
+  ipcMain.handle('print:report', async (_, html: string, options?: Partial<ReportPrintOptions>) => {
+    return printReportUsingDefault(html, options)
   })
 
   ipcMain.handle('print:kitchen-batch', async (_, jobs: TargetedPrintJob[]) => {
