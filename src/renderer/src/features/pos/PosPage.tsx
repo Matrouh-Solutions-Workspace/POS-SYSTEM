@@ -21,6 +21,7 @@ import {
 import { getOrderItems } from '@renderer/features/orders/order-service'
 import { listDiningTables } from '@renderer/features/tables/table-service'
 import { printReceipt } from '@renderer/features/receipt/receipt-builder'
+import { printKitchenTickets } from '@renderer/features/printers/kitchen-printing'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import {
   lineTotal,
@@ -824,6 +825,14 @@ export function PosPage(): React.ReactElement {
     setCheckoutOpen(true)
   }
 
+  function printKitchenAfterSave(order: Order, orderItems: Awaited<ReturnType<typeof getOrderItems>>, settings: Awaited<ReturnType<typeof getSettings>>, successPrefix: string): void {
+    printKitchenTickets(order, orderItems, settings).then((result) => {
+      if (!result.ok) {
+        setMessage(`${successPrefix}، لكن فشلت طباعة التجهيز: ${result.failed.map((f) => f.printerName).join('، ')}`)
+      }
+    }).catch(() => {})
+  }
+
   async function submitCheckout(): Promise<void> {
     if (cart.length === 0) return
 
@@ -876,6 +885,7 @@ export function PosPage(): React.ReactElement {
       resetCheckoutFields()
       setMessage(`تم إتمام الطلب #${orderReference(order)}`)
       printReceipt(order, orderItems, settings).catch(() => {})
+      printKitchenAfterSave(order, orderItems, settings, 'تم حفظ الطلب')
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'فشل')
     } finally {
@@ -908,6 +918,7 @@ export function PosPage(): React.ReactElement {
       setUnpaidOrders(unpaid)
       setMessage(`تم إنشاء طلب صالة #${orderReference(order)}`)
       printReceipt(order, orderItems, settings).catch(() => {})
+      printKitchenAfterSave(order, orderItems, settings, 'تم حفظ الطلب')
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'فشل')
     } finally {
@@ -975,15 +986,17 @@ export function PosPage(): React.ReactElement {
     setLoading(true)
     setMessage('')
     try {
-      await editOrderItems({
+      const order = await editOrderItems({
         orderId: editingOrder.id,
         cashierId: user.id,
         lines: cart,
         orderNoteAr: orderNote || undefined
       })
+      const [orderItems, settings] = await Promise.all([getOrderItems(order.id), getSettings()])
       setCart([])
       setOrderNote('')
       setEditingOrder(null)
+      printKitchenAfterSave(order, orderItems, settings, 'تم تعديل الطلب')
       const unpaid = await listUnpaidDineInOrders()
       setUnpaidOrders(unpaid)
       setMessage('تم تعديل الطلب بنجاح')

@@ -97,6 +97,7 @@ export async function updateMenuItem(
       | 'weightedPriceOptions'
       | 'allowCustomWeight'
       | 'customWeightUnitPrice'
+      | 'kitchenPrinterIds'
       | 'active'
     >
   >
@@ -131,6 +132,7 @@ export async function createMenuItemWithRecipe(params: {
   weightedPriceOptions?: MenuItem['weightedPriceOptions']
   allowCustomWeight?: boolean
   customWeightUnitPrice?: number
+  kitchenPrinterIds?: string[]
   lines: RecipeLine[]   // empty array = no inventory deduction
   sortOrder?: number
 }): Promise<{ item: MenuItem; recipe: Recipe }> {
@@ -164,6 +166,7 @@ export async function createMenuItemWithRecipe(params: {
     weightedPriceOptions: params.isWeighted ? params.weightedPriceOptions : undefined,
     allowCustomWeight: params.isWeighted ? params.allowCustomWeight : undefined,
     customWeightUnitPrice: params.isWeighted ? params.customWeightUnitPrice : undefined,
+    kitchenPrinterIds: params.kitchenPrinterIds ?? [],
     active: true,
     recipeId,
     sortOrder: params.sortOrder ?? 9999,

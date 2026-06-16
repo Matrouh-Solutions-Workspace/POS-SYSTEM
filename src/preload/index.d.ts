@@ -1,6 +1,24 @@
 export interface ElectronAPI {
   // Receipt printing
   printReceipt: (html: string) => Promise<boolean>
+  listPrinters: () => Promise<Array<{
+    name: string
+    displayName: string
+    description?: string
+    isDefault?: boolean
+    status?: number
+  }>>
+  printKitchenBatch: (jobs: Array<{
+    printerId: string
+    printerName: string
+    deviceName: string
+    copies?: number
+    html: string
+  }>) => Promise<{
+    ok: boolean
+    printed: number
+    failed: Array<{ printerName: string; error: string }>
+  }>
   // Auth admin
   deleteAuthUser: (uid: string) => Promise<{ ok: boolean; error?: string }>
   resetAuthUserPassword: (uid: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>

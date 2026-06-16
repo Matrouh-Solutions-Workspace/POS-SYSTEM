@@ -18,7 +18,8 @@ export const COLLECTIONS = {
   settings: 'settings',
   auditLog: 'audit_log',
   itemSizes: 'item_sizes',
-  itemAddons: 'item_addons'
+  itemAddons: 'item_addons',
+  kitchenPrinters: 'kitchen_printers'
 } as const
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS]

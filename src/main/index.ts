@@ -115,6 +115,78 @@ async function printReceiptHtml(html: string): Promise<boolean> {
   }
 }
 
+interface TargetedPrintJob {
+  printerId: string
+  printerName: string
+  deviceName: string
+  copies?: number
+  html: string
+}
+
+async function printHtmlToDevice(html: string, deviceName: string, copies = 1): Promise<boolean> {
+  const printWindow = new BrowserWindow({
+    width: 380,
+    height: 700,
+    show: false,
+    webPreferences: { nodeIntegration: false, contextIsolation: true }
+  })
+
+  try {
+    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+    await new Promise<void>((resolve) => setTimeout(resolve, 300))
+
+    for (let i = 0; i < Math.max(1, Math.min(5, copies)); i += 1) {
+      const printed = await new Promise<boolean>((resolve) => {
+        const timeout = setTimeout(() => {
+          if (!printWindow.isDestroyed()) printWindow.close()
+          resolve(false)
+        }, 30000)
+
+        printWindow.webContents.print(
+          {
+            silent: true,
+            printBackground: true,
+            deviceName,
+            pageSize: { width: 80000, height: 297000 }
+          },
+          (success) => {
+            clearTimeout(timeout)
+            resolve(success)
+          }
+        )
+      })
+      if (!printed) return false
+    }
+    return true
+  } catch (e) {
+    console.error('[targeted-print]', e)
+    return false
+  } finally {
+    if (!printWindow.isDestroyed()) printWindow.close()
+  }
+}
+
+async function printKitchenBatch(jobs: TargetedPrintJob[]): Promise<{
+  ok: boolean
+  printed: number
+  failed: Array<{ printerName: string; error: string }>
+}> {
+  const failed: Array<{ printerName: string; error: string }> = []
+  let printed = 0
+
+  for (const job of jobs) {
+    if (!job.deviceName) {
+      failed.push({ printerName: job.printerName, error: 'Printer device name is missing' })
+      continue
+    }
+    const ok = await printHtmlToDevice(job.html, job.deviceName, job.copies ?? 1)
+    if (ok) printed += 1
+    else failed.push({ printerName: job.printerName, error: 'Print job failed' })
+  }
+
+  return { ok: failed.length === 0, printed, failed }
+}
+
 async function exportHtmlToPdf(html: string, suggestedName: string): Promise<{ ok: boolean; path?: string; error?: string }> {
   const { dialog } = await import('electron')
   const result = await dialog.showSaveDialog({
@@ -210,7 +282,7 @@ app.whenReady().then(() => {
   if (!isSideMode() && getLicenseStatus().valid) {
     initLocalStore()
     startBackupScheduler()
-    void syncMasterServerWithSettings({ printReceiptHtml }).catch((e) => {
+    void syncMasterServerWithSettings({ printReceiptHtml, printKitchenBatch }).catch((e) => {
       console.error('[master-server]', e)
     })
   }
@@ -285,7 +357,7 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('network:master-status', () => getMasterServerStatus())
   ipcMain.handle('network:master-refresh', async () => {
-    await syncMasterServerWithSettings({ printReceiptHtml })
+    await syncMasterServerWithSettings({ printReceiptHtml, printKitchenBatch })
     return getMasterServerStatus()
   })
   ipcMain.handle('network:master-reset-pairing-code', () => ({ code: resetMasterPairingCode() }))
@@ -320,7 +392,7 @@ app.whenReady().then(() => {
     if (isSideMode()) return callMaster('/db/save', { collectionName, documents })
     cacheDocuments(collectionName, documents)
     if (collectionName === 'settings') {
-      void syncMasterServerWithSettings({ printReceiptHtml }).catch((e) => console.error('[master-server]', e))
+      void syncMasterServerWithSettings({ printReceiptHtml, printKitchenBatch }).catch((e) => console.error('[master-server]', e))
     }
     return { ok: true as const }
   })
@@ -346,7 +418,7 @@ app.whenReady().then(() => {
     if (isSideMode()) return callMaster('/db/batch', { operations })
     const result = executeBatch(operations)
     if (operations.some((op) => op.collection === 'settings')) {
-      void syncMasterServerWithSettings({ printReceiptHtml }).catch((e) => console.error('[master-server]', e))
+      void syncMasterServerWithSettings({ printReceiptHtml, printKitchenBatch }).catch((e) => console.error('[master-server]', e))
     }
     return result
   })
@@ -467,6 +539,38 @@ app.whenReady().then(() => {
       }
     }
     return printReceiptHtml(html)
+  })
+
+  ipcMain.handle('print:list-printers', async () => {
+    const printers = await (mainWindow?.webContents.getPrintersAsync() ?? Promise.resolve([]))
+    return printers.map((printer) => {
+      const details = printer as typeof printer & { isDefault?: boolean; status?: number }
+      return {
+        name: printer.name,
+        displayName: printer.displayName || printer.name,
+        description: printer.description,
+        isDefault: details.isDefault,
+        status: details.status
+      }
+    })
+  })
+
+  ipcMain.handle('print:kitchen-batch', async (_, jobs: TargetedPrintJob[]) => {
+    if (isSideMode()) {
+      try {
+        return await callMaster('/print/kitchen-batch', { jobs })
+      } catch (e) {
+        return {
+          ok: false as const,
+          printed: 0,
+          failed: jobs.map((job) => ({
+            printerName: job.printerName,
+            error: e instanceof Error ? e.message : String(e)
+          }))
+        }
+      }
+    }
+    return printKitchenBatch(jobs)
   })
 
   ipcMain.handle('print:pdf-report', async (_, html: string, suggestedName: string) => {

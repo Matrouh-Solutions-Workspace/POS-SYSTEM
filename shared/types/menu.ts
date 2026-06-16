@@ -43,6 +43,7 @@ export interface MenuItem {
   weightedPriceOptions?: WeightedPriceOption[]
   allowCustomWeight?: boolean
   customWeightUnitPrice?: number
+  kitchenPrinterIds?: string[]
   imageUrl?: string
   active: boolean
   recipeId: string

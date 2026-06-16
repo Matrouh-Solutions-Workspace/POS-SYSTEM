@@ -14,7 +14,8 @@ import type {
   WeightedPriceOption,
   Ingredient,
   ItemSize,
-  ItemAddon
+  ItemAddon,
+  KitchenPrinter
 } from '@shared/types'
 import {
   listCategories,
@@ -38,11 +39,12 @@ import {
 } from '@renderer/features/inventory/inventory-service'
 import { listSizes, createSize, updateSize, deleteSize, reorderSizes } from '@renderer/features/menu/sizes-service'
 import { listAddons, createAddon, updateAddon, deleteAddon, reorderAddons } from '@renderer/features/menu/addons-service'
+import { listKitchenPrinters } from '@renderer/features/printers/printer-service'
 import { ConfirmDeleteButton } from '@renderer/components/ConfirmDeleteButton'
 import {
   MdArrowUpward, MdArrowDownward, MdEdit, MdCheck,
   MdClose, MdMenuBook, MdStraighten, MdAddBox,
-  MdInventory2
+  MdInventory2, MdPrint
 } from 'react-icons/md'
 import { usePageState } from '@renderer/features/tabs/page-state-store'
 
@@ -69,6 +71,7 @@ type ItemEditState = {
   sizeOptions: SizeOptionForm[]; attachments: AttachmentForm[]
   isWeighted: boolean; weightedPriceOptions: WeightedPriceOptionForm[]
   allowCustomWeight: boolean; customWeightUnitPrice: string; active: boolean
+  kitchenPrinterIds: string[]
 }
 
 function newWeightedOption(kiloPreset = false): WeightedPriceOptionForm {
@@ -573,6 +576,7 @@ export type ItemFormState = {
   weightedPriceOptions: WeightedPriceOptionForm[]
   allowCustomWeight: boolean
   customWeightUnitPrice: string
+  kitchenPrinterIds: string[]
   lines: RecipeLineForm[]
 }
 
@@ -589,6 +593,7 @@ export const defaultItemForm: ItemFormState = {
   weightedPriceOptions: [{ id: 'default-weighted', label: '1 كجم', weightGrams: '1000', price: '' }],
   allowCustomWeight: false,
   customWeightUnitPrice: '',
+  kitchenPrinterIds: [],
   lines: [{ ingredientId: '', quantity: '', unit: 'جرام' }]
 }
 
@@ -628,12 +633,13 @@ function needsLinkedStock(itemType: MenuItemType, productType: ProductType): boo
   return productType === 'ready_made' || productType === 'manufactured'
 }
 
-function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, setMessage, itemForm, setItemForm, formRef }: {
+function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onRefresh, setMessage, itemForm, setItemForm, formRef }: {
   categories: MenuCategory[]
   items: MenuItem[]
   ingredients: Ingredient[]
   sizes: ItemSize[]
   addons: ItemAddon[]
+  printers: KitchenPrinter[]
   onRefresh: () => Promise<void>
   setMessage: (m: string | null) => void
   itemForm: ItemFormState
@@ -684,6 +690,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
         weightedPriceOptions: weightedOpts,
         allowCustomWeight: itemForm.isWeighted ? itemForm.allowCustomWeight : undefined,
         customWeightUnitPrice: itemForm.isWeighted && itemForm.allowCustomWeight ? Number(itemForm.customWeightUnitPrice) : undefined,
+        kitchenPrinterIds: itemForm.kitchenPrinterIds,
         lines: recipeLines,
         sortOrder: items.length
       })
@@ -722,6 +729,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
       weightedPriceOptions: editingItem.isWeighted ? weightedOpts : [],
       allowCustomWeight: editingItem.isWeighted ? editingItem.allowCustomWeight : false,
       customWeightUnitPrice: editingItem.isWeighted && editingItem.allowCustomWeight ? Number(editingItem.customWeightUnitPrice) : undefined,
+      kitchenPrinterIds: editingItem.kitchenPrinterIds,
       active: editingItem.active
     })
     setEditingItem(null)
@@ -763,6 +771,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
       weightedPriceOptions: (item.weightedPriceOptions ?? []).map(toWeightedOptionForm),
       allowCustomWeight: !!item.allowCustomWeight,
       customWeightUnitPrice: item.customWeightUnitPrice != null ? String(item.customWeightUnitPrice) : '',
+      kitchenPrinterIds: item.kitchenPrinterIds ?? [],
       active: item.active
     })
   }
@@ -809,6 +818,39 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
 
   const activeSizes = sizes.filter((s) => s.active)
   const activeAddons = addons.filter((a) => a.active)
+  const activePrinters = printers.filter((printer) => printer.active)
+
+  function renderPrinterSection(selectedIds: string[], isForm: boolean): React.ReactElement {
+    return (
+      <div className="weighted-pricing-editor">
+        <h3><MdPrint style={{ verticalAlign: 'middle', marginLeft: 4 }} />طابعات التجهيز</h3>
+        {activePrinters.length === 0 && (
+          <p style={{ fontSize: '0.82rem', color: 'var(--color-muted)', margin: '0 0 8px' }}>
+            أضف طابعات التجهيز من الإعدادات أولا.
+          </p>
+        )}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8 }}>
+          {activePrinters.map((printer) => (
+            <label key={printer.id} className="field--checkbox" style={{ border: '1px solid var(--color-border-light)', padding: 8, borderRadius: 4 }}>
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(printer.id)}
+                onChange={(e) => {
+                  const checked = e.target.checked
+                  const next = checked
+                    ? [...selectedIds, printer.id]
+                    : selectedIds.filter((id) => id !== printer.id)
+                  if (isForm) setItemForm((f) => ({ ...f, kitchenPrinterIds: next }))
+                  else setEditingItem((prev) => prev ? { ...prev, kitchenPrinterIds: next } : prev)
+                }}
+              />
+              <span>{printer.name}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   // ── Render size options section (reused in add form + edit inline) ────────
   function renderSizeSection(
@@ -1031,6 +1073,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
 
           {/* Attachments — products + services */}
           {itemForm.itemType !== 'raw_material' && renderAttachmentsSection(itemForm.attachments, true)}
+          {renderPrinterSection(itemForm.kitchenPrinterIds, true)}
 
           {/* Recipe lines — only for recipe-type products */}
           {showRecipeSection && (
@@ -1081,6 +1124,9 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
           <tbody>
             {items.map((item, idx) => {
               const isEditing = editingItem?.id === item.id
+              const linkedPrinterNames = (item.kitchenPrinterIds ?? [])
+                .map((id) => printers.find((printer) => printer.id === id)?.name)
+                .filter(Boolean)
               return (
                 <tr key={item.id}>
                   <td>
@@ -1091,7 +1137,17 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
                   </td>
                   <td>{isEditing
                     ? <input className="inline-edit-input" value={editingItem.nameAr} onChange={(e) => setEditingItem({...editingItem,nameAr:e.target.value})} autoFocus />
-                    : item.nameAr}
+                    : (
+                        <div>
+                          <div>{item.nameAr}</div>
+                          {linkedPrinterNames.length > 0 && (
+                            <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginTop: 3 }}>
+                              <MdPrint style={{ verticalAlign: 'middle', marginLeft: 3 }} />
+                              {linkedPrinterNames.join('، ')}
+                            </div>
+                          )}
+                        </div>
+                      )}
                   </td>
                   <td>
                     {isEditing ? (
@@ -1147,6 +1203,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, onRefresh, se
                           {editingItem.itemType !== 'raw_material' && renderSizeSection(editingItem.sizeOptions, editingItem.isWeighted, false)}
                           {/* inline edit: attachments */}
                           {editingItem.itemType !== 'raw_material' && renderAttachmentsSection(editingItem.attachments, false)}
+                          {renderPrinterSection(editingItem.kitchenPrinterIds, false)}
                           {needsLinkedStock(editingItem.itemType, editingItem.productType) && (
                             <select
                               className="inline-edit-input"
@@ -1247,13 +1304,14 @@ export function ItemsPage(): React.ReactElement {
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
   const [sizes, setSizes] = useState<ItemSize[]>([])
   const [addons, setAddons] = useState<ItemAddon[]>([])
+  const [printers, setPrinters] = useState<KitchenPrinter[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const tabListRef = useRef<HTMLDivElement>(null)
   const addItemFormRef = useRef<HTMLFormElement>(null)
 
   const [itemForm, setItemForm] = useState<ItemFormState>(() => {
     const s = saved.itemForm
-    if (s) return s as ItemFormState
+    if (s) return { ...defaultItemForm, ...(s as ItemFormState), kitchenPrinterIds: (s as ItemFormState).kitchenPrinterIds ?? [] }
     return { ...defaultItemForm, weightedPriceOptions: [newWeightedOption(true)] }
   })
 
@@ -1261,18 +1319,20 @@ export function ItemsPage(): React.ReactElement {
   useEffect(() => { save({ itemForm }) }, [itemForm])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async () => {
-    const [cats, menu, ing, szs, adns] = await Promise.all([
+    const [cats, menu, ing, szs, adns, prns] = await Promise.all([
       listCategories(),
       listMenuItems(),
       listIngredients(),
       listSizes(),
-      listAddons()
+      listAddons(),
+      listKitchenPrinters()
     ])
     setCategories(cats)
     setItems(menu)
     setIngredients(ing)
     setSizes(szs)
     setAddons(adns)
+    setPrinters(prns)
   }, [])
 
   useEffect(() => { void load() }, [load])
@@ -1360,6 +1420,7 @@ export function ItemsPage(): React.ReactElement {
           ingredients={ingredients}
           sizes={sizes}
           addons={addons}
+          printers={printers}
           onRefresh={load}
           setMessage={setMessage}
           itemForm={itemForm}

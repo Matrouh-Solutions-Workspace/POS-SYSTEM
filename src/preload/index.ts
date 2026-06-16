@@ -3,6 +3,10 @@ import { contextBridge, ipcRenderer } from 'electron'
 contextBridge.exposeInMainWorld('electronAPI', {
   printReceipt: (html: string): Promise<boolean> =>
     ipcRenderer.invoke('print:receipt', html),
+  listPrinters: (): Promise<Array<{ name: string; displayName: string; description?: string; isDefault?: boolean; status?: number }>> =>
+    ipcRenderer.invoke('print:list-printers'),
+  printKitchenBatch: (jobs: Array<{ printerId: string; printerName: string; deviceName: string; copies?: number; html: string }>): Promise<{ ok: boolean; printed: number; failed: Array<{ printerName: string; error: string }> }> =>
+    ipcRenderer.invoke('print:kitchen-batch', jobs),
   deleteAuthUser: (uid: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('auth:delete-user', uid),
   resetAuthUserPassword: (uid: string, newPassword: string): Promise<{ ok: boolean; error?: string }> =>

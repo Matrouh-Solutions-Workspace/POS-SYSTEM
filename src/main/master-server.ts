@@ -25,6 +25,19 @@ import { readLatestUpdateYml, resolveUpdateArtifact } from './master-update-arti
 
 interface MasterServerOptions {
   printReceiptHtml: (html: string) => Promise<boolean>
+  printKitchenBatch: (jobs: TargetedPrintJob[]) => Promise<{
+    ok: boolean
+    printed: number
+    failed: Array<{ printerName: string; error: string }>
+  }>
+}
+
+interface TargetedPrintJob {
+  printerId: string
+  printerName: string
+  deviceName: string
+  copies?: number
+  html: string
 }
 
 let server: Server | null = null
@@ -32,6 +45,7 @@ let activePort = DEFAULT_MASTER_PORT
 let lastError: string | undefined
 let pairingCode = newPairingCode()
 let printReceiptHtml: MasterServerOptions['printReceiptHtml'] | null = null
+let printKitchenBatch: MasterServerOptions['printKitchenBatch'] | null = null
 
 function newPairingCode(): string {
   return String(Math.floor(100000 + Math.random() * 900000))
@@ -254,6 +268,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return
     }
 
+    if (req.method === 'POST' && url.pathname === '/print/kitchen-batch') {
+      const body = await readBody(req) as { jobs?: TargetedPrintJob[] }
+      if (!printKitchenBatch) { fail(res, 503, 'Kitchen printing is not available'); return }
+      ok(res, await printKitchenBatch(body.jobs ?? []))
+      return
+    }
+
     routeNotFound(res)
   } catch (e) {
     fail(res, 500, e instanceof Error ? e.message : String(e))
@@ -262,6 +283,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
 export async function startMasterServer(port: number, options: MasterServerOptions): Promise<void> {
   printReceiptHtml = options.printReceiptHtml
+  printKitchenBatch = options.printKitchenBatch
   if (server && activePort === port) return
   await stopMasterServer()
   activePort = port

@@ -1,11 +1,20 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import type { AppSettings } from '@shared/types'
+import type { AppSettings, KitchenPrinter, KitchenPrinterVisibility, SystemPrinter } from '@shared/types'
 import { getSettings, updateSettings } from '@renderer/features/orders/order-service'
 import { applyThemeColor, DEFAULT_PRIMARY } from '@renderer/features/theme/theme-store'
 import { listUsersByRole, updateUserProfile } from '@renderer/features/auth/auth-service'
 import { hashPin } from '@renderer/features/auth/pin-store'
-import { MdSave, MdPalette, MdLock, MdPerson, MdBackup, MdRestorePage, MdKeyboard, MdDevices, MdFolderOpen } from 'react-icons/md'
+import { MdSave, MdPalette, MdLock, MdPerson, MdBackup, MdRestorePage, MdKeyboard, MdDevices, MdFolderOpen, MdPrint, MdRefresh, MdDelete, MdVisibility } from 'react-icons/md'
 import type { AppUser } from '@shared/types'
+import {
+  createKitchenPrinter,
+  DEFAULT_KITCHEN_VISIBILITY,
+  deleteKitchenPrinter,
+  listKitchenPrinters,
+  listSystemPrinters,
+  updateKitchenPrinter
+} from '@renderer/features/printers/printer-service'
+import { buildKitchenTicketHtml } from '@renderer/features/printers/kitchen-printing'
 import {
   SHORTCUT_ACTIONS,
   chordToDisplay,
@@ -204,6 +213,264 @@ function ShortcutsTab(): React.ReactElement {
   )
 }
 
+function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElement {
+  const [systemPrinters, setSystemPrinters] = useState<SystemPrinter[]>([])
+  const [kitchenPrinters, setKitchenPrinters] = useState<KitchenPrinter[]>([])
+  const [selectedDeviceName, setSelectedDeviceName] = useState('')
+  const [printerName, setPrinterName] = useState('')
+  const [description, setDescription] = useState('')
+  const [copies, setCopies] = useState(1)
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null)
+
+  async function load(): Promise<void> {
+    const [system, saved] = await Promise.all([
+      listSystemPrinters().catch(() => []),
+      listKitchenPrinters()
+    ])
+    setSystemPrinters(system)
+    setKitchenPrinters(saved)
+    if (!selectedDeviceName && system[0]) {
+      setSelectedDeviceName(system.find((printer) => printer.isDefault)?.name ?? system[0].name)
+    }
+  }
+
+  useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleAddPrinter(e: FormEvent): Promise<void> {
+    e.preventDefault()
+    if (!selectedDeviceName) {
+      setMessage('اختر طابعة من الطابعات المتاحة أولا')
+      return
+    }
+    setLoading(true)
+    setMessage(null)
+    try {
+      const selected = systemPrinters.find((printer) => printer.name === selectedDeviceName)
+      await createKitchenPrinter({
+        name: printerName.trim() || selected?.displayName || selectedDeviceName,
+        deviceName: selectedDeviceName,
+        description,
+        copies,
+        visibility: DEFAULT_KITCHEN_VISIBILITY
+      })
+      setPrinterName('')
+      setDescription('')
+      setCopies(1)
+      setMessage('تمت إضافة الطابعة')
+      await load()
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'فشل إضافة الطابعة')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function patchVisibility(printer: KitchenPrinter, key: keyof KitchenPrinterVisibility, checked: boolean): void {
+    void updateKitchenPrinter(printer.id, {
+      visibility: { ...printer.visibility, [key]: checked }
+    }).then(load)
+  }
+
+  function openPreview(printer: KitchenPrinter): void {
+    setPreviewHtml(buildKitchenTicketHtml({
+      settings,
+      printer,
+      title: `معاينة ${printer.name}`,
+      order: {
+        id: 'preview',
+        orderNumber: 128,
+        orderCode: 'A-128',
+        status: 'completed',
+        orderType: 'dine_in',
+        paymentStatus: 'unpaid',
+        tableNameAr: 'ترابيزة 5',
+        tableCategoryAr: 'الدور الأرضي',
+        cashierId: 'preview',
+        cashierName: 'كاشير تجريبي',
+        subtotal: 0,
+        total: 0,
+        noteAr: 'بدون بصل، تجهيز سريع',
+        customerName: 'عميل تجريبي',
+        customerPhone: '01000000000',
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      },
+      items: [
+        {
+          id: 'preview-item-1',
+          orderId: 'preview',
+          menuItemId: 'sample',
+          sourceMenuItemId: 'sample',
+          nameAr: 'وجبة كفتة',
+          quantity: 2,
+          unitPrice: 0,
+          lineTotal: 0,
+          sizeLabelAr: 'كبير',
+          noteAr: 'زيادة صوص'
+        },
+        {
+          id: 'preview-item-2',
+          orderId: 'preview',
+          menuItemId: 'sample-2',
+          sourceMenuItemId: 'sample-2',
+          nameAr: 'بطاطس',
+          quantity: 1,
+          unitPrice: 0,
+          lineTotal: 0
+        }
+      ]
+    }))
+  }
+
+  return (
+    <div className="card">
+      <h2 className="card__title"><MdPrint style={{ verticalAlign: 'middle', marginLeft: 6 }} />طابعات التجهيز</h2>
+      <p style={{ fontSize: '0.85rem', color: 'var(--color-muted)', marginBottom: 16 }}>
+        أضف الطابعات المتاحة من النظام، ثم اربط كل صنف بطابعة أو أكثر من صفحة الأصناف. عند الطلب يتم تجميع كل أصناف الطابعة في إيصال تجهيز واحد.
+      </p>
+      {message && <p className={`form-message ${message.includes('فشل') || message.includes('اختر') ? 'form-message--error' : 'form-message--ok'}`}>{message}</p>}
+
+      <form onSubmit={(e) => void handleAddPrinter(e)} className="settings-form-grid" style={{ marginBottom: 18 }}>
+        <label className="field">
+          <span>الطابعة الفعلية</span>
+          <select value={selectedDeviceName} onChange={(e) => setSelectedDeviceName(e.target.value)} required>
+            <option value="">اختر طابعة...</option>
+            {systemPrinters.map((printer) => (
+              <option key={printer.name} value={printer.name}>
+                {printer.displayName || printer.name}{printer.isDefault ? ' (افتراضية)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>اسم يظهر للمدير</span>
+          <input value={printerName} onChange={(e) => setPrinterName(e.target.value)} placeholder="مثال: مطبخ ساخن" />
+        </label>
+        <label className="field">
+          <span>عدد النسخ</span>
+          <input type="number" min="1" max="5" value={copies} onChange={(e) => setCopies(Number(e.target.value) || 1)} />
+        </label>
+        <label className="field settings-form-grid__full">
+          <span>ملاحظات داخلية</span>
+          <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="مكان الطابعة أو استخدامها" />
+        </label>
+        <div className="form-actions settings-form-grid__full">
+          <button type="submit" className="btn btn--primary" disabled={loading || systemPrinters.length === 0}>
+            <MdSave /> {loading ? 'جارٍ الحفظ...' : 'إضافة الطابعة'}
+          </button>
+          <button type="button" className="btn btn--secondary" onClick={() => void load()}>
+            <MdRefresh /> اكتشاف الطابعات
+          </button>
+        </div>
+      </form>
+
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>الاسم</th>
+            <th>الطابعة</th>
+            <th>إعدادات الإيصال</th>
+            <th>الحالة</th>
+            <th>إجراءات</th>
+          </tr>
+        </thead>
+        <tbody>
+          {kitchenPrinters.map((printer) => (
+            <tr key={printer.id}>
+              <td>
+                <input
+                  className="inline-edit-input"
+                  value={printer.name}
+                  onChange={(e) => void updateKitchenPrinter(printer.id, { name: e.target.value }).then(load)}
+                />
+                <input
+                  className="inline-edit-input"
+                  value={printer.description ?? ''}
+                  onChange={(e) => void updateKitchenPrinter(printer.id, { description: e.target.value }).then(load)}
+                  placeholder="ملاحظة"
+                  style={{ marginTop: 4 }}
+                />
+              </td>
+              <td>
+                <select
+                  className="inline-edit-input"
+                  value={printer.deviceName}
+                  onChange={(e) => void updateKitchenPrinter(printer.id, { deviceName: e.target.value }).then(load)}
+                >
+                  {systemPrinters.some((p) => p.name === printer.deviceName) || <option value={printer.deviceName}>{printer.deviceName} (غير مكتشفة الآن)</option>}
+                  {systemPrinters.map((systemPrinter) => (
+                    <option key={systemPrinter.name} value={systemPrinter.name}>
+                      {systemPrinter.displayName || systemPrinter.name}{systemPrinter.isDefault ? ' (افتراضية)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <label className="field" style={{ marginTop: 6 }}>
+                  <span>نسخ</span>
+                  <input type="number" min="1" max="5" value={printer.copies} onChange={(e) => void updateKitchenPrinter(printer.id, { copies: Number(e.target.value) || 1 }).then(load)} />
+                </label>
+              </td>
+              <td>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(120px, 1fr))', gap: 6 }}>
+                  {([
+                    ['showOrderType', 'نوع الطلب'],
+                    ['showTable', 'الترابيزة'],
+                    ['showCashier', 'الكاشير'],
+                    ['showCustomer', 'العميل'],
+                    ['showOrderNote', 'ملاحظة الطلب'],
+                    ['showItemNotes', 'ملاحظات الأصناف']
+                  ] as Array<[keyof KitchenPrinterVisibility, string]>).map(([key, label]) => (
+                    <label key={key} className="field--checkbox" style={{ fontSize: '0.78rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={printer.visibility[key]}
+                        onChange={(e) => patchVisibility(printer, key, e.target.checked)}
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </td>
+              <td>
+                <select className="inline-edit-input" value={printer.active ? 'active' : 'inactive'} onChange={(e) => void updateKitchenPrinter(printer.id, { active: e.target.value === 'active' }).then(load)}>
+                  <option value="active">مفعلة</option>
+                  <option value="inactive">معطلة</option>
+                </select>
+              </td>
+              <td>
+                <div className="table-actions">
+                  <button type="button" className="btn btn--secondary btn--sm" onClick={() => openPreview(printer)}>
+                    <MdVisibility /> معاينة
+                  </button>
+                  <button type="button" className="btn btn--danger btn--sm" onClick={() => void deleteKitchenPrinter(printer.id).then(load)}>
+                    <MdDelete /> حذف
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+          {kitchenPrinters.length === 0 && (
+            <tr><td colSpan={5}>لا توجد طابعات تجهيز بعد</td></tr>
+          )}
+        </tbody>
+      </table>
+
+      {previewHtml && (
+        <div className="modal-overlay" onClick={() => setPreviewHtml(null)}>
+          <div className="modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div className="order-details__header">
+              <h2 className="order-details__title">معاينة إيصال التجهيز</h2>
+              <button type="button" className="order-details__close" onClick={() => setPreviewHtml(null)} aria-label="إغلاق">×</button>
+            </div>
+            <iframe title="Kitchen ticket preview" srcDoc={previewHtml} style={{ width: '100%', height: 520, border: '2px solid var(--color-border)', background: '#fff' }} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function SettingsPage(): React.ReactElement {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [cashiers, setCashiers] = useState<AppUser[]>([])
@@ -375,7 +642,7 @@ export function SettingsPage(): React.ReactElement {
     }
   }
 
-  type SettingsTab = 'general' | 'theme' | 'pin' | 'network' | 'backup' | 'shortcuts'
+  type SettingsTab = 'general' | 'theme' | 'pin' | 'printers' | 'network' | 'backup' | 'shortcuts'
   const [backupMsg, setBackupMsg] = useState<string | null>(null)
   const [backupLoading, setBackupLoading] = useState(false)
   const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false)
@@ -467,6 +734,7 @@ export function SettingsPage(): React.ReactElement {
     { key: 'general',   labelAr: 'عام',          icon: <MdSave /> },
     { key: 'theme',     labelAr: 'المظهر',        icon: <MdPalette /> },
     { key: 'pin',       labelAr: 'PIN والقفل',    icon: <MdLock /> },
+    { key: 'printers',  labelAr: 'الطابعات',      icon: <MdPrint /> },
     { key: 'backup',    labelAr: 'نسخ احتياطي',   icon: <MdBackup /> },
     { key: 'shortcuts', labelAr: 'الاختصارات',    icon: <MdKeyboard /> },
     { key: 'network', labelAr: 'Network', icon: <MdDevices /> },
@@ -666,6 +934,8 @@ export function SettingsPage(): React.ReactElement {
             )}
           </div>
         )}
+
+        {activeSettingsTab === 'printers' && <PrintersTab settings={settings} />}
 
         {/* ── Backup ── */}
         {activeSettingsTab === 'network' && (

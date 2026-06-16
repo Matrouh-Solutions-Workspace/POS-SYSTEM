@@ -20,7 +20,8 @@ import type {
   Supplier,
   SupplierTransaction,
   ItemSize,
-  ItemAddon
+  ItemAddon,
+  KitchenPrinter
 } from '../types'
 
 export type FirestoreDoc<T> = T
@@ -44,6 +45,7 @@ export interface FirestoreSchema {
   settings: FirestoreDoc<AppSettings>
   item_sizes: FirestoreDoc<ItemSize>
   item_addons: FirestoreDoc<ItemAddon>
+  kitchen_printers: FirestoreDoc<KitchenPrinter>
 }
 
 /** Default settings document id */
