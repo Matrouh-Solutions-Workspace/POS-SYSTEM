@@ -10,6 +10,7 @@ out
 release
 
 # Secrets & local config
+.env
 .env.local
 service-account.json
 **/service-account*.json

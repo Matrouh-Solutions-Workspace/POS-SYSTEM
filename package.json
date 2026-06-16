@@ -9,7 +9,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "dist:win": "npm run build && electron-builder --win --x64",
-    "dist:win:publish": "npm run build && electron-builder --win --x64 --publish always",
+    "dist:win:publish": "tsx scripts/publish-win.ts",
     "preview:prod": "npm run build && electron .",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
