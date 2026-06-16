@@ -98,6 +98,7 @@ export async function updateSettings(
       | 'receiptCompactMode'
       | 'receiptLogoEnabled'
       | 'receiptLogoDataUrl'
+      | 'receiptLogoProcessedDataUrl'
       | 'receiptLogoAscii'
       | 'receiptLogoMode'
       | 'receiptLogoThreshold'

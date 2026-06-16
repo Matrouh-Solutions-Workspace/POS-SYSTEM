@@ -40,6 +40,8 @@ export interface AppSettings {
   receiptLogoEnabled?: boolean
   /** Original restaurant logo/image as a data URL. */
   receiptLogoDataUrl?: string
+  /** Processed black/white logo as it will be sent to print. */
+  receiptLogoProcessedDataUrl?: string
   /** ESC/POS-friendly processed text art derived from the logo. */
   receiptLogoAscii?: string
   /** How logo/images are rendered for receipt preview and print. */

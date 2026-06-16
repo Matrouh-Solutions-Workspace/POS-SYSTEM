@@ -237,8 +237,8 @@ function ReceiptDesigner({
   const [hiddenSections, setHiddenSections] = useState<ReceiptSectionId[]>(settings.receiptHiddenSections ?? [])
   const [showItemNotes, setShowItemNotes] = useState(settings.receiptShowItemNotes !== false)
   const [compactMode, setCompactMode] = useState(Boolean(settings.receiptCompactMode))
-  const [logoEnabled, setLogoEnabled] = useState(Boolean(settings.receiptLogoEnabled))
   const [logoDataUrl, setLogoDataUrl] = useState(settings.receiptLogoDataUrl ?? '')
+  const [logoProcessedDataUrl, setLogoProcessedDataUrl] = useState(settings.receiptLogoProcessedDataUrl ?? '')
   const [logoAscii, setLogoAscii] = useState(settings.receiptLogoAscii ?? '')
   const [logoMode, setLogoMode] = useState<AppSettings['receiptLogoMode']>(settings.receiptLogoMode ?? 'image')
   const [logoThreshold, setLogoThreshold] = useState(settings.receiptLogoThreshold ?? 150)
@@ -259,14 +259,15 @@ function ReceiptDesigner({
     receiptHiddenSections: hiddenSections,
     receiptShowItemNotes: showItemNotes,
     receiptCompactMode: compactMode,
-    receiptLogoEnabled: logoEnabled,
+    receiptLogoEnabled: !hiddenSections.includes('logo'),
     receiptLogoDataUrl: logoDataUrl || undefined,
+    receiptLogoProcessedDataUrl: logoProcessedDataUrl || undefined,
     receiptLogoAscii: logoAscii || undefined,
     receiptLogoMode: logoMode,
     receiptLogoThreshold: logoThreshold,
     receiptLogoWidth: logoWidth,
     receiptLogoInvert: logoInvert
-  }), [compactMode, hiddenSections, logoAscii, logoDataUrl, logoEnabled, logoInvert, logoMode, logoThreshold, logoWidth, sectionOrder, settings, showItemNotes])
+  }), [compactMode, hiddenSections, logoAscii, logoDataUrl, logoInvert, logoMode, logoProcessedDataUrl, logoThreshold, logoWidth, sectionOrder, settings, showItemNotes])
 
   const previewHtml = useMemo(() => {
     const subtotal = previewItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
@@ -330,19 +331,22 @@ function ReceiptDesigner({
   async function handleLogoFile(file: File | undefined): Promise<void> {
     if (!file) return
     const dataUrl = await readFileAsDataUrl(file)
+    const processed = await processLogoImage(dataUrl, logoWidth, logoThreshold, logoInvert)
     setLogoDataUrl(dataUrl)
-    setLogoEnabled(true)
-    setLogoAscii(await imageToAscii(dataUrl, logoWidth, logoThreshold, logoInvert))
+    setLogoProcessedDataUrl(processed.monoDataUrl)
+    setLogoAscii(processed.ascii)
   }
 
-  async function regenerateAscii(next?: { width?: number; threshold?: number; invert?: boolean }): Promise<void> {
+  async function regenerateLogoAssets(next?: { width?: number; threshold?: number; invert?: boolean }): Promise<void> {
     if (!logoDataUrl) return
-    setLogoAscii(await imageToAscii(
+    const processed = await processLogoImage(
       logoDataUrl,
       next?.width ?? logoWidth,
       next?.threshold ?? logoThreshold,
       next?.invert ?? logoInvert
-    ))
+    )
+    setLogoProcessedDataUrl(processed.monoDataUrl)
+    setLogoAscii(processed.ascii)
   }
 
   function updatePreviewItem(id: string, patch: Partial<ReceiptPreviewItem>): void {
@@ -354,14 +358,24 @@ function ReceiptDesigner({
   async function saveDesigner(): Promise<void> {
     setSaving(true)
     setMessage(null)
+    let processedDataUrl = logoProcessedDataUrl
+    let processedAscii = logoAscii
+    if (logoDataUrl && (!processedDataUrl || !processedAscii)) {
+      const processed = await processLogoImage(logoDataUrl, logoWidth, logoThreshold, logoInvert)
+      processedDataUrl = processed.monoDataUrl
+      processedAscii = processed.ascii
+      setLogoProcessedDataUrl(processedDataUrl)
+      setLogoAscii(processedAscii)
+    }
     const patch: Partial<AppSettings> = {
       receiptSectionOrder: sectionOrder,
       receiptHiddenSections: hiddenSections,
       receiptShowItemNotes: showItemNotes,
       receiptCompactMode: compactMode,
-      receiptLogoEnabled: logoEnabled,
+      receiptLogoEnabled: !hiddenSections.includes('logo'),
       receiptLogoDataUrl: logoDataUrl || undefined,
-      receiptLogoAscii: logoAscii || undefined,
+      receiptLogoProcessedDataUrl: processedDataUrl || undefined,
+      receiptLogoAscii: processedAscii || undefined,
       receiptLogoMode: logoMode,
       receiptLogoThreshold: logoThreshold,
       receiptLogoWidth: logoWidth,
@@ -437,10 +451,6 @@ function ReceiptDesigner({
           <div className="receipt-designer-panel">
             <h3 className="card__title"><MdImage /> شعار المطعم ومعالجة الصورة</h3>
             <div className="settings-form-grid">
-              <label className="field--checkbox">
-                <input type="checkbox" checked={logoEnabled} onChange={(e) => setLogoEnabled(e.target.checked)} />
-                <span>استخدام الشعار في الإيصال</span>
-              </label>
               <label className="field">
                 <span>رفع الشعار</span>
                 <input type="file" accept="image/*" onChange={(e) => void handleLogoFile(e.target.files?.[0])} />
@@ -463,7 +473,7 @@ function ReceiptDesigner({
                   onChange={(e) => {
                     const width = Number(e.target.value)
                     setLogoWidth(width)
-                    void regenerateAscii({ width })
+                    void regenerateLogoAssets({ width })
                   }}
                 />
               </label>
@@ -477,7 +487,7 @@ function ReceiptDesigner({
                   onChange={(e) => {
                     const threshold = Number(e.target.value)
                     setLogoThreshold(threshold)
-                    void regenerateAscii({ threshold })
+                    void regenerateLogoAssets({ threshold })
                   }}
                 />
               </label>
@@ -487,14 +497,21 @@ function ReceiptDesigner({
                   checked={logoInvert}
                   onChange={(e) => {
                     setLogoInvert(e.target.checked)
-                    void regenerateAscii({ invert: e.target.checked })
+                    void regenerateLogoAssets({ invert: e.target.checked })
                   }}
                 />
                 <span>عكس الأبيض والأسود</span>
               </label>
             </div>
-            {logoAscii && (
-              <pre className="receipt-ascii-preview" dir="ltr">{logoAscii}</pre>
+            {logoDataUrl && (
+              <div className="receipt-logo-print-preview">
+                <span>معاينة ما سيتم طباعته</span>
+                {logoMode === 'ascii' ? (
+                  <pre className="receipt-ascii-preview" dir="ltr">{logoAscii}</pre>
+                ) : (
+                  <img src={logoMode === 'mono' ? logoProcessedDataUrl || logoDataUrl : logoDataUrl} alt="Receipt logo print preview" />
+                )}
+              </div>
             )}
           </div>
 
@@ -548,25 +565,25 @@ function readFileAsDataUrl(file: File): Promise<string> {
   })
 }
 
-function imageToAscii(dataUrl: string, width: number, threshold: number, invert: boolean): Promise<string> {
+function processLogoImage(dataUrl: string, width: number, threshold: number, invert: boolean): Promise<{ monoDataUrl: string; ascii: string }> {
   return new Promise((resolve, reject) => {
     const image = new Image()
     image.onload = () => {
       const safeWidth = Math.max(24, Math.min(72, width))
       const ratio = image.height / Math.max(1, image.width)
-      const height = Math.max(6, Math.round(safeWidth * ratio * 0.45))
-      const canvas = document.createElement('canvas')
-      canvas.width = safeWidth
-      canvas.height = height
-      const ctx = canvas.getContext('2d')
-      if (!ctx) { resolve(''); return }
-      ctx.fillStyle = '#fff'
-      ctx.fillRect(0, 0, safeWidth, height)
-      ctx.drawImage(image, 0, 0, safeWidth, height)
-      const pixels = ctx.getImageData(0, 0, safeWidth, height).data
+      const asciiHeight = Math.max(6, Math.round(safeWidth * ratio * 0.45))
+      const asciiCanvas = document.createElement('canvas')
+      asciiCanvas.width = safeWidth
+      asciiCanvas.height = asciiHeight
+      const asciiCtx = asciiCanvas.getContext('2d')
+      if (!asciiCtx) { resolve({ monoDataUrl: dataUrl, ascii: '' }); return }
+      asciiCtx.fillStyle = '#fff'
+      asciiCtx.fillRect(0, 0, safeWidth, asciiHeight)
+      asciiCtx.drawImage(image, 0, 0, safeWidth, asciiHeight)
+      const pixels = asciiCtx.getImageData(0, 0, safeWidth, asciiHeight).data
       const chars = invert ? ' .:-=+*#%@' : '@%#*+=-:. '
       const lines: string[] = []
-      for (let y = 0; y < height; y += 1) {
+      for (let y = 0; y < asciiHeight; y += 1) {
         let line = ''
         for (let x = 0; x < safeWidth; x += 1) {
           const offset = (y * safeWidth + x) * 4
@@ -578,7 +595,30 @@ function imageToAscii(dataUrl: string, width: number, threshold: number, invert:
         }
         lines.push(line.replace(/\s+$/g, ''))
       }
-      resolve(lines.join('\n'))
+
+      const monoWidth = Math.max(192, Math.min(576, safeWidth * 8))
+      const monoHeight = Math.max(24, Math.round(monoWidth * ratio))
+      const monoCanvas = document.createElement('canvas')
+      monoCanvas.width = monoWidth
+      monoCanvas.height = monoHeight
+      const monoCtx = monoCanvas.getContext('2d')
+      if (!monoCtx) { resolve({ monoDataUrl: dataUrl, ascii: lines.join('\n') }); return }
+      monoCtx.fillStyle = '#fff'
+      monoCtx.fillRect(0, 0, monoWidth, monoHeight)
+      monoCtx.drawImage(image, 0, 0, monoWidth, monoHeight)
+      const imageData = monoCtx.getImageData(0, 0, monoWidth, monoHeight)
+      for (let i = 0; i < imageData.data.length; i += 4) {
+        const alpha = imageData.data[i + 3] / 255
+        const luminance = (imageData.data[i] * 0.299 + imageData.data[i + 1] * 0.587 + imageData.data[i + 2] * 0.114) * alpha + 255 * (1 - alpha)
+        const black = invert ? luminance >= threshold : luminance < threshold
+        const value = black ? 0 : 255
+        imageData.data[i] = value
+        imageData.data[i + 1] = value
+        imageData.data[i + 2] = value
+        imageData.data[i + 3] = 255
+      }
+      monoCtx.putImageData(imageData, 0, 0)
+      resolve({ monoDataUrl: monoCanvas.toDataURL('image/png'), ascii: lines.join('\n') })
     }
     image.onerror = () => reject(new Error('Failed to process image'))
     image.src = dataUrl
@@ -658,7 +698,7 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
         deviceName: printer.name,
         displayName: printer.displayName || printer.name
       } : null)
-      setMessage(printer ? 'تم حفظ طابعة فواتير هذا الجهاز' : 'تم الرجوع لاختيار الطابعة وقت الطباعة')
+      setMessage(printer ? 'تم حفظ طابعة فواتير هذا الجهاز' : 'تم الرجوع لاختيار الطابعة')
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'فشل حفظ طابعة الفواتير')
     } finally {
@@ -731,7 +771,7 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
           <label className="field">
             <span>الطابعة الافتراضية لفواتير العملاء</span>
             <select value={defaultReceiptDeviceName} onChange={(e) => setDefaultReceiptDeviceName(e.target.value)}>
-              <option value="">اختيار وقت الطباعة</option>
+              <option value="">اختيار الطابعة</option>
               {systemPrinters.map((printer) => (
                 <option key={printer.name} value={printer.name}>
                   {printer.displayName || printer.name}{printer.isDefault ? ' (افتراضية في النظام)' : ''}
@@ -766,8 +806,8 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
           </select>
         </label>
         <label className="field">
-          <span>اسم يظهر للمدير</span>
-          <input value={printerName} onChange={(e) => setPrinterName(e.target.value)} placeholder="مثال: مطبخ ساخن" />
+          <span>اسم الطابعة داخل النظام</span>
+          <input value={printerName} onChange={(e) => setPrinterName(e.target.value)} placeholder="مثال: جريل خارجي" />
         </label>
         <label className="field">
           <span>عدد النسخ</span>

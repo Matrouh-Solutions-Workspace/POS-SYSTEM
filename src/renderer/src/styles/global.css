@@ -3844,8 +3844,6 @@ select.inline-edit-input {
 }
 
 .receipt-designer__preview {
-  position: sticky;
-  top: 12px;
   border: 2px solid var(--color-border);
   background: #f3f4f6;
   padding: 12px;
@@ -3873,6 +3871,28 @@ select.inline-edit-input {
   padding: 8px;
   margin: 10px 0 0;
   white-space: pre;
+}
+
+.receipt-logo-print-preview {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.receipt-logo-print-preview > span {
+  color: var(--color-muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.receipt-logo-print-preview img {
+  display: block;
+  max-width: min(100%, 360px);
+  max-height: 180px;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  padding: 10px;
 }
 
 @media (max-width: 1000px) {
@@ -4596,7 +4616,13 @@ select.inline-edit-input {
 /* ── Settings page — tabbed layout ──────────────────────────────────────── */
 
 .settings-tab-content {
-  max-width: 860px;
+  max-width: none;
+  width: 100%;
+}
+
+.settings-tab-content > .card,
+.settings-tab-content > .backup-tab {
+  width: 100%;
 }
 
 /* ── Keyboard shortcuts tab ──────────────────────────────────────────────── */

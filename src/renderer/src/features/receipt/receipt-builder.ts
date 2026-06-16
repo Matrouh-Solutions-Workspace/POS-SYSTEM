@@ -75,7 +75,6 @@ export function buildReceiptHtml(
     h1 { font-size: ${compact ? '15px' : '17px'}; text-align: center; margin: 0 0 2px; font-weight: 900; }
     .sub { text-align: center; font-size: 11px; color: #333; margin: 2px 0; }
     .receipt-logo { display: block; max-width: 72%; max-height: 92px; margin: 0 auto 6px; object-fit: contain; }
-    .receipt-logo--mono { filter: grayscale(1) contrast(1.7); }
     .receipt-ascii { direction: ltr; text-align: center; font-family: 'Courier New', monospace; font-size: 6px; line-height: 0.92; white-space: pre; margin: 0 0 6px; }
     table { width: 100%; border-collapse: collapse; margin: ${compact ? '5px' : '8px'} 0; }
     th, td { padding: ${compact ? '2px 3px' : '3px 4px'}; text-align: right; border-bottom: 1px dashed #bdbdbd; font-size: ${compact ? '10px' : '11px'}; vertical-align: top; }
@@ -130,13 +129,14 @@ function renderSection(
 }
 
 function renderLogo(settings: AppSettings): string {
-  if (!settings.receiptLogoEnabled) return ''
   if (settings.receiptLogoMode === 'ascii' && settings.receiptLogoAscii) {
     return `<pre class="receipt-ascii">${escapeHtml(settings.receiptLogoAscii)}</pre>`
   }
-  if (!settings.receiptLogoDataUrl) return ''
-  const className = settings.receiptLogoMode === 'mono' ? 'receipt-logo receipt-logo--mono' : 'receipt-logo'
-  return `<img class="${className}" src="${escapeAttribute(settings.receiptLogoDataUrl)}" alt="Restaurant logo" />`
+  const imageSrc = settings.receiptLogoMode === 'mono'
+    ? settings.receiptLogoProcessedDataUrl || settings.receiptLogoDataUrl
+    : settings.receiptLogoDataUrl
+  if (!imageSrc) return ''
+  return `<img class="receipt-logo" src="${escapeAttribute(imageSrc)}" alt="Restaurant logo" />`
 }
 
 function renderCustomer(order: Order): string {
