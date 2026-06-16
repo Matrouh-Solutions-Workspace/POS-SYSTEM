@@ -3790,7 +3790,7 @@ select.inline-edit-input {
 
 .receipt-designer__workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.85fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
@@ -3844,17 +3844,21 @@ select.inline-edit-input {
 }
 
 .receipt-designer__preview {
+  position: static;
+  z-index: auto;
   border: 2px solid var(--color-border);
   background: #f3f4f6;
   padding: 12px;
+  overflow: visible;
 }
 
 .receipt-designer__preview iframe {
   display: block;
-  width: 100%;
+  width: min(100%, 460px);
   min-height: 680px;
   border: 1px solid var(--color-border);
   background: #fff;
+  margin: 0 auto;
 }
 
 .receipt-ascii-preview {
@@ -3863,8 +3867,8 @@ select.inline-edit-input {
   direction: ltr;
   text-align: left;
   font-family: "Courier New", monospace;
-  font-size: 7px;
-  line-height: 0.95;
+  font-size: 5px;
+  line-height: 0.82;
   color: #111827;
   background: #fff;
   border: 1px solid var(--color-border);

@@ -241,8 +241,8 @@ function ReceiptDesigner({
   const [logoProcessedDataUrl, setLogoProcessedDataUrl] = useState(settings.receiptLogoProcessedDataUrl ?? '')
   const [logoAscii, setLogoAscii] = useState(settings.receiptLogoAscii ?? '')
   const [logoMode, setLogoMode] = useState<AppSettings['receiptLogoMode']>(settings.receiptLogoMode ?? 'image')
-  const [logoThreshold, setLogoThreshold] = useState(settings.receiptLogoThreshold ?? 150)
-  const [logoWidth, setLogoWidth] = useState(settings.receiptLogoWidth ?? 42)
+  const [logoThreshold, setLogoThreshold] = useState(settings.receiptLogoThreshold ?? 176)
+  const [logoWidth, setLogoWidth] = useState(settings.receiptLogoWidth ?? 112)
   const [logoInvert, setLogoInvert] = useState(Boolean(settings.receiptLogoInvert))
   const [draggingSection, setDraggingSection] = useState<ReceiptSectionId | null>(null)
   const [saving, setSaving] = useState(false)
@@ -467,8 +467,8 @@ function ReceiptDesigner({
                 <span>عرض المعالجة</span>
                 <input
                   type="range"
-                  min="24"
-                  max="72"
+                  min="64"
+                  max="180"
                   value={logoWidth}
                   onChange={(e) => {
                     const width = Number(e.target.value)
@@ -481,7 +481,7 @@ function ReceiptDesigner({
                 <span>حد الأبيض والأسود</span>
                 <input
                   type="range"
-                  min="40"
+                  min="80"
                   max="230"
                   value={logoThreshold}
                   onChange={(e) => {
@@ -507,7 +507,7 @@ function ReceiptDesigner({
               <div className="receipt-logo-print-preview">
                 <span>معاينة ما سيتم طباعته</span>
                 {logoMode === 'ascii' ? (
-                  <pre className="receipt-ascii-preview" dir="ltr">{logoAscii}</pre>
+                  <pre className="receipt-ascii receipt-ascii-preview" dir="ltr">{logoAscii}</pre>
                 ) : (
                   <img src={logoMode === 'mono' ? logoProcessedDataUrl || logoDataUrl : logoDataUrl} alt="Receipt logo print preview" />
                 )}
@@ -569,9 +569,10 @@ function processLogoImage(dataUrl: string, width: number, threshold: number, inv
   return new Promise((resolve, reject) => {
     const image = new Image()
     image.onload = () => {
-      const safeWidth = Math.max(24, Math.min(72, width))
-      const ratio = image.height / Math.max(1, image.width)
-      const asciiHeight = Math.max(6, Math.round(safeWidth * ratio * 0.45))
+      const crop = cropImageBounds(image)
+      const safeWidth = Math.max(64, Math.min(180, width))
+      const ratio = crop.height / Math.max(1, crop.width)
+      const asciiHeight = Math.max(10, Math.round(safeWidth * ratio * 0.48))
       const asciiCanvas = document.createElement('canvas')
       asciiCanvas.width = safeWidth
       asciiCanvas.height = asciiHeight
@@ -579,7 +580,9 @@ function processLogoImage(dataUrl: string, width: number, threshold: number, inv
       if (!asciiCtx) { resolve({ monoDataUrl: dataUrl, ascii: '' }); return }
       asciiCtx.fillStyle = '#fff'
       asciiCtx.fillRect(0, 0, safeWidth, asciiHeight)
-      asciiCtx.drawImage(image, 0, 0, safeWidth, asciiHeight)
+      asciiCtx.imageSmoothingEnabled = true
+      asciiCtx.imageSmoothingQuality = 'high'
+      asciiCtx.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, safeWidth, asciiHeight)
       const pixels = asciiCtx.getImageData(0, 0, safeWidth, asciiHeight).data
       const chars = invert ? ' .:-=+*#%@' : '@%#*+=-:. '
       const lines: string[] = []
@@ -589,14 +592,15 @@ function processLogoImage(dataUrl: string, width: number, threshold: number, inv
           const offset = (y * safeWidth + x) * 4
           const alpha = pixels[offset + 3] / 255
           const luminance = (pixels[offset] * 0.299 + pixels[offset + 1] * 0.587 + pixels[offset + 2] * 0.114) * alpha + 255 * (1 - alpha)
-          const adjusted = luminance < threshold ? luminance * 0.7 : luminance
+          const contrast = Math.max(0, Math.min(255, (luminance - threshold) * 1.6 + threshold))
+          const adjusted = contrast < threshold ? contrast * 0.62 : 255 - ((255 - contrast) * 0.7)
           const index = Math.max(0, Math.min(chars.length - 1, Math.round((adjusted / 255) * (chars.length - 1))))
           line += chars[index]
         }
         lines.push(line.replace(/\s+$/g, ''))
       }
 
-      const monoWidth = Math.max(192, Math.min(576, safeWidth * 8))
+      const monoWidth = Math.max(384, Math.min(640, safeWidth * 6))
       const monoHeight = Math.max(24, Math.round(monoWidth * ratio))
       const monoCanvas = document.createElement('canvas')
       monoCanvas.width = monoWidth
@@ -605,7 +609,9 @@ function processLogoImage(dataUrl: string, width: number, threshold: number, inv
       if (!monoCtx) { resolve({ monoDataUrl: dataUrl, ascii: lines.join('\n') }); return }
       monoCtx.fillStyle = '#fff'
       monoCtx.fillRect(0, 0, monoWidth, monoHeight)
-      monoCtx.drawImage(image, 0, 0, monoWidth, monoHeight)
+      monoCtx.imageSmoothingEnabled = true
+      monoCtx.imageSmoothingQuality = 'high'
+      monoCtx.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, monoWidth, monoHeight)
       const imageData = monoCtx.getImageData(0, 0, monoWidth, monoHeight)
       for (let i = 0; i < imageData.data.length; i += 4) {
         const alpha = imageData.data[i + 3] / 255
@@ -623,6 +629,41 @@ function processLogoImage(dataUrl: string, width: number, threshold: number, inv
     image.onerror = () => reject(new Error('Failed to process image'))
     image.src = dataUrl
   })
+}
+
+function cropImageBounds(image: HTMLImageElement): { x: number; y: number; width: number; height: number } {
+  const canvas = document.createElement('canvas')
+  canvas.width = image.width
+  canvas.height = image.height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return { x: 0, y: 0, width: image.width, height: image.height }
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  ctx.drawImage(image, 0, 0)
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+  let minX = canvas.width
+  let minY = canvas.height
+  let maxX = 0
+  let maxY = 0
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let x = 0; x < canvas.width; x += 1) {
+      const offset = (y * canvas.width + x) * 4
+      const alpha = data[offset + 3]
+      const luminance = data[offset] * 0.299 + data[offset + 1] * 0.587 + data[offset + 2] * 0.114
+      if (alpha > 10 && luminance < 248) {
+        minX = Math.min(minX, x)
+        minY = Math.min(minY, y)
+        maxX = Math.max(maxX, x)
+        maxY = Math.max(maxY, y)
+      }
+    }
+  }
+  if (minX > maxX || minY > maxY) return { x: 0, y: 0, width: image.width, height: image.height }
+  const pad = 4
+  const x = Math.max(0, minX - pad)
+  const y = Math.max(0, minY - pad)
+  const right = Math.min(canvas.width, maxX + pad)
+  const bottom = Math.min(canvas.height, maxY + pad)
+  return { x, y, width: right - x, height: bottom - y }
 }
 
 function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElement {

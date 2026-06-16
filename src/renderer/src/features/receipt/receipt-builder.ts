@@ -75,7 +75,7 @@ export function buildReceiptHtml(
     h1 { font-size: ${compact ? '15px' : '17px'}; text-align: center; margin: 0 0 2px; font-weight: 900; }
     .sub { text-align: center; font-size: 11px; color: #333; margin: 2px 0; }
     .receipt-logo { display: block; max-width: 72%; max-height: 92px; margin: 0 auto 6px; object-fit: contain; }
-    .receipt-ascii { direction: ltr; text-align: center; font-family: 'Courier New', monospace; font-size: 6px; line-height: 0.92; white-space: pre; margin: 0 0 6px; }
+    .receipt-ascii { direction: ltr; display: table; max-width: 100%; margin: 0 auto 6px; overflow: hidden; text-align: left; font-family: 'Courier New', monospace; font-size: 5px; line-height: 0.82; white-space: pre; }
     table { width: 100%; border-collapse: collapse; margin: ${compact ? '5px' : '8px'} 0; }
     th, td { padding: ${compact ? '2px 3px' : '3px 4px'}; text-align: right; border-bottom: 1px dashed #bdbdbd; font-size: ${compact ? '10px' : '11px'}; vertical-align: top; }
     th { font-weight: 900; background: #f5f5f5; }
