@@ -19,23 +19,30 @@ if (!process.env.GH_TOKEN) {
   process.exit(1)
 }
 
-async function run(command: string, args: string[]): Promise<void> {
+function cleanEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const next: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(env)) {
+    if (value == null) continue
+    if (key.includes('\0') || value.includes('\0')) continue
+    next[key] = value
+  }
+  return next
+}
+
+async function run(command: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, {
-      env: process.env,
-      shell: false,
+    const child = spawn(command, [], {
+      env: cleanEnv(process.env),
+      shell: true,
       stdio: 'inherit'
     })
     child.on('error', reject)
     child.on('exit', (code) => {
       if (code === 0) resolve()
-      else reject(new Error(`${command} ${args.join(' ')} exited with code ${code ?? 'unknown'}`))
+      else reject(new Error(`${command} exited with code ${code ?? 'unknown'}`))
     })
   })
 }
 
-const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx'
-
-await run(npmCmd, ['run', 'build'])
-await run(npxCmd, ['electron-builder', '--win', '--x64', '--publish', 'always'])
+await run('npm run build')
+await run('npx electron-builder --win --x64 --publish always')
