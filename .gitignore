@@ -5,6 +5,7 @@ node_modules
 dist
 out
 .next
+.release-notes
 
 # Electron build output
 release
