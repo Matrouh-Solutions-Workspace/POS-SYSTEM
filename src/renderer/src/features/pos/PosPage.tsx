@@ -923,7 +923,6 @@ export function PosPage(): React.ReactElement {
       setOrderNote('')
       setUnpaidOrders(unpaid)
       setMessage(`تم إنشاء طلب صالة #${orderReference(order)}`)
-      printReceipt(order, orderItems, settings).catch(() => {})
       printKitchenAfterSave(order, orderItems, settings, 'تم حفظ الطلب')
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'فشل')
