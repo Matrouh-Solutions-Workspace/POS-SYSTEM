@@ -47,7 +47,8 @@ export function InventoryPage(): React.ReactElement {
       quantity: Number(qty),
       unit: ing.unit,
       noteAr: note || undefined,
-      createdBy: user.id
+      createdBy: user.id,
+      actor: user
     })
     setQty('')
     setNote('')
@@ -66,7 +67,8 @@ export function InventoryPage(): React.ReactElement {
         quantity,
         unit: stock.unit,
         noteAr: noteAr || undefined,
-        createdBy: user.id
+        createdBy: user.id,
+        actor: user
       })
     } else {
       await recordAdjustment({
@@ -74,7 +76,8 @@ export function InventoryPage(): React.ReactElement {
         quantity,
         unit: stock.unit,
         noteAr: noteAr || undefined,
-        createdBy: user.id
+        createdBy: user.id,
+        actor: user
       })
     }
     await load()
@@ -176,7 +179,7 @@ export function InventoryPage(): React.ReactElement {
                         label="حذف"
                         confirmMessage={`حذف "${s.nameAr}" من المكوّنات؟ (يُمنع إن كان مستخدماً في وصفة)`}
                         onConfirm={async () => {
-                          await deleteIngredient(s.ingredientId)
+                          await deleteIngredient(s.ingredientId, user)
                           setMessage(`تم حذف "${s.nameAr}"`)
                           await load()
                         }}

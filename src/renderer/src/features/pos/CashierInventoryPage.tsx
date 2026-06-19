@@ -37,7 +37,8 @@ export function CashierInventoryPage(): React.ReactElement {
       noteAr: purchase.noteAr || undefined,
       createdBy: user.id,
       supplierId: purchase.supplierId || undefined,
-      shiftId: shift?.id
+      shiftId: shift?.id,
+      actor: user
     })
     if (paid > 0) {
       await recordCashDrawerTransaction({
@@ -56,7 +57,8 @@ export function CashierInventoryPage(): React.ReactElement {
         amount: totalCost - paid,
         noteAr: purchase.noteAr || 'توريد على الحساب',
         shiftId: shift?.id,
-        createdBy: user.id
+        createdBy: user.id,
+        actor: user
       })
     }
     setPurchase({ ingredientId: '', supplierId: '', qty: '', totalCost: '', paid: '', noteAr: '' })

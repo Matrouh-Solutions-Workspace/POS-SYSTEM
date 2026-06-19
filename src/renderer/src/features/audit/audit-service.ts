@@ -10,6 +10,28 @@ import { COLLECTIONS } from '@shared/constants/collections'
 import { cacheDocs, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 import { generateId } from '@renderer/lib/utils/id'
 
+export interface AuditActor {
+  id: string
+  username?: string
+  displayName?: string
+}
+
+export function actorAuditName(actor: AuditActor): string {
+  return actor.username?.trim() || actor.displayName?.trim() || actor.id
+}
+
+export function describePatch(patch: Record<string, unknown>): string {
+  const entries = Object.entries(patch)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => {
+      if (typeof value === 'boolean') return `${key}: ${value ? 'نعم' : 'لا'}`
+      if (Array.isArray(value)) return `${key}: ${value.length} عنصر`
+      if (value && typeof value === 'object') return `${key}: تم التعديل`
+      return `${key}: ${String(value)}`
+    })
+  return entries.length ? entries.join('، ') : 'بدون تفاصيل'
+}
+
 // ---------------------------------------------------------------------------
 // Write
 // ---------------------------------------------------------------------------

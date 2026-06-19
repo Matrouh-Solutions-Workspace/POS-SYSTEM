@@ -295,7 +295,7 @@ function AccountCard({ account, currentUser, onRefresh, setMessage }: {
         displayName: editName.trim(),
         cashierCode: editCode.trim().toUpperCase() || undefined,
         permissions: account.role === 'manager' ? undefined : editPerms
-      })
+      }, currentUser)
       setMessage('تم تعديل بيانات الحساب')
       cancelEdit()
       await onRefresh()
@@ -310,7 +310,7 @@ function AccountCard({ account, currentUser, onRefresh, setMessage }: {
     if (editPassword.length < 6) { setEditError('كلمة المرور يجب أن تكون 6 أحرف على الأقل'); return }
     setEditSaving(true)
     try {
-      await resetCashierPassword(account.id, editPassword)
+      await resetCashierPassword(account.id, editPassword, currentUser)
       setMessage('تم تغيير كلمة المرور')
       cancelEdit()
     } catch (e) {
@@ -328,7 +328,7 @@ function AccountCard({ account, currentUser, onRefresh, setMessage }: {
     setEditSaving(true)
     try {
       const pinHash = editPin ? await hashPin(editPin) : undefined
-      await updateUserProfile(account.id, { pinHash })
+      await updateUserProfile(account.id, { pinHash }, currentUser)
       setMessage(editPin ? 'تم تعيين PIN' : 'تم حذف PIN')
       cancelEdit()
       await onRefresh()
@@ -465,7 +465,7 @@ function AccountCard({ account, currentUser, onRefresh, setMessage }: {
           <button
             type="button"
             className={`btn btn--sm ${account.active ? 'btn--secondary' : 'btn--danger'}`}
-            onClick={() => void updateUserActive(account.id, !account.active).then(onRefresh)}
+            onClick={() => void updateUserActive(account.id, !account.active, currentUser.id, currentUser.username).then(onRefresh)}
             disabled={isMe}
           >
             {account.active ? 'مفعّل' : 'معطّل'}

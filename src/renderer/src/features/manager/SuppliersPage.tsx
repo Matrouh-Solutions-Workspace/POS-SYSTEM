@@ -51,7 +51,7 @@ export function SuppliersPage(): React.ReactElement {
       nameAr: form.nameAr.trim(),
       phone: form.phone || undefined,
       noteAr: form.noteAr || undefined
-    })
+    }, user)
     setForm({ nameAr: '', phone: '', noteAr: '' })
     setMessage('تم إضافة المورد')
     await load()
@@ -66,7 +66,8 @@ export function SuppliersPage(): React.ReactElement {
       type: txForm.type,
       amount,
       noteAr: txForm.noteAr || undefined,
-      createdBy: user.id
+      createdBy: user.id,
+      actor: user
     })
     if (txForm.type === 'payment' || txForm.type === 'settlement') {
       await recordCashDrawerTransaction({
@@ -130,7 +131,7 @@ export function SuppliersPage(): React.ReactElement {
                 <td dir="ltr">{s.phone ?? '-'}</td>
                 <td>{(balances[s.id] ?? 0).toFixed(2)}</td>
                 <td>
-                  <button type="button" className="btn btn--secondary btn--sm" onClick={() => void updateSupplier(s.id, { active: !s.active }).then(load)}>
+                  <button type="button" className="btn btn--secondary btn--sm" onClick={() => void updateSupplier(s.id, { active: !s.active }, user).then(load)}>
                     {s.active ? 'مفعل' : 'معطل'}
                   </button>
                 </td>
@@ -138,7 +139,7 @@ export function SuppliersPage(): React.ReactElement {
                   <ConfirmDeleteButton
                     confirmMessage={`حذف المورد "${s.nameAr}" وكل حركاته؟`}
                     onConfirm={async () => {
-                      await deleteSupplier(s.id)
+                      await deleteSupplier(s.id, user)
                       setMessage(`تم حذف المورد "${s.nameAr}"`)
                       await load()
                     }}

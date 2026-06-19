@@ -11,6 +11,7 @@ export type AuditAction =
   | 'manager_override_discount'
   | 'order_refunded'
   | 'account_created'
+  | 'account_updated'
   | 'account_deactivated'
   | 'account_deleted'
   | 'settings_changed'
@@ -18,6 +19,31 @@ export type AuditAction =
   | 'shift_closed'
   | 'cash_in'
   | 'cash_out'
+  | 'menu_category_created'
+  | 'menu_category_updated'
+  | 'menu_category_deleted'
+  | 'menu_item_created'
+  | 'menu_item_updated'
+  | 'menu_item_deleted'
+  | 'item_size_created'
+  | 'item_size_updated'
+  | 'item_size_deleted'
+  | 'item_addon_created'
+  | 'item_addon_updated'
+  | 'item_addon_deleted'
+  | 'ingredient_created'
+  | 'ingredient_updated'
+  | 'ingredient_deleted'
+  | 'inventory_purchase'
+  | 'inventory_waste'
+  | 'inventory_adjustment'
+  | 'supplier_created'
+  | 'supplier_updated'
+  | 'supplier_deleted'
+  | 'supplier_transaction_recorded'
+  | 'kitchen_printer_created'
+  | 'kitchen_printer_updated'
+  | 'kitchen_printer_deleted'
 
 export interface AuditEntry {
   id: string
@@ -27,7 +53,20 @@ export interface AuditEntry {
   /** ID of the entity this action was performed on (order, user, shift…) */
   targetId?: string
   /** Type of the target entity */
-  targetType?: 'order' | 'user' | 'shift' | 'settings' | 'cash'
+  targetType?:
+    | 'order'
+    | 'user'
+    | 'shift'
+    | 'settings'
+    | 'cash'
+    | 'menu_category'
+    | 'menu_item'
+    | 'item_size'
+    | 'item_addon'
+    | 'ingredient'
+    | 'inventory'
+    | 'supplier'
+    | 'printer'
   /** Human-readable Arabic description of what happened */
   detailAr: string
   createdAt: number

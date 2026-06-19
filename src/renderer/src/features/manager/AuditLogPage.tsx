@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { listAuditEntries, type AuditDateRange } from '@renderer/features/audit/audit-service'
 import type { AuditEntry, AuditAction } from '@shared/types'
+import { listAllAccounts } from '@renderer/features/auth/auth-service'
 
 const RANGE_OPTIONS: { value: AuditDateRange; label: string }[] = [
   { value: 'today', label: 'اليوم' },
@@ -21,13 +22,39 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   manager_override_discount: 'تجاوز خصم بموافقة مدير',
   order_refunded:            'استرداد طلب',
   account_created:           'إنشاء حساب',
+  account_updated:           'تعديل حساب',
   account_deactivated:       'تعديل حالة حساب',
   account_deleted:           'حذف حساب',
   settings_changed:          'تغيير إعدادات',
   shift_opened:              'فتح شيفت',
   shift_closed:              'إغلاق شيفت',
   cash_in:                   'إضافة نقدية',
-  cash_out:                  'سحب نقدي'
+  cash_out:                  'سحب نقدي',
+  menu_category_created:     'إضافة تصنيف',
+  menu_category_updated:     'تعديل تصنيف',
+  menu_category_deleted:     'حذف تصنيف',
+  menu_item_created:         'إضافة صنف',
+  menu_item_updated:         'تعديل صنف',
+  menu_item_deleted:         'حذف صنف',
+  item_size_created:         'إضافة حجم',
+  item_size_updated:         'تعديل حجم',
+  item_size_deleted:         'حذف حجم',
+  item_addon_created:        'إضافة إضافة',
+  item_addon_updated:        'تعديل إضافة',
+  item_addon_deleted:        'حذف إضافة',
+  ingredient_created:        'إضافة مكوّن',
+  ingredient_updated:        'تعديل مكوّن',
+  ingredient_deleted:        'حذف مكوّن',
+  inventory_purchase:        'شراء مخزون',
+  inventory_waste:           'هدر مخزون',
+  inventory_adjustment:      'تسوية مخزون',
+  supplier_created:          'إضافة مورد',
+  supplier_updated:          'تعديل مورد',
+  supplier_deleted:          'حذف مورد',
+  supplier_transaction_recorded: 'حركة مورد',
+  kitchen_printer_created:   'إضافة طابعة تجهيز',
+  kitchen_printer_updated:   'تعديل طابعة تجهيز',
+  kitchen_printer_deleted:   'حذف طابعة تجهيز'
 }
 
 const TARGET_LABELS: Record<NonNullable<AuditEntry['targetType']>, string> = {
@@ -35,7 +62,15 @@ const TARGET_LABELS: Record<NonNullable<AuditEntry['targetType']>, string> = {
   user: 'مستخدم',
   shift: 'شيفت',
   settings: 'إعدادات',
-  cash: 'نقدية'
+  cash: 'نقدية',
+  menu_category: 'تصنيف',
+  menu_item: 'صنف',
+  item_size: 'حجم',
+  item_addon: 'إضافة',
+  ingredient: 'مكوّن',
+  inventory: 'مخزون',
+  supplier: 'مورد',
+  printer: 'طابعة'
 }
 
 const ACTION_BADGE: Record<AuditAction, string> = {
@@ -46,17 +81,44 @@ const ACTION_BADGE: Record<AuditAction, string> = {
   manager_override_discount: 'badge--warning',
   order_refunded:            'badge--danger',
   account_created:           'badge--success',
+  account_updated:           'badge--info',
   account_deactivated:       'badge--warning',
   account_deleted:           'badge--danger',
   settings_changed:          'badge--info',
   shift_opened:              'badge--success',
   shift_closed:              'badge--muted',
   cash_in:                   'badge--success',
-  cash_out:                  'badge--warning'
+  cash_out:                  'badge--warning',
+  menu_category_created:     'badge--success',
+  menu_category_updated:     'badge--info',
+  menu_category_deleted:     'badge--danger',
+  menu_item_created:         'badge--success',
+  menu_item_updated:         'badge--info',
+  menu_item_deleted:         'badge--danger',
+  item_size_created:         'badge--success',
+  item_size_updated:         'badge--info',
+  item_size_deleted:         'badge--danger',
+  item_addon_created:        'badge--success',
+  item_addon_updated:        'badge--info',
+  item_addon_deleted:        'badge--danger',
+  ingredient_created:        'badge--success',
+  ingredient_updated:        'badge--info',
+  ingredient_deleted:        'badge--danger',
+  inventory_purchase:        'badge--success',
+  inventory_waste:           'badge--warning',
+  inventory_adjustment:      'badge--info',
+  supplier_created:          'badge--success',
+  supplier_updated:          'badge--info',
+  supplier_deleted:          'badge--danger',
+  supplier_transaction_recorded: 'badge--info',
+  kitchen_printer_created:   'badge--success',
+  kitchen_printer_updated:   'badge--info',
+  kitchen_printer_deleted:   'badge--danger'
 }
 
 export function AuditLogPage(): React.ReactElement {
   const [entries, setEntries] = useState<AuditEntry[]>([])
+  const [usernamesById, setUsernamesById] = useState<Record<string, string>>({})
   const [range, setRange] = useState<AuditDateRange>('today')
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -66,15 +128,24 @@ export function AuditLogPage(): React.ReactElement {
 
   useEffect(() => {
     setLoading(true)
-    void listAuditEntries(range).then((data) => {
+    void Promise.all([listAuditEntries(range), listAllAccounts()]).then(([data, users]) => {
       setEntries(data)
+      setUsernamesById(Object.fromEntries(users.map((user) => [user.id, user.username])))
       setLoading(false)
     })
   }, [range])
 
+  function actorLabel(entry: AuditEntry): string {
+    const username = usernamesById[entry.actorId]
+    if (username) return username
+    if (entry.actorId === 'system') return entry.actorName
+    const localUser = entry.actorId.match(/^local_(.+?)(?:_\d+)?$/)
+    return localUser?.[1] ?? entry.actorName
+  }
+
   const actors = useMemo(() => {
-    return Array.from(new Set(entries.map((e) => e.actorName).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ar'))
-  }, [entries])
+    return Array.from(new Set(entries.map((e) => actorLabel(e)).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ar'))
+  }, [entries, usernamesById])
 
   const availableTargets = useMemo(() => {
     return Array.from(new Set(entries.map((e) => e.targetType).filter(Boolean))) as Array<NonNullable<AuditEntry['targetType']>>
@@ -84,11 +155,13 @@ export function AuditLogPage(): React.ReactElement {
     const q = search.trim()
     const matchesText = !q ||
       entry.actorName.includes(q) ||
+      actorLabel(entry).includes(q) ||
       entry.detailAr.includes(q) ||
       entry.targetId?.includes(q) ||
       ACTION_LABELS[entry.action].includes(q)
     const matchesAction = actionFilter === 'all' || entry.action === actionFilter
-    const matchesActor = actorFilter === 'all' || entry.actorName === actorFilter
+    const displayActor = actorLabel(entry)
+    const matchesActor = actorFilter === 'all' || displayActor === actorFilter
     const matchesTarget = targetFilter === 'all' || entry.targetType === targetFilter
     return matchesText && matchesAction && matchesActor && matchesTarget
   })
@@ -189,7 +262,7 @@ export function AuditLogPage(): React.ReactElement {
                       {new Date(entry.createdAt).toLocaleString('ar-EG')}
                     </td>
                     <td style={{ fontWeight: 600, fontSize: '0.88rem' }}>
-                      {entry.actorName}
+                      {actorLabel(entry)}
                     </td>
                     <td>
                       <span

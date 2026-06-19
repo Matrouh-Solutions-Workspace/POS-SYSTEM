@@ -27,6 +27,7 @@ import {
   resolveChords,
   useKeyboardStore
 } from '@renderer/features/keyboard/keyboard-store'
+import { useAuthStore } from '@renderer/features/auth/auth-store'
 
 const COLOR_PRESETS = [
   { label: 'فيروزي (افتراضي)', value: '#0e7490' },
@@ -52,6 +53,7 @@ const LOCK_OPTIONS = [
 // ── ShortcutsTab ─────────────────────────────────────────────────────────
 
 function ShortcutsTab(): React.ReactElement {
+  const user = useAuthStore((s) => s.user)!
   const storeChords = useKeyboardStore((s) => s.chords)
   const setChord    = useKeyboardStore((s) => s.setChord)
   const setCapturingShortcut = useKeyboardStore((s) => s.setCapturingShortcut)
@@ -112,7 +114,7 @@ function ShortcutsTab(): React.ReactElement {
       for (const [id, chord] of Object.entries(draft)) {
         setChord(id, chord)
       }
-      await updateSettings({ keyboardShortcuts: draft })
+      await updateSettings({ keyboardShortcuts: draft }, user)
       setMsg('تم حفظ الاختصارات ✓')
     } catch { setMsg('فشل الحفظ') }
     finally { setSaving(false) }
@@ -288,6 +290,7 @@ function ReceiptDesigner({
   settings: AppSettings
   onSettingsSaved: (settings: AppSettings) => void
 }): React.ReactElement {
+  const user = useAuthStore((s) => s.user)!
   const [sectionOrder, setSectionOrder] = useState<ReceiptSectionId[]>(() => normalizeReceiptSections(settings.receiptSectionOrder))
   const [hiddenSections, setHiddenSections] = useState<ReceiptSectionId[]>(settings.receiptHiddenSections ?? [])
   const [showItemNotes, setShowItemNotes] = useState(settings.receiptShowItemNotes !== false)
@@ -450,7 +453,7 @@ function ReceiptDesigner({
       receiptLogoMaxWidthPercent: logoMaxWidthPercent
     }
     try {
-      await updateSettings(patch)
+      await updateSettings(patch, user)
       onSettingsSaved({ ...settings, ...patch, updatedAt: Date.now() })
       setMessage('تم حفظ تصميم الإيصال')
     } catch {
@@ -783,6 +786,7 @@ function cropImageBounds(image: HTMLImageElement): { x: number; y: number; width
 }
 
 function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElement {
+  const user = useAuthStore((s) => s.user)!
   const [systemPrinters, setSystemPrinters] = useState<SystemPrinter[]>([])
   const [kitchenPrinters, setKitchenPrinters] = useState<KitchenPrinter[]>([])
   const [selectedDeviceName, setSelectedDeviceName] = useState('')
@@ -836,7 +840,8 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
         deviceName: selectedDeviceName,
         description,
         copies,
-        visibility: DEFAULT_KITCHEN_VISIBILITY
+        visibility: DEFAULT_KITCHEN_VISIBILITY,
+        actor: user
       })
       setPrinterName('')
       setDescription('')
@@ -853,7 +858,7 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
   function patchVisibility(printer: KitchenPrinter, key: keyof KitchenPrinterVisibility, checked: boolean): void {
     void updateKitchenPrinter(printer.id, {
       visibility: { ...printer.visibility, [key]: checked }
-    }).then(load)
+    }, user).then(load)
   }
 
   async function saveDefaultReceiptPrinter(): Promise<void> {
@@ -1100,12 +1105,12 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
                 <input
                   className="inline-edit-input"
                   value={printer.name}
-                  onChange={(e) => void updateKitchenPrinter(printer.id, { name: e.target.value }).then(load)}
+                  onChange={(e) => void updateKitchenPrinter(printer.id, { name: e.target.value }, user).then(load)}
                 />
                 <input
                   className="inline-edit-input"
                   value={printer.description ?? ''}
-                  onChange={(e) => void updateKitchenPrinter(printer.id, { description: e.target.value }).then(load)}
+                  onChange={(e) => void updateKitchenPrinter(printer.id, { description: e.target.value }, user).then(load)}
                   placeholder="ملاحظة"
                   style={{ marginTop: 4 }}
                 />
@@ -1114,7 +1119,7 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
                 <select
                   className="inline-edit-input"
                   value={printer.deviceName}
-                  onChange={(e) => void updateKitchenPrinter(printer.id, { deviceName: e.target.value }).then(load)}
+                  onChange={(e) => void updateKitchenPrinter(printer.id, { deviceName: e.target.value }, user).then(load)}
                 >
                   {systemPrinters.some((p) => p.name === printer.deviceName) || <option value={printer.deviceName}>{printer.deviceName} (غير مكتشفة الآن)</option>}
                   {systemPrinters.map((systemPrinter) => (
@@ -1125,7 +1130,7 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
                 </select>
                 <label className="field" style={{ marginTop: 6 }}>
                   <span>نسخ</span>
-                  <input type="number" min="1" max="5" value={printer.copies} onChange={(e) => void updateKitchenPrinter(printer.id, { copies: Number(e.target.value) || 1 }).then(load)} />
+                  <input type="number" min="1" max="5" value={printer.copies} onChange={(e) => void updateKitchenPrinter(printer.id, { copies: Number(e.target.value) || 1 }, user).then(load)} />
                 </label>
               </td>
               <td>
@@ -1150,7 +1155,7 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
                 </div>
               </td>
               <td>
-                <select className="inline-edit-input" value={printer.active ? 'active' : 'inactive'} onChange={(e) => void updateKitchenPrinter(printer.id, { active: e.target.value === 'active' }).then(load)}>
+                <select className="inline-edit-input" value={printer.active ? 'active' : 'inactive'} onChange={(e) => void updateKitchenPrinter(printer.id, { active: e.target.value === 'active' }, user).then(load)}>
                   <option value="active">مفعلة</option>
                   <option value="inactive">معطلة</option>
                 </select>
@@ -1160,7 +1165,7 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
                   <button type="button" className="btn btn--secondary btn--sm" onClick={() => openPreview(printer)}>
                     <MdVisibility /> معاينة
                   </button>
-                  <button type="button" className="btn btn--danger btn--sm" onClick={() => void deleteKitchenPrinter(printer.id).then(load)}>
+                  <button type="button" className="btn btn--danger btn--sm" onClick={() => void deleteKitchenPrinter(printer.id, user).then(load)}>
                     <MdDelete /> حذف
                   </button>
                 </div>
@@ -1190,6 +1195,7 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
 }
 
 export function SettingsPage(): React.ReactElement {
+  const user = useAuthStore((s) => s.user)!
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [cashiers, setCashiers] = useState<AppUser[]>([])
 
@@ -1294,7 +1300,7 @@ export function SettingsPage(): React.ReactElement {
         defaultDeliveryFee: receiptForm.defaultDeliveryFee ? Number(receiptForm.defaultDeliveryFee) : 0,
         maxCashierDiscountPct: receiptForm.maxCashierDiscountPct ? Number(receiptForm.maxCashierDiscountPct) : undefined
       }
-      await updateSettings(patch)
+      await updateSettings(patch, user)
       setSettings((current) => current ? { ...current, ...patch, updatedAt: Date.now() } : current)
       setReceiptMsg('تم حفظ إعدادات الإيصال')
     } catch { setReceiptMsg('فشل الحفظ') }
@@ -1306,7 +1312,7 @@ export function SettingsPage(): React.ReactElement {
     setThemeSaving(true)
     setThemeMsg(null)
     try {
-      await updateSettings({ primaryColor: selectedColor })
+      await updateSettings({ primaryColor: selectedColor }, user)
       applyThemeColor(selectedColor)
       setThemeMsg('تم حفظ اللون')
     } catch { setThemeMsg('فشل الحفظ') }
@@ -1322,7 +1328,7 @@ export function SettingsPage(): React.ReactElement {
     setPinSaving(true)
     setPinMsg(null)
     try {
-      await updateSettings({ pinEnabled, autoLockMinutes })
+      await updateSettings({ pinEnabled, autoLockMinutes }, user)
       setPinMsg('تم حفظ إعدادات القفل')
     } catch { setPinMsg('فشل الحفظ') }
     finally { setPinSaving(false) }
@@ -1338,7 +1344,7 @@ export function SettingsPage(): React.ReactElement {
     setPinSavingFor(cashier.id)
     try {
       const pinHash = pin ? await hashPin(pin) : undefined
-      await updateUserProfile(cashier.id, { pinHash })
+      await updateUserProfile(cashier.id, { pinHash }, user)
       setCashierPins((prev) => ({ ...prev, [cashier.id]: '' }))
       setPinMsg(`تم ${pin ? 'تعيين' : 'حذف'} PIN للكاشير ${cashier.displayName}`)
     } catch (e) { setPinMsg(e instanceof Error ? e.message : 'فشل') }
@@ -1355,7 +1361,7 @@ export function SettingsPage(): React.ReactElement {
         masterServerPort,
         sideDisconnectPolicy: 'block_actions',
         receiptPrintRoute
-      })
+      }, user)
       const status = await window.electronAPI.refreshMasterServer()
       setMasterStatus(status as typeof masterStatus)
       setNetworkMsg('تم حفظ إعدادات الشبكة')
@@ -1451,7 +1457,7 @@ export function SettingsPage(): React.ReactElement {
         autoBackupIntervalDays: Math.max(1, Math.min(7, autoBackupIntervalDays)) as AppSettings['autoBackupIntervalDays'],
         autoBackupOnClose,
         backupRetentionDays: backupRetentionDays as AppSettings['backupRetentionDays']
-      })
+      }, user)
       setBackupMsg('تم حفظ إعدادات النسخ الاحتياطي ✓')
     } catch (e) {
       setBackupMsg(e instanceof Error ? e.message : 'فشل حفظ إعدادات النسخ الاحتياطي')
@@ -1679,7 +1685,7 @@ export function SettingsPage(): React.ReactElement {
                         {c.pinHash && (
                           <button type="button" className="btn btn--danger btn--sm"
                             onClick={async () => {
-                              await updateUserProfile(c.id, { pinHash: undefined })
+                              await updateUserProfile(c.id, { pinHash: undefined }, user)
                               setPinMsg(`تم حذف PIN للكاشير ${c.displayName}`)
                               setCashiers(await listUsersByRole('cashier'))
                             }}>

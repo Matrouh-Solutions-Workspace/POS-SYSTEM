@@ -33,6 +33,7 @@ import type { AppSettings } from '@shared/types'
 import { cacheDocs, getCachedDoc, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 import { dbBatch, type DbBatchOp } from '@renderer/lib/db/sqlite-db'
 import { generateId } from '@renderer/lib/utils/id'
+import { actorAuditName, describePatch, type AuditActor } from '@renderer/features/audit/audit-service'
 import { getRecipe } from '../menu/menu-service'
 import { ensureOpenShift } from '../shifts/shift-service'
 import { nextLocalShiftOrderReference } from '@renderer/lib/offline/order-number'
@@ -119,10 +120,23 @@ export async function updateSettings(
       | 'backupRetentionDays'
       | 'lastAutoBackupAt'
     >
-  >
+  >,
+  actor?: AuditActor
 ): Promise<void> {
   const current = await getSettings()
   await cacheDocs(COLLECTIONS.settings, [{ ...current, ...patch, updatedAt: Date.now() }])
+  if (actor) {
+    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+      logAudit({
+        action: 'settings_changed',
+        actorId: actor.id,
+        actorName: actorAuditName(actor),
+        targetId: SETTINGS_DOC_ID,
+        targetType: 'settings',
+        detailAr: `تغيير إعدادات — ${describePatch(patch)}`
+      })
+    )
+  }
 }
 
 // ---------------------------------------------------------------------------

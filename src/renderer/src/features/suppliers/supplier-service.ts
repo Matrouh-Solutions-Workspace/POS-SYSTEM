@@ -6,6 +6,12 @@ import { COLLECTIONS } from '@shared/constants/collections'
 import { cacheDocs, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 import { dbDelete } from '@renderer/lib/db/sqlite-db'
 import { generateId } from '@renderer/lib/utils/id'
+import { actorAuditName, describePatch, type AuditActor } from '@renderer/features/audit/audit-service'
+
+function audit(actor: AuditActor | undefined, params: Parameters<typeof import('@renderer/features/audit/audit-service').logAudit>[0]): void {
+  if (!actor) return
+  void import('@renderer/features/audit/audit-service').then(({ logAudit }) => logAudit(params))
+}
 
 export async function listSuppliers(activeOnly = false): Promise<Supplier[]> {
   let suppliers = await getCachedDocs<Supplier>(COLLECTIONS.suppliers)
@@ -17,7 +23,7 @@ export async function createSupplier(data: {
   nameAr: string
   phone?: string
   noteAr?: string
-}): Promise<Supplier> {
+}, actor?: AuditActor): Promise<Supplier> {
   const now = Date.now()
   const supplier: Supplier = {
     id: generateId(),
@@ -29,25 +35,52 @@ export async function createSupplier(data: {
     updatedAt: now
   }
   await cacheDocs(COLLECTIONS.suppliers, [supplier])
+  audit(actor, {
+    action: 'supplier_created',
+    actorId: actor?.id ?? 'system',
+    actorName: actor ? actorAuditName(actor) : 'system',
+    targetId: supplier.id,
+    targetType: 'supplier',
+    detailAr: `إضافة مورد: ${supplier.nameAr}${supplier.phone ? ` — هاتف ${supplier.phone}` : ''}${supplier.noteAr ? ` — ملاحظة: ${supplier.noteAr}` : ''}`
+  })
   return supplier
 }
 
 export async function updateSupplier(
   id: string,
-  patch: Partial<Pick<Supplier, 'nameAr' | 'phone' | 'noteAr' | 'active'>>
+  patch: Partial<Pick<Supplier, 'nameAr' | 'phone' | 'noteAr' | 'active'>>,
+  actor?: AuditActor
 ): Promise<void> {
   const suppliers = await getCachedDocs<Supplier>(COLLECTIONS.suppliers)
   const cached = suppliers.find((s) => s.id === id)
   if (!cached) return
   await cacheDocs(COLLECTIONS.suppliers, [{ ...cached, ...patch, updatedAt: Date.now() }])
+  audit(actor, {
+    action: 'supplier_updated',
+    actorId: actor?.id ?? 'system',
+    actorName: actor ? actorAuditName(actor) : 'system',
+    targetId: id,
+    targetType: 'supplier',
+    detailAr: `تعديل مورد "${cached.nameAr}" — ${describePatch(patch)}`
+  })
 }
 
-export async function deleteSupplier(id: string): Promise<void> {
+export async function deleteSupplier(id: string, actor?: AuditActor): Promise<void> {
+  const suppliers = await getCachedDocs<Supplier>(COLLECTIONS.suppliers)
+  const cached = suppliers.find((s) => s.id === id)
   const transactions = await listSupplierTransactions(id)
   await Promise.all([
     dbDelete(COLLECTIONS.suppliers, id),
     ...transactions.map((tx) => dbDelete(COLLECTIONS.supplierTransactions, tx.id))
   ])
+  audit(actor, {
+    action: 'supplier_deleted',
+    actorId: actor?.id ?? 'system',
+    actorName: actor ? actorAuditName(actor) : 'system',
+    targetId: id,
+    targetType: 'supplier',
+    detailAr: `حذف مورد: ${cached?.nameAr ?? id} — تم حذف ${transactions.length} حركة مرتبطة`
+  })
 }
 
 export async function recordSupplierTransaction(params: {
@@ -57,6 +90,7 @@ export async function recordSupplierTransaction(params: {
   noteAr?: string
   shiftId?: string
   createdBy: string
+  actor?: AuditActor
 }): Promise<SupplierTransaction> {
   const tx: SupplierTransaction = {
     id: generateId(),
@@ -69,6 +103,16 @@ export async function recordSupplierTransaction(params: {
     createdAt: Date.now()
   }
   await cacheDocs(COLLECTIONS.supplierTransactions, [tx])
+  const suppliers = await getCachedDocs<Supplier>(COLLECTIONS.suppliers)
+  const supplierName = suppliers.find((supplier) => supplier.id === params.supplierId)?.nameAr ?? params.supplierId
+  audit(params.actor, {
+    action: 'supplier_transaction_recorded',
+    actorId: params.actor?.id ?? params.createdBy,
+    actorName: params.actor ? actorAuditName(params.actor) : params.createdBy,
+    targetId: tx.id,
+    targetType: 'supplier',
+    detailAr: `حركة مورد — ${supplierName} — النوع ${params.type} — المبلغ ${params.amount}${params.noteAr ? ` — ملاحظة: ${params.noteAr}` : ''}`
+  })
   return tx
 }
 

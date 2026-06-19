@@ -3,6 +3,12 @@ import type { KitchenPrinter, KitchenPrinterVisibility, MenuItem, SystemPrinter 
 import { cacheDocs, getCachedDoc, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 import { dbDelete } from '@renderer/lib/db/sqlite-db'
 import { generateId } from '@renderer/lib/utils/id'
+import { actorAuditName, describePatch, type AuditActor } from '@renderer/features/audit/audit-service'
+
+function audit(actor: AuditActor | undefined, params: Parameters<typeof import('@renderer/features/audit/audit-service').logAudit>[0]): void {
+  if (!actor) return
+  void import('@renderer/features/audit/audit-service').then(({ logAudit }) => logAudit(params))
+}
 
 export const DEFAULT_KITCHEN_VISIBILITY: KitchenPrinterVisibility = {
   showOrderType: true,
@@ -33,6 +39,7 @@ export async function createKitchenPrinter(params: {
   description?: string
   copies?: number
   visibility?: KitchenPrinterVisibility
+  actor?: AuditActor
 }): Promise<KitchenPrinter> {
   const now = Date.now()
   const printer: KitchenPrinter = {
@@ -47,12 +54,21 @@ export async function createKitchenPrinter(params: {
     updatedAt: now
   }
   await cacheDocs(COLLECTIONS.kitchenPrinters, [printer])
+  audit(params.actor, {
+    action: 'kitchen_printer_created',
+    actorId: params.actor?.id ?? 'system',
+    actorName: params.actor ? actorAuditName(params.actor) : 'system',
+    targetId: printer.id,
+    targetType: 'printer',
+    detailAr: `إضافة طابعة تجهيز: ${printer.name} — الجهاز ${printer.deviceName} — النسخ ${printer.copies}`
+  })
   return printer
 }
 
 export async function updateKitchenPrinter(
   id: string,
-  patch: Partial<Pick<KitchenPrinter, 'name' | 'deviceName' | 'description' | 'copies' | 'active' | 'visibility'>>
+  patch: Partial<Pick<KitchenPrinter, 'name' | 'deviceName' | 'description' | 'copies' | 'active' | 'visibility'>>,
+  actor?: AuditActor
 ): Promise<void> {
   const cached = await getCachedDoc<KitchenPrinter>(COLLECTIONS.kitchenPrinters, id)
   if (!cached) return
@@ -65,9 +81,18 @@ export async function updateKitchenPrinter(
     visibility: patch.visibility ? { ...cached.visibility, ...patch.visibility } : cached.visibility,
     updatedAt: Date.now()
   }])
+  audit(actor, {
+    action: 'kitchen_printer_updated',
+    actorId: actor?.id ?? 'system',
+    actorName: actor ? actorAuditName(actor) : 'system',
+    targetId: id,
+    targetType: 'printer',
+    detailAr: `تعديل طابعة تجهيز "${cached.name}" — ${describePatch(patch)}`
+  })
 }
 
-export async function deleteKitchenPrinter(id: string): Promise<void> {
+export async function deleteKitchenPrinter(id: string, actor?: AuditActor): Promise<void> {
+  const cached = await getCachedDoc<KitchenPrinter>(COLLECTIONS.kitchenPrinters, id)
   const items = await getCachedDocs<MenuItem>(COLLECTIONS.menuItems)
   const updates = items
     .filter((item) => item.kitchenPrinterIds?.includes(id))
@@ -78,4 +103,12 @@ export async function deleteKitchenPrinter(id: string): Promise<void> {
     }))
   if (updates.length) await cacheDocs(COLLECTIONS.menuItems, updates)
   await dbDelete(COLLECTIONS.kitchenPrinters, id)
+  audit(actor, {
+    action: 'kitchen_printer_deleted',
+    actorId: actor?.id ?? 'system',
+    actorName: actor ? actorAuditName(actor) : 'system',
+    targetId: id,
+    targetType: 'printer',
+    detailAr: `حذف طابعة تجهيز: ${cached?.name ?? id} — تم فك الربط من ${updates.length} صنف`
+  })
 }

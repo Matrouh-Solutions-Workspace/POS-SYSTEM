@@ -55,7 +55,7 @@ function StockTab({ stocks, ingredients, suppliers, onRefresh, setMessage }: {
     e.preventDefault()
     const ing = activeIngredients.find((i) => i.id === ingredientId)
     if (!ing) return
-    await recordPurchase({ ingredientId: ing.id, quantity: Number(qty), unit: ing.unit, noteAr: note || undefined, createdBy: user.id, supplierId: supplierId || undefined })
+    await recordPurchase({ ingredientId: ing.id, quantity: Number(qty), unit: ing.unit, noteAr: note || undefined, createdBy: user.id, supplierId: supplierId || undefined, actor: user })
     setQty(''); setNote('')
     setMessage('تم تسجيل الشراء')
     await onRefresh()
@@ -65,9 +65,9 @@ function StockTab({ stocks, ingredients, suppliers, onRefresh, setMessage }: {
     if (!modal) return
     const { stock, action } = modal
     if (action === 'waste') {
-      await recordWaste({ ingredientId: stock.ingredientId, quantity, unit: stock.unit, noteAr: noteAr || undefined, createdBy: user.id })
+      await recordWaste({ ingredientId: stock.ingredientId, quantity, unit: stock.unit, noteAr: noteAr || undefined, createdBy: user.id, actor: user })
     } else {
-      await recordAdjustment({ ingredientId: stock.ingredientId, quantity, unit: stock.unit, noteAr: noteAr || undefined, createdBy: user.id })
+      await recordAdjustment({ ingredientId: stock.ingredientId, quantity, unit: stock.unit, noteAr: noteAr || undefined, createdBy: user.id, actor: user })
     }
     setMessage(action === 'waste' ? 'تم تسجيل الهدر' : 'تم تسوية المخزون')
     await onRefresh()
@@ -172,6 +172,7 @@ function IngredientsTab({ ingredients, onRefresh, setMessage }: {
   onRefresh: () => Promise<void>
   setMessage: (m: string | null) => void
 }): React.ReactElement {
+  const user = useAuthStore((s) => s.user)!
   const [nameAr, setNameAr] = useState('')
   const [unit, setUnit] = useState('جرام')
   const [threshold, setThreshold] = useState('')
@@ -179,7 +180,7 @@ function IngredientsTab({ ingredients, onRefresh, setMessage }: {
 
   async function handleAdd(e: FormEvent): Promise<void> {
     e.preventDefault()
-    await createIngredient({ nameAr: nameAr.trim(), unit, lowStockThreshold: threshold ? Number(threshold) : undefined, active: true })
+    await createIngredient({ nameAr: nameAr.trim(), unit, lowStockThreshold: threshold ? Number(threshold) : undefined, active: true }, user)
     setNameAr(''); setThreshold('')
     setMessage('تم إضافة المكوّن')
     await onRefresh()
@@ -187,7 +188,7 @@ function IngredientsTab({ ingredients, onRefresh, setMessage }: {
 
   async function saveEdit(): Promise<void> {
     if (!editing) return
-    await updateIngredient(editing.id, { nameAr: editing.nameAr.trim(), unit: editing.unit, lowStockThreshold: editing.threshold ? Number(editing.threshold) : undefined })
+    await updateIngredient(editing.id, { nameAr: editing.nameAr.trim(), unit: editing.unit, lowStockThreshold: editing.threshold ? Number(editing.threshold) : undefined }, user)
     setEditing(null)
     setMessage('تم حفظ التعديلات')
     await onRefresh()
@@ -236,7 +237,7 @@ function IngredientsTab({ ingredients, onRefresh, setMessage }: {
                   <td>{isEditing ? <select className="inline-edit-input" value={editing.unit} onChange={(e) => setEditing({...editing,unit:e.target.value})}>{UNITS.map((u)=><option key={u} value={u}>{u}</option>)}</select> : i.unit}</td>
                   <td>{isEditing ? <input className="inline-edit-input" type="number" value={editing.threshold} onChange={(e) => setEditing({...editing,threshold:e.target.value})} placeholder="—" /> : (i.lowStockThreshold ?? '—')}</td>
                   <td>
-                    <button type="button" className={`btn btn--sm ${i.active ? 'btn--secondary' : 'btn--danger'}`} onClick={() => void updateIngredient(i.id, { active: !i.active }).then(onRefresh)}>
+                    <button type="button" className={`btn btn--sm ${i.active ? 'btn--secondary' : 'btn--danger'}`} onClick={() => void updateIngredient(i.id, { active: !i.active }, user).then(onRefresh)}>
                       {i.active ? 'مفعّل' : 'معطّل'}
                     </button>
                   </td>
@@ -246,7 +247,7 @@ function IngredientsTab({ ingredients, onRefresh, setMessage }: {
                         <><button type="button" className="btn btn--primary btn--sm" onClick={() => void saveEdit()}><MdCheck /> حفظ</button><button type="button" className="btn btn--secondary btn--sm" onClick={() => setEditing(null)}><MdClose /></button></>
                       ) : (
                         <><button type="button" className="btn btn--secondary btn--sm" onClick={() => setEditing({ id: i.id, nameAr: i.nameAr, unit: i.unit, threshold: i.lowStockThreshold != null ? String(i.lowStockThreshold) : '' })}><MdEdit /> تعديل</button>
-                        <ConfirmDeleteButton confirmMessage={`حذف "${i.nameAr}" نهائياً؟`} onConfirm={async () => { await deleteIngredient(i.id); setMessage(`تم حذف "${i.nameAr}"`); await onRefresh() }} /></>
+                        <ConfirmDeleteButton confirmMessage={`حذف "${i.nameAr}" نهائياً؟`} onConfirm={async () => { await deleteIngredient(i.id, user); setMessage(`تم حذف "${i.nameAr}"`); await onRefresh() }} /></>
                       )}
                     </div>
                   </td>

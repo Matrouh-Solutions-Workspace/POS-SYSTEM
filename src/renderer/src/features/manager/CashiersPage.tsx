@@ -92,7 +92,7 @@ export function CashiersPage(): React.ReactElement {
       await updateUserProfile(editingId, {
         displayName: editingName.trim(),
         cashierCode: editingCode.trim().toUpperCase()
-      })
+      }, manager)
       setMessage('تم تعديل بيانات الكاشير')
       cancelEdit()
       await load()
@@ -111,7 +111,7 @@ export function CashiersPage(): React.ReactElement {
     }
     setEditSaving(true)
     try {
-      await resetCashierPassword(editingId, newPassword)
+      await resetCashierPassword(editingId, newPassword, manager)
       setMessage('تم تغيير كلمة المرور')
       cancelEdit()
     } catch (e) {
@@ -213,7 +213,7 @@ export function CashiersPage(): React.ReactElement {
                     <button
                       type="button"
                       className={`btn btn--sm ${c.active ? 'btn--secondary' : 'btn--danger'}`}
-                      onClick={() => void updateUserActive(c.id, !c.active).then(load)}
+                      onClick={() => void updateUserActive(c.id, !c.active, manager.id, manager.username).then(load)}
                     >
                       {c.active ? 'مفعّل' : 'معطّل'}
                     </button>

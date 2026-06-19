@@ -9,6 +9,7 @@ import { usernameToEmail } from '@shared/types/user'
 import { COLLECTIONS } from '@shared/constants/collections'
 import { cacheDocs, getCachedDoc, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 import { dbDelete } from '@renderer/lib/db/sqlite-db'
+import { actorAuditName, describePatch, type AuditActor } from '@renderer/features/audit/audit-service'
 
 // ---------------------------------------------------------------------------
 // Session persistence (localStorage)
@@ -126,7 +127,7 @@ export async function loginAndLoadUser(username: string, password: string): Prom
     const user = mainAuth.user as AppUser
     writeSession(user.id)
     void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
-      logAudit({ action: 'login', actorId: user.id, actorName: user.displayName, detailAr: `ØªØ³Ø¬ÙŠÙ„ Ø¯Ø®ÙˆÙ„: ${user.displayName}` })
+      logAudit({ action: 'login', actorId: user.id, actorName: actorAuditName(user), detailAr: `ØªØ³Ø¬ÙŠÙ„ Ø¯Ø®ÙˆÙ„: ${user.displayName}` })
     )
     return user
   }
@@ -148,16 +149,16 @@ export async function loginAndLoadUser(username: string, password: string): Prom
   writeSession(user.id)
   // Audit: login
   void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
-    logAudit({ action: 'login', actorId: user.id, actorName: user.displayName, detailAr: `تسجيل دخول: ${user.displayName}` })
+    logAudit({ action: 'login', actorId: user.id, actorName: actorAuditName(user), detailAr: `تسجيل دخول: ${user.displayName}` })
   )
   return user
 }
 
 /** Logout — clear local session only */
-export async function logoutUser(user?: { id: string; displayName: string }): Promise<void> {
+export async function logoutUser(user?: { id: string; displayName: string; username?: string }): Promise<void> {
   if (user) {
     void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
-      logAudit({ action: 'logout', actorId: user.id, actorName: user.displayName, detailAr: `تسجيل خروج: ${user.displayName}` })
+      logAudit({ action: 'logout', actorId: user.id, actorName: actorAuditName(user), detailAr: `تسجيل خروج: ${user.displayName}` })
     )
   }
   clearSession()
@@ -254,13 +255,14 @@ export async function createAccount(
 
   await cacheDocs(COLLECTIONS.users, [user])
   await storeLocalCredential(user, data.password)
+  const actor = existing.find((u) => u.id === _createdByManagerId)
 
   // Audit: account created
   void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
     logAudit({
       action: 'account_created',
       actorId: _createdByManagerId,
-      actorName: 'مدير',
+      actorName: actor?.username ?? _createdByManagerId,
       targetId: user.id,
       targetType: 'user',
       detailAr: `إنشاء حساب جديد: ${user.displayName} (${user.role})`
@@ -305,7 +307,8 @@ export async function updateUserActive(userId: string, active: boolean, actorId 
 
 export async function updateUserProfile(
   userId: string,
-  patch: Partial<Pick<AppUser, 'displayName' | 'username' | 'pinHash' | 'cashierCode' | 'role' | 'permissions'>>
+  patch: Partial<Pick<AppUser, 'displayName' | 'username' | 'pinHash' | 'cashierCode' | 'role' | 'permissions'>>,
+  actor?: AuditActor
 ): Promise<void> {
   const cached = await getCachedDoc<AppUser>(COLLECTIONS.users, userId)
   if (!cached) return
@@ -324,14 +327,38 @@ export async function updateUserProfile(
   }
 
   await cacheDocs(COLLECTIONS.users, [{ ...cached, ...normalizedPatch, updatedAt: Date.now() }])
+  if (actor) {
+    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+      logAudit({
+        action: 'account_updated',
+        actorId: actor.id,
+        actorName: actorAuditName(actor),
+        targetId: userId,
+        targetType: 'user',
+        detailAr: `تعديل حساب: ${cached.username} — ${describePatch({ ...normalizedPatch, pinHash: normalizedPatch.pinHash ? 'تم التعيين' : normalizedPatch.pinHash })}`
+      })
+    )
+  }
 }
 
-export async function resetCashierPassword(userId: string, newPassword: string): Promise<void> {
+export async function resetCashierPassword(userId: string, newPassword: string, actor?: AuditActor): Promise<void> {
   const cached = await getCachedDoc<AppUser>(COLLECTIONS.users, userId)
   if (!cached) throw new Error('المستخدم غير موجود')
 
   await storeLocalCredential(cached, newPassword)
   await cacheDocs(COLLECTIONS.users, [{ ...cached, updatedAt: Date.now() }])
+  if (actor) {
+    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+      logAudit({
+        action: 'account_updated',
+        actorId: actor.id,
+        actorName: actorAuditName(actor),
+        targetId: userId,
+        targetType: 'user',
+        detailAr: `تغيير كلمة مرور حساب: ${cached.username}`
+      })
+    )
+  }
 
   // Background: update Firebase Auth password (fire-and-forget)
   void window.electronAPI.resetAuthUserPassword(userId, newPassword).catch(() => {
@@ -345,13 +372,14 @@ export async function deleteAccount(userId: string, currentUserId: string): Prom
   }
 
   const cached = await getCachedDoc<AppUser>(COLLECTIONS.users, userId)
+  const actor = await getCachedDoc<AppUser>(COLLECTIONS.users, currentUserId)
   if (cached) {
     await dbDelete(COLLECTIONS.users, userId)
     void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
       logAudit({
         action: 'account_deleted',
         actorId: currentUserId,
-        actorName: 'مدير',
+        actorName: actor?.username ?? currentUserId,
         targetId: userId,
         targetType: 'user',
         detailAr: `حذف حساب: ${cached.displayName}`

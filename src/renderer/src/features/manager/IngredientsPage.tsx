@@ -7,6 +7,7 @@ import {
   updateIngredient,
   deleteIngredient
 } from '@renderer/features/inventory/inventory-service'
+import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { MdEdit, MdCheck, MdClose } from 'react-icons/md'
 
 interface EditState {
@@ -19,6 +20,7 @@ interface EditState {
 const UNITS = ['جرام', 'كيلوجرام', 'قطعة', 'مل', 'لتر']
 
 export function IngredientsPage(): React.ReactElement {
+  const user = useAuthStore((s) => s.user)!
   const [items, setItems] = useState<Ingredient[]>([])
   const [nameAr, setNameAr] = useState('')
   const [unit, setUnit] = useState('جرام')
@@ -41,7 +43,7 @@ export function IngredientsPage(): React.ReactElement {
       unit,
       lowStockThreshold: threshold ? Number(threshold) : undefined,
       active: true
-    })
+    }, user)
     setNameAr('')
     setThreshold('')
     setMessage('تم إضافة المكوّن')
@@ -63,7 +65,7 @@ export function IngredientsPage(): React.ReactElement {
       nameAr: editing.nameAr.trim(),
       unit: editing.unit,
       lowStockThreshold: editing.threshold ? Number(editing.threshold) : undefined
-    })
+    }, user)
     setEditing(null)
     setMessage('تم حفظ التعديلات')
     await load()
@@ -154,7 +156,7 @@ export function IngredientsPage(): React.ReactElement {
                     <button
                       type="button"
                       className={`btn btn--sm ${i.active ? 'btn--secondary' : 'btn--danger'}`}
-                      onClick={() => void updateIngredient(i.id, { active: !i.active }).then(load)}
+                      onClick={() => void updateIngredient(i.id, { active: !i.active }, user).then(load)}
                     >
                       {i.active ? 'مفعّل' : 'معطّل'}
                     </button>
@@ -193,7 +195,7 @@ export function IngredientsPage(): React.ReactElement {
                           <ConfirmDeleteButton
                             confirmMessage={`حذف "${i.nameAr}" نهائياً؟`}
                             onConfirm={async () => {
-                              await deleteIngredient(i.id)
+                              await deleteIngredient(i.id, user)
                               setMessage(`تم حذف "${i.nameAr}"`)
                               await load()
                             }}

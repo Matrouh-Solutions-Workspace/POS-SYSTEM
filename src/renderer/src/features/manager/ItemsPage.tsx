@@ -41,6 +41,7 @@ import { listSizes, createSize, updateSize, deleteSize, reorderSizes } from '@re
 import { listAddons, createAddon, updateAddon, deleteAddon, reorderAddons } from '@renderer/features/menu/addons-service'
 import { listKitchenPrinters } from '@renderer/features/printers/printer-service'
 import { ConfirmDeleteButton } from '@renderer/components/ConfirmDeleteButton'
+import { useAuthStore } from '@renderer/features/auth/auth-store'
 import {
   MdArrowUpward, MdArrowDownward, MdEdit, MdCheck,
   MdClose, MdMenuBook, MdStraighten, MdAddBox,
@@ -130,6 +131,7 @@ function CategoriesTab({ categories, onRefresh, setMessage }: {
   onRefresh: () => Promise<void>
   setMessage: (m: string | null) => void
 }): React.ReactElement {
+  const user = useAuthStore((s) => s.user)!
   const [catName, setCatName] = useState('')
   const [catParentId, setCatParentId] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -150,7 +152,7 @@ function CategoriesTab({ categories, onRefresh, setMessage }: {
   async function addCategory(e: FormEvent): Promise<void> {
     e.preventDefault()
     try {
-      await createCategory(catName.trim(), categories.length, catParentId || undefined)
+      await createCategory(catName.trim(), categories.length, catParentId || undefined, user)
       setCatName(''); setCatParentId('')
       setMessage('تم إضافة التصنيف')
       await onRefresh()
@@ -159,7 +161,7 @@ function CategoriesTab({ categories, onRefresh, setMessage }: {
 
   async function saveCatEdit(id: string): Promise<void> {
     if (!editingName.trim()) return
-    await updateCategory(id, { nameAr: editingName.trim(), parentId: editingParentId || undefined })
+    await updateCategory(id, { nameAr: editingName.trim(), parentId: editingParentId || undefined }, user)
     setEditingId(null)
     setMessage('تم تعديل التصنيف')
     await onRefresh()
@@ -232,8 +234,8 @@ function CategoriesTab({ categories, onRefresh, setMessage }: {
                 ) : (
                   <>
                     <button type="button" className="btn btn--secondary btn--sm" onClick={() => { setEditingId(c.id); setEditingName(c.nameAr); setEditingParentId(c.parentId ?? '') }}><MdEdit /> تعديل</button>
-                    <button type="button" className={`btn btn--sm ${c.active ? 'btn--secondary' : 'btn--danger'}`} onClick={() => void updateCategory(c.id, { active: !c.active }).then(onRefresh)}>{c.active ? 'مفعّل' : 'معطّل'}</button>
-                    <ConfirmDeleteButton confirmMessage={`حذف تصنيف "${c.nameAr}"؟`} onConfirm={async () => { await deleteCategory(c.id); setMessage(`تم حذف "${c.nameAr}"`); await onRefresh() }} />
+                    <button type="button" className={`btn btn--sm ${c.active ? 'btn--secondary' : 'btn--danger'}`} onClick={() => void updateCategory(c.id, { active: !c.active }, user).then(onRefresh)}>{c.active ? 'مفعّل' : 'معطّل'}</button>
+                    <ConfirmDeleteButton confirmMessage={`حذف تصنيف "${c.nameAr}"؟`} onConfirm={async () => { await deleteCategory(c.id, user); setMessage(`تم حذف "${c.nameAr}"`); await onRefresh() }} />
                   </>
                 )}
               </div>
@@ -253,6 +255,7 @@ function SizesTab({ sizes, onRefresh, setMessage }: {
   onRefresh: () => Promise<void>
   setMessage: (m: string | null) => void
 }): React.ReactElement {
+  const user = useAuthStore((s) => s.user)!
   const [name, setName] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
@@ -262,7 +265,7 @@ function SizesTab({ sizes, onRefresh, setMessage }: {
     e.preventDefault()
     if (!name.trim()) return
     try {
-      await createSize(name.trim(), sizes.length)
+      await createSize(name.trim(), sizes.length, user)
       setName('')
       setMessage('تم إضافة الحجم')
       await onRefresh()
@@ -271,7 +274,7 @@ function SizesTab({ sizes, onRefresh, setMessage }: {
 
   async function saveEdit(id: string): Promise<void> {
     if (!editingName.trim()) return
-    await updateSize(id, { nameAr: editingName.trim() })
+    await updateSize(id, { nameAr: editingName.trim() }, user)
     setEditingId(null)
     setMessage('تم تعديل الحجم')
     await onRefresh()
@@ -329,8 +332,8 @@ function SizesTab({ sizes, onRefresh, setMessage }: {
                 ) : (
                   <>
                     <button type="button" className="btn btn--secondary btn--sm" onClick={() => { setEditingId(s.id); setEditingName(s.nameAr) }}><MdEdit /> تعديل</button>
-                    <button type="button" className={`btn btn--sm ${s.active ? 'btn--secondary' : 'btn--danger'}`} onClick={() => void updateSize(s.id, { active: !s.active }).then(onRefresh)}>{s.active ? 'مفعّل' : 'معطّل'}</button>
-                    <ConfirmDeleteButton confirmMessage={`حذف حجم "${s.nameAr}"؟`} onConfirm={async () => { await deleteSize(s.id); setMessage(`تم حذف "${s.nameAr}"`); await onRefresh() }} />
+                    <button type="button" className={`btn btn--sm ${s.active ? 'btn--secondary' : 'btn--danger'}`} onClick={() => void updateSize(s.id, { active: !s.active }, user).then(onRefresh)}>{s.active ? 'مفعّل' : 'معطّل'}</button>
+                    <ConfirmDeleteButton confirmMessage={`حذف حجم "${s.nameAr}"؟`} onConfirm={async () => { await deleteSize(s.id, user); setMessage(`تم حذف "${s.nameAr}"`); await onRefresh() }} />
                   </>
                 )}
               </div>
@@ -349,6 +352,7 @@ function AddonsTab({ addons, onRefresh, setMessage }: {
   onRefresh: () => Promise<void>
   setMessage: (m: string | null) => void
 }): React.ReactElement {
+  const user = useAuthStore((s) => s.user)!
   const [name, setName] = useState('')
   const [price, setPrice] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -360,7 +364,7 @@ function AddonsTab({ addons, onRefresh, setMessage }: {
     e.preventDefault()
     if (!name.trim()) return
     try {
-      await createAddon(name.trim(), Number(price) || 0, addons.length)
+      await createAddon(name.trim(), Number(price) || 0, addons.length, user)
       setName(''); setPrice('')
       setMessage('تم إضافة الإضافة')
       await onRefresh()
@@ -369,7 +373,7 @@ function AddonsTab({ addons, onRefresh, setMessage }: {
 
   async function saveEdit(id: string): Promise<void> {
     if (!editingName.trim()) return
-    await updateAddon(id, { nameAr: editingName.trim(), defaultPrice: Number(editingPrice) || 0 })
+    await updateAddon(id, { nameAr: editingName.trim(), defaultPrice: Number(editingPrice) || 0 }, user)
     setEditingId(null)
     setMessage('تم تعديل الإضافة')
     await onRefresh()
@@ -445,8 +449,8 @@ function AddonsTab({ addons, onRefresh, setMessage }: {
                     ) : (
                       <>
                         <button type="button" className="btn btn--secondary btn--sm" onClick={() => { setEditingId(a.id); setEditingName(a.nameAr); setEditingPrice(String(a.defaultPrice)) }}><MdEdit /> تعديل</button>
-                        <button type="button" className={`btn btn--sm ${a.active ? 'btn--secondary' : 'btn--danger'}`} onClick={() => void updateAddon(a.id, { active: !a.active }).then(onRefresh)}>{a.active ? 'مفعّل' : 'معطّل'}</button>
-                        <ConfirmDeleteButton confirmMessage={`حذف إضافة "${a.nameAr}"؟`} onConfirm={async () => { await deleteAddon(a.id); setMessage(`تم حذف "${a.nameAr}"`); await onRefresh() }} />
+                        <button type="button" className={`btn btn--sm ${a.active ? 'btn--secondary' : 'btn--danger'}`} onClick={() => void updateAddon(a.id, { active: !a.active }, user).then(onRefresh)}>{a.active ? 'مفعّل' : 'معطّل'}</button>
+                        <ConfirmDeleteButton confirmMessage={`حذف إضافة "${a.nameAr}"؟`} onConfirm={async () => { await deleteAddon(a.id, user); setMessage(`تم حذف "${a.nameAr}"`); await onRefresh() }} />
                       </>
                     )}
                   </div>
@@ -467,6 +471,7 @@ function RawMaterialsTab({ ingredients, onRefresh, setMessage }: {
   onRefresh: () => Promise<void>
   setMessage: (m: string | null) => void
 }): React.ReactElement {
+  const user = useAuthStore((s) => s.user)!
   const [nameAr, setNameAr] = useState('')
   const [unit, setUnit] = useState('جرام')
   const [threshold, setThreshold] = useState('')
@@ -484,7 +489,7 @@ function RawMaterialsTab({ ingredients, onRefresh, setMessage }: {
         unit: unit.trim(),
         lowStockThreshold: threshold ? Number(threshold) : undefined,
         active: true
-      })
+      }, user)
       setNameAr(''); setUnit('جرام'); setThreshold('')
       setMessage('تمت إضافة المادة الخام')
       await onRefresh()
@@ -496,7 +501,7 @@ function RawMaterialsTab({ ingredients, onRefresh, setMessage }: {
       nameAr: editName.trim(),
       unit: editUnit.trim(),
       lowStockThreshold: editThreshold ? Number(editThreshold) : undefined
-    })
+    }, user)
     setEditingId(null)
     setMessage('تم تعديل المادة الخام')
     await onRefresh()
@@ -558,8 +563,8 @@ function RawMaterialsTab({ ingredients, onRefresh, setMessage }: {
                       ) : (
                         <>
                           <button type="button" className="btn btn--secondary btn--sm" onClick={() => { setEditingId(ing.id); setEditName(ing.nameAr); setEditUnit(ing.unit); setEditThreshold(ing.lowStockThreshold != null ? String(ing.lowStockThreshold) : '') }}><MdEdit /> تعديل</button>
-                          <button type="button" className={`btn btn--sm ${ing.active ? 'btn--secondary' : 'btn--danger'}`} onClick={() => void updateIngredient(ing.id, { active: !ing.active }).then(onRefresh)}>{ing.active ? 'مفعّل' : 'معطّل'}</button>
-                          <ConfirmDeleteButton confirmMessage={`حذف "${ing.nameAr}"؟`} onConfirm={async () => { try { await deleteIngredient(ing.id); await onRefresh() } catch (e) { setMessage(e instanceof Error ? e.message : 'فشل الحذف') } }} />
+                          <button type="button" className={`btn btn--sm ${ing.active ? 'btn--secondary' : 'btn--danger'}`} onClick={() => void updateIngredient(ing.id, { active: !ing.active }, user).then(onRefresh)}>{ing.active ? 'مفعّل' : 'معطّل'}</button>
+                          <ConfirmDeleteButton confirmMessage={`حذف "${ing.nameAr}"؟`} onConfirm={async () => { try { await deleteIngredient(ing.id, user); await onRefresh() } catch (e) { setMessage(e instanceof Error ? e.message : 'فشل الحذف') } }} />
                         </>
                       )}
                     </div>
@@ -659,6 +664,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
   setItemForm: React.Dispatch<React.SetStateAction<ItemFormState>>
   formRef: React.RefObject<HTMLFormElement | null>
 }): React.ReactElement {
+  const user = useAuthStore((s) => s.user)!
   const [editingItem, setEditingItem] = useState<ItemEditState | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null)
@@ -706,7 +712,8 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
         customWeightUnitPrice: itemForm.isWeighted && itemForm.allowCustomWeight ? Number(itemForm.customWeightUnitPrice) : undefined,
         kitchenPrinterIds: itemForm.kitchenPrinterIds,
         lines: recipeLines,
-        sortOrder: items.length
+        sortOrder: items.length,
+        actor: user
       })
       setItemForm((f) => (
         shouldRepeat
@@ -746,7 +753,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
       customWeightUnitPrice: editingItem.isWeighted && editingItem.allowCustomWeight ? Number(editingItem.customWeightUnitPrice) : undefined,
       kitchenPrinterIds: editingItem.kitchenPrinterIds,
       active: editingItem.active
-    })
+    }, user)
     setEditingItem(null)
     setMessage('تم تعديل الصنف')
     await onRefresh()
@@ -766,7 +773,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
 
   async function saveRecipe(): Promise<void> {
     if (!editingRecipeId) return
-    await updateRecipe(editingRecipeId, recipeLines)
+    await updateRecipe(editingRecipeId, recipeLines, undefined, user)
     setEditingRecipeId(null)
     setMessage('تم تعديل الوصفة')
   }
@@ -1276,7 +1283,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
                           {(item.itemType == null || item.itemType === 'product') && item.productType !== 'no_inventory' && item.productType !== 'ready_made' && item.productType !== 'manufactured' && (
                             <button type="button" className="btn btn--secondary btn--sm" onClick={()=>void openRecipe(item)}>الوصفة</button>
                           )}
-                          <ConfirmDeleteButton confirmMessage={`حذف "${item.nameAr}"؟`} onConfirm={async()=>{await deleteMenuItem(item.id,item.recipeId);await onRefresh()}}/>
+                          <ConfirmDeleteButton confirmMessage={`حذف "${item.nameAr}"؟`} onConfirm={async()=>{await deleteMenuItem(item.id,item.recipeId,user);await onRefresh()}}/>
                         </>
                       )}
                     </div>
