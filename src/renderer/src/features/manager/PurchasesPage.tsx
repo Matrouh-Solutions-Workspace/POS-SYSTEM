@@ -11,7 +11,7 @@
  * This mirrors how Square, Toast, and Lightspeed structure their inventory.
  */
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import type { Ingredient, IngredientStock } from '@shared/types'
+import type { Ingredient, IngredientStock, Supplier } from '@shared/types'
 import {
   listIngredients,
   createIngredient,
@@ -27,31 +27,35 @@ import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { InventoryActionModal, type InventoryActionType } from './InventoryActionModal'
 import { MdAdd, MdEdit, MdCheck, MdClose, MdInventory, MdKitchen, MdRemove, MdSwapVert, MdWarning } from 'react-icons/md'
 import { usePageState } from '@renderer/features/tabs/page-state-store'
+import { listSuppliers } from '@renderer/features/suppliers/supplier-service'
 
 const UNITS = ['جرام', 'كيلوجرام', 'قطعة', 'مل', 'لتر']
 
 // ── Stock tab ───────────────────────────────────────────────────────────────
 
-function StockTab({ stocks, ingredients, onRefresh, setMessage }: {
+function StockTab({ stocks, ingredients, suppliers, onRefresh, setMessage }: {
   stocks: IngredientStock[]
   ingredients: Ingredient[]
+  suppliers: Supplier[]
   onRefresh: () => Promise<void>
   setMessage: (m: string | null) => void
 }): React.ReactElement {
   const user = useAuthStore((s) => s.user)!
   const [ingredientId, setIngredientId] = useState('')
+  const [supplierId, setSupplierId] = useState('')
   const [qty, setQty] = useState('')
   const [note, setNote] = useState('')
   const [modal, setModal] = useState<{ stock: IngredientStock; action: InventoryActionType } | null>(null)
 
   const activeIngredients = ingredients.filter((i) => i.active)
+  const activeSuppliers = suppliers.filter((s) => s.active)
   const lowStockCount = stocks.filter((s) => s.lowStockThreshold != null && s.quantity <= s.lowStockThreshold).length
 
   async function handlePurchase(e: FormEvent): Promise<void> {
     e.preventDefault()
     const ing = activeIngredients.find((i) => i.id === ingredientId)
     if (!ing) return
-    await recordPurchase({ ingredientId: ing.id, quantity: Number(qty), unit: ing.unit, noteAr: note || undefined, createdBy: user.id })
+    await recordPurchase({ ingredientId: ing.id, quantity: Number(qty), unit: ing.unit, noteAr: note || undefined, createdBy: user.id, supplierId: supplierId || undefined })
     setQty(''); setNote('')
     setMessage('تم تسجيل الشراء')
     await onRefresh()
@@ -91,8 +95,17 @@ function StockTab({ stocks, ingredients, onRefresh, setMessage }: {
             </select>
           </label>
           <label className="field">
+            <span>المورد</span>
+            <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+              <option value="">بدون مورد</option>
+              {activeSuppliers.map((supplier) => (
+                <option key={supplier.id} value={supplier.id}>{supplier.nameAr}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
             <span>الكمية المشتراة</span>
-            <input type="number" min="0.01" step="any" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="مثال: 5" required />
+            <input className="stock-qty-input" type="number" min="0.01" step="any" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="مثال: 5" required />
           </label>
           <label className="field">
             <span>ملاحظة (اختياري)</span>
@@ -256,6 +269,7 @@ export function PurchasesPage(): React.ReactElement {
   const [activeTab, setActiveTab] = useState<PurchasesTab>(saved.activeTab ?? 'stock')
   const [stocks, setStocks] = useState<IngredientStock[]>([])
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const tabListRef = useRef<HTMLDivElement>(null)
   const stockTabRef = useRef<HTMLDivElement>(null)
@@ -264,9 +278,10 @@ export function PurchasesPage(): React.ReactElement {
   useEffect(() => { save({ activeTab }) }, [activeTab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async () => {
-    const [s, ing] = await Promise.all([getIngredientStocks(), listIngredients()])
+    const [s, ing, supplierList] = await Promise.all([getIngredientStocks(), listIngredients(), listSuppliers()])
     setStocks(s)
     setIngredients(ing)
+    setSuppliers(supplierList)
   }, [])
 
   useEffect(() => { void load() }, [load])
@@ -348,7 +363,7 @@ export function PurchasesPage(): React.ReactElement {
 
       {activeTab === 'stock' && (
         <div ref={stockTabRef}>
-          <StockTab stocks={stocks} ingredients={ingredients} onRefresh={load} setMessage={setMessage} />
+          <StockTab stocks={stocks} ingredients={ingredients} suppliers={suppliers} onRefresh={load} setMessage={setMessage} />
         </div>
       )}
       {activeTab === 'ingredients' && (
