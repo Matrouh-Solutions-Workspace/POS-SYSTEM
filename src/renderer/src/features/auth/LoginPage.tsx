@@ -14,10 +14,8 @@ export function LoginPage(): React.ReactElement {
   const user = useAuthStore((s) => s.user)
   const setUser = useAuthStore((s) => s.setUser)
   const navigate = useNavigate()
-  const [username, setUsername] = useState('manager')
-  const [password, setPassword] = useState(() =>
-    !hasOfflineAuthUsers() && !navigator.onLine ? '' : 'Manager123!'
-  )
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [localSetupMode, setLocalSetupMode] = useState(
@@ -70,7 +68,7 @@ export function LoginPage(): React.ReactElement {
         {localSetupMode && !isSideDevice && (
           <p className="muted">إنشاء أول حساب مدير محلي للعمل بدون إنترنت من أول تشغيل.</p>
         )}
-        <form onSubmit={(e) => void handleSubmit(e)} className="login-form">
+        <form onSubmit={(e) => void handleSubmit(e)} className="login-form" autoComplete="off">
           <label className="field">
             <span>اسم المستخدم</span>
             <input
@@ -78,14 +76,14 @@ export function LoginPage(): React.ReactElement {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
-              autoComplete="username"
+              autoComplete="off"
               dir="ltr"
               placeholder="manager"
             />
           </label>
           <label className="field">
             <span>كلمة المرور</span>
-            <PasswordInput value={password} onChange={setPassword} />
+            <PasswordInput value={password} onChange={setPassword} autoComplete="off" />
           </label>
           {error && <p className="form-error">{error}</p>}
           <button type="submit" className="btn btn--primary btn--lg" disabled={loading}>
