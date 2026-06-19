@@ -14,22 +14,6 @@ import { MdArchive, MdLock, MdPrint, MdRefresh, MdUnarchive } from 'react-icons/
 
 type ShiftViewMode = 'active' | 'archived'
 
-function orderStatusLabel(status: string): string {
-  if (status === 'completed') return 'مكتمل'
-  if (status === 'cancelled') return 'ملغي'
-  return 'مفتوح'
-}
-
-function paymentStatusLabel(status?: string): string {
-  return status === 'unpaid' ? 'غير مدفوع' : 'مدفوع'
-}
-
-function orderPlaceLabel(order: ShiftSummary['orders'][number]): string {
-  if (order.orderType === 'delivery') return 'دليفري'
-  if (order.orderType !== 'dine_in') return 'تيك أواي'
-  return [order.tableCategoryAr, order.tableNameAr].filter(Boolean).join(' / ') || 'صالة'
-}
-
 function shiftOrderTypeSummary(summary: ShiftSummary): Record<'dine_in' | 'delivery' | 'takeaway', number> {
   return summary.completedOrders.reduce((acc, order) => {
     if (order.orderType === 'dine_in') acc.dine_in += 1
@@ -39,14 +23,17 @@ function shiftOrderTypeSummary(summary: ShiftSummary): Record<'dine_in' | 'deliv
   }, { dine_in: 0, delivery: 0, takeaway: 0 })
 }
 
+function formatQty(qty: number): string {
+  return Number.isInteger(qty) ? String(qty) : qty.toFixed(3).replace(/0+$/g, '').replace(/\.$/g, '')
+}
+
 function buildShiftReceiptHtml(summary: ShiftSummary, currency: string): string {
   const typeCounts = shiftOrderTypeSummary(summary)
-  const rows = summary.orders.map((order) => `
+  const itemRows = summary.itemSummary.map((item) => `
     <tr>
-      <td>${order.orderCode ?? order.orderNumber}</td>
-      <td>${orderPlaceLabel(order)}</td>
-      <td>${orderStatusLabel(order.status)}</td>
-      <td>${order.total.toFixed(2)} ${currency}</td>
+      <td>${item.nameAr}${item.sizeLabelAr ? `<br/><small>${item.sizeLabelAr}</small>` : ''}</td>
+      <td>${formatQty(item.quantity)}${item.unitLabel ? ` ${item.unitLabel}` : ''}</td>
+      <td>${item.total.toFixed(2)} ${currency}</td>
     </tr>
   `).join('')
   return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8" />
@@ -70,7 +57,8 @@ function buildShiftReceiptHtml(summary: ShiftSummary, currency: string): string 
       <div class="line"><span>صالة</span><span>${typeCounts.dine_in}</span></div>
       <div class="line"><span>دليفري</span><span>${typeCounts.delivery}</span></div>
       <div class="line"><span>تيك أواي</span><span>${typeCounts.takeaway}</span></div>
-      <table><thead><tr><th>الأوردر</th><th>النوع</th><th>الحالة</th><th>الإجمالي</th></tr></thead><tbody>${rows}</tbody></table>
+      <h2>الأصناف المباعة</h2>
+      <table><thead><tr><th>الصنف</th><th>الكمية</th><th>الإجمالي</th></tr></thead><tbody>${itemRows}</tbody></table>
     </body></html>`
 }
 
@@ -279,50 +267,24 @@ export function ShiftsPage(): React.ReactElement {
             </div>
           </div>
 
-          <h3 className="section-title">أوردرات الشيفت</h3>
+          <h3 className="section-title">الأصناف المباعة في الشيفت</h3>
           <table className="data-table">
             <thead>
-              <tr>
-                <th>الأوردر</th>
-                <th>الوقت</th>
-                <th>النوع / الترابيزة</th>
-                <th>الحالة</th>
-                <th>الدفع</th>
-                <th>الإجمالي</th>
-              </tr>
+              <tr><th>الصنف</th><th>الكمية</th><th>الإجمالي</th></tr>
             </thead>
             <tbody>
-              {selected.orders.length === 0 ? (
-                <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-muted)' }}>
-                    لا توجد أوردرات في هذا الشيفت
-                  </td>
-                </tr>
-              ) : selected.orders.map((order) => (
-                <tr key={order.id}>
-                  <td dir="ltr">{order.orderCode ?? order.orderNumber}</td>
-                  <td>{new Date(order.createdAt).toLocaleString('ar-EG')}</td>
-                  <td>{orderPlaceLabel(order)}</td>
-                  <td>{orderStatusLabel(order.status)}</td>
-                  <td>{paymentStatusLabel(order.paymentStatus)}</td>
-                  <td>{order.total.toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <h3 className="section-title">الأوردرات الملغية</h3>
-          <table className="data-table">
-            <thead><tr><th>الأوردر</th><th>السبب</th><th>الإجمالي</th></tr></thead>
-            <tbody>
-              {selected.cancelledOrders.length === 0 ? (
+              {selected.itemSummary.length === 0 ? (
                 <tr>
                   <td colSpan={3} style={{ textAlign: 'center', color: 'var(--color-muted)' }}>
-                    لا توجد أوردرات ملغية
+                    لا توجد أصناف مباعة في هذا الشيفت
                   </td>
                 </tr>
-              ) : selected.cancelledOrders.map((o) => (
-                <tr key={o.id}><td dir="ltr">{o.orderCode ?? o.orderNumber}</td><td>{o.cancelReasonAr ?? '-'}</td><td>{o.total.toFixed(2)}</td></tr>
+              ) : selected.itemSummary.map((item) => (
+                <tr key={item.key}>
+                  <td>{item.nameAr}{item.sizeLabelAr ? ` - ${item.sizeLabelAr}` : ''}</td>
+                  <td>{formatQty(item.quantity)}{item.unitLabel ? ` ${item.unitLabel}` : ''}</td>
+                  <td>{item.total.toFixed(2)}</td>
+                </tr>
               ))}
             </tbody>
           </table>

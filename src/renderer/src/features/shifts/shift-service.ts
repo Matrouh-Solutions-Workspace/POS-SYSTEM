@@ -1,7 +1,7 @@
 /**
  * Shift service — SQLite primary database.
  */
-import type { CashDrawerTransaction, InventoryTransaction, Order, Shift } from '@shared/types'
+import type { CashDrawerTransaction, InventoryTransaction, Order, OrderItem, Shift } from '@shared/types'
 import { COLLECTIONS } from '@shared/constants/collections'
 import { cacheDocs, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 import { generateId } from '@renderer/lib/utils/id'
@@ -25,6 +25,14 @@ export interface ShiftSummary {
   cashRevenue: number
   cardRevenue: number
   expenses: number
+  itemSummary: Array<{
+    key: string
+    nameAr: string
+    sizeLabelAr?: string
+    unitLabel?: string
+    quantity: number
+    total: number
+  }>
   suppliedInventory: Array<InventoryTransaction & { ingredientNameAr: string }>
   usedInventory: Array<InventoryTransaction & { ingredientNameAr: string }>
   cashTransactions: CashDrawerTransaction[]
@@ -166,8 +174,9 @@ export async function getUnarchivedShiftCount(): Promise<number> {
 }
 
 export async function getShiftSummary(shift: Shift): Promise<ShiftSummary> {
-  const [allOrders, inventoryTransactions, cashTransactions, ingredients] = await Promise.all([
+  const [allOrders, allOrderItems, inventoryTransactions, cashTransactions, ingredients] = await Promise.all([
     listOrders(2000),
+    getCachedDocs<OrderItem>(COLLECTIONS.orderItems),
     listInventoryTransactions(),
     listCashDrawerTransactions(),
     listIngredients()
@@ -179,6 +188,26 @@ export async function getShiftSummary(shift: Shift): Promise<ShiftSummary> {
   const orderIds = new Set(orders.map((o) => o.id))
   const completedOrders = orders.filter((o) => o.status === 'completed')
   const cancelledOrders = orders.filter((o) => o.status === 'cancelled')
+  const completedOrderIds = new Set(completedOrders.map((o) => o.id))
+  const itemSummaryMap = new Map<string, ShiftSummary['itemSummary'][number]>()
+  for (const item of allOrderItems.filter((line) => completedOrderIds.has(line.orderId))) {
+    const key = [item.menuItemId, item.nameAr, item.sizeLabelAr ?? '', item.unitLabel ?? ''].join('|')
+    const existing = itemSummaryMap.get(key)
+    if (existing) {
+      existing.quantity += item.quantity
+      existing.total += item.lineTotal
+    } else {
+      itemSummaryMap.set(key, {
+        key,
+        nameAr: item.nameAr,
+        sizeLabelAr: item.sizeLabelAr,
+        unitLabel: item.unitLabel,
+        quantity: item.quantity,
+        total: item.lineTotal
+      })
+    }
+  }
+  const itemSummary = [...itemSummaryMap.values()].sort((a, b) => b.quantity - a.quantity || a.nameAr.localeCompare(b.nameAr, 'ar'))
 
   const shiftInventory = inventoryTransactions.filter((tx) =>
     transactionBelongsToShift(tx, shift, orderIds)
@@ -241,6 +270,7 @@ export async function getShiftSummary(shift: Shift): Promise<ShiftSummary> {
     cashRevenue,
     cardRevenue,
     expenses,
+    itemSummary,
     suppliedInventory: suppliedInventory.map(withName),
     usedInventory: usedInventory.map(withName),
     cashTransactions: shiftCashTransactions
