@@ -38,12 +38,19 @@ export function computeTax(afterDiscount: number, taxRate?: number): number {
   return Math.round(afterDiscount * taxRate) / 100
 }
 
-/** Full order total: subtotal − discount + tax + deliveryFee */
+/** Compute service amount from (subtotal - discount) */
+export function computeService(afterDiscount: number, serviceRate?: number): number {
+  if (!serviceRate || serviceRate <= 0) return 0
+  return Math.round(afterDiscount * serviceRate) / 100
+}
+
+/** Full order total: subtotal − discount + tax + service + deliveryFee */
 export function orderTotal(
   subtotal: number,
   discountAmount = 0,
   taxAmount = 0,
-  deliveryFee = 0
+  deliveryFee = 0,
+  serviceAmount = 0
 ): number {
-  return Math.round((subtotal - discountAmount + taxAmount + deliveryFee) * 100) / 100
+  return Math.round((subtotal - discountAmount + taxAmount + serviceAmount + deliveryFee) * 100) / 100
 }

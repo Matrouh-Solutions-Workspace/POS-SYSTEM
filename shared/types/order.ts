@@ -24,8 +24,10 @@ export interface Order {
   discountAmount?: number  // computed discount amount stored for receipts
   taxRate?: number         // percentage e.g. 14 for 14% VAT
   taxAmount?: number       // computed tax amount stored for receipts
+  serviceRate?: number     // percentage e.g. 12 for service charge
+  serviceAmount?: number   // computed service amount stored for receipts
   deliveryFee?: number
-  total: number            // subtotal - discountAmount + taxAmount + deliveryFee
+  total: number            // subtotal - discountAmount + taxAmount + serviceAmount + deliveryFee
   noteAr?: string
   // Delivery customer info
   customerName?: string

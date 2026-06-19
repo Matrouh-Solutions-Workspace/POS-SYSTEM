@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import type { Supplier, SupplierTransactionType } from '@shared/types'
+import type { Supplier, SupplierTransaction, SupplierTransactionType } from '@shared/types'
 import {
   createSupplier,
+  deleteSupplier,
   getSupplierBalance,
+  listSupplierTransactions,
   listSuppliers,
   recordSupplierTransaction,
   updateSupplier
 } from '@renderer/features/suppliers/supplier-service'
 import { recordCashDrawerTransaction } from '@renderer/features/cash/cash-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
+import { ConfirmDeleteButton } from '@renderer/components/ConfirmDeleteButton'
 
 const TX_TYPES: Array<{ value: SupplierTransactionType; label: string }> = [
   { value: 'purchase_credit', label: 'توريد على الحساب' },
@@ -21,6 +24,7 @@ const TX_TYPES: Array<{ value: SupplierTransactionType; label: string }> = [
 export function SuppliersPage(): React.ReactElement {
   const user = useAuthStore((s) => s.user)!
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [transactions, setTransactions] = useState<SupplierTransaction[]>([])
   const [balances, setBalances] = useState<Record<string, number>>({})
   const [form, setForm] = useState({ nameAr: '', phone: '', noteAr: '' })
   const [txForm, setTxForm] = useState({
@@ -32,8 +36,9 @@ export function SuppliersPage(): React.ReactElement {
   const [message, setMessage] = useState('')
 
   const load = useCallback(async () => {
-    const list = await listSuppliers()
+    const [list, txs] = await Promise.all([listSuppliers(), listSupplierTransactions()])
     setSuppliers(list)
+    setTransactions(txs.slice(0, 100))
     const pairs = await Promise.all(list.map(async (s) => [s.id, await getSupplierBalance(s.id)] as const))
     setBalances(Object.fromEntries(pairs))
   }, [])
@@ -117,7 +122,7 @@ export function SuppliersPage(): React.ReactElement {
       <div className="card">
         <h2 className="card__title">الموردين</h2>
         <table className="data-table">
-          <thead><tr><th>الاسم</th><th>الهاتف</th><th>الرصيد</th><th>الحالة</th></tr></thead>
+          <thead><tr><th>الاسم</th><th>الهاتف</th><th>الرصيد</th><th>الحالة</th><th>إجراءات</th></tr></thead>
           <tbody>
             {suppliers.map((s) => (
               <tr key={s.id}>
@@ -129,6 +134,38 @@ export function SuppliersPage(): React.ReactElement {
                     {s.active ? 'مفعل' : 'معطل'}
                   </button>
                 </td>
+                <td>
+                  <ConfirmDeleteButton
+                    confirmMessage={`حذف المورد "${s.nameAr}" وكل حركاته؟`}
+                    onConfirm={async () => {
+                      await deleteSupplier(s.id)
+                      setMessage(`تم حذف المورد "${s.nameAr}"`)
+                      await load()
+                    }}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="card">
+        <h2 className="card__title">سجل عمليات التوريد</h2>
+        <table className="data-table">
+          <thead>
+            <tr><th>الوقت</th><th>المورد</th><th>نوع الحركة</th><th>المبلغ</th><th>ملاحظة</th></tr>
+          </thead>
+          <tbody>
+            {transactions.length === 0 ? (
+              <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-muted)' }}>لا توجد عمليات توريد بعد</td></tr>
+            ) : transactions.map((tx) => (
+              <tr key={tx.id}>
+                <td>{new Date(tx.createdAt).toLocaleString('ar-EG')}</td>
+                <td>{suppliers.find((s) => s.id === tx.supplierId)?.nameAr ?? tx.supplierId}</td>
+                <td>{TX_TYPES.find((t) => t.value === tx.type)?.label ?? tx.type}</td>
+                <td>{tx.amount.toFixed(2)}</td>
+                <td>{tx.noteAr ?? '-'}</td>
               </tr>
             ))}
           </tbody>

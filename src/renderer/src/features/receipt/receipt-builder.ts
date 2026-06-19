@@ -217,6 +217,9 @@ function renderTotals(order: Order, cur: string): string {
   if (order.taxAmount && order.taxAmount > 0) {
     rows.push(`<div><span>ضريبة القيمة المضافة (${order.taxRate}%)</span><span>${fm(order.taxAmount, cur)}</span></div>`)
   }
+  if (order.serviceAmount && order.serviceAmount > 0) {
+    rows.push(`<div><span>خدمة (${order.serviceRate}%)</span><span>${fm(order.serviceAmount, cur)}</span></div>`)
+  }
   if (order.deliveryFee && order.deliveryFee > 0) {
     rows.push(`<div><span>رسوم التوصيل</span><span>${fm(order.deliveryFee, cur)}</span></div>`)
   }

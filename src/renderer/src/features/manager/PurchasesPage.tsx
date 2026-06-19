@@ -25,7 +25,7 @@ import {
 import { ConfirmDeleteButton } from '@renderer/components/ConfirmDeleteButton'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { InventoryActionModal, type InventoryActionType } from './InventoryActionModal'
-import { MdEdit, MdCheck, MdClose, MdInventory, MdKitchen, MdWarning } from 'react-icons/md'
+import { MdAdd, MdEdit, MdCheck, MdClose, MdInventory, MdKitchen, MdRemove, MdSwapVert, MdWarning } from 'react-icons/md'
 import { usePageState } from '@renderer/features/tabs/page-state-store'
 
 const UNITS = ['جرام', 'كيلوجرام', 'قطعة', 'مل', 'لتر']
@@ -133,9 +133,9 @@ function StockTab({ stocks, ingredients, onRefresh, setMessage }: {
                   <td>{s.lowStockThreshold ?? '—'}</td>
                   <td>
                     <div className="table-actions">
-                      <button type="button" className="btn btn--primary btn--sm" onClick={() => { setIngredientId(s.ingredientId); document.querySelector<HTMLInputElement>('.stock-qty-input')?.focus() }}>شراء</button>
-                      <button type="button" className="btn btn--secondary btn--sm" onClick={() => setModal({ stock: s, action: 'adjustment' })}>تسوية</button>
-                      <button type="button" className="btn btn--secondary btn--sm" onClick={() => setModal({ stock: s, action: 'waste' })}>هدر</button>
+                      <button type="button" className="btn btn--primary btn--sm" title="شراء: إضافة للمخزون" onClick={() => { setIngredientId(s.ingredientId); document.querySelector<HTMLInputElement>('.stock-qty-input')?.focus() }}><MdAdd /> شراء</button>
+                      <button type="button" className="btn btn--secondary btn--sm" title="تسوية: تصحيح الرصيد بالزيادة أو النقص" onClick={() => setModal({ stock: s, action: 'adjustment' })}><MdSwapVert /> تسوية</button>
+                      <button type="button" className="btn btn--secondary btn--sm" title="هدر: خصم من المخزون" onClick={() => setModal({ stock: s, action: 'waste' })}><MdRemove /> هدر</button>
                     </div>
                   </td>
                 </tr>

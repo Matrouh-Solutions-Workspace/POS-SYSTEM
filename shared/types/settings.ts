@@ -10,6 +10,8 @@ export interface AppSettings {
   nextOrderNumber: number
   /** VAT/tax percentage — 0 means no tax. e.g. 14 = 14% */
   taxRate?: number
+  /** Service percentage — 0 means disabled. */
+  serviceRate?: number
   /** Default delivery fee added to delivery orders */
   defaultDeliveryFee?: number
   /**

@@ -201,6 +201,14 @@ function CreateAccountForm({ currentUser, onCreated, onCancel }: {
             <input value={form.cashierCode} onChange={(e) => setForm((f) => ({ ...f, cashierCode: e.target.value.toUpperCase().slice(0, 2) }))} placeholder="AA" dir="ltr" maxLength={2} />
           </label>
           <label className="field">
+            <span>الدور</span>
+            <select value={form.role} onChange={(e) => handleRoleChange(e.target.value as UserRole)}>
+              {(Object.entries(ROLE_LABELS) as [UserRole, string][]).map(([role, label]) => (
+                <option key={role} value={role}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
             <span>كلمة المرور</span>
             <PasswordInput value={form.password} onChange={(v) => setForm((f) => ({ ...f, password: v }))} autoComplete="new-password" required />
           </label>

@@ -957,10 +957,11 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
   }
 
   return (
+    <>
     <div className="card">
-      <h2 className="card__title"><MdPrint style={{ verticalAlign: 'middle', marginLeft: 6 }} />طابعات التجهيز</h2>
+      <h2 className="card__title"><MdPrint style={{ verticalAlign: 'middle', marginLeft: 6 }} />طابعات هذا الجهاز</h2>
       <p style={{ fontSize: '0.85rem', color: 'var(--color-muted)', marginBottom: 16 }}>
-        أضف الطابعات المتاحة من النظام، ثم اربط كل صنف بطابعة أو أكثر من صفحة الأصناف. عند الطلب يتم تجميع كل أصناف الطابعة في إيصال تجهيز واحد.
+        اختر الطابعة الافتراضية لفواتير العملاء والتقارير على هذا الجهاز. طابعات التجهيز لها قسم مستقل بالأسفل.
       </p>
       {message && <p className={`form-message ${message.includes('فشل') || message.includes('اختر') ? 'form-message--error' : 'form-message--ok'}`}>{message}</p>}
 
@@ -1040,6 +1041,13 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
           التقارير تستخدم هذه الطابعة والخيارات عند الضغط على طباعة من صفحة التقارير.
         </p>
       </div>
+    </div>
+
+    <div className="card">
+      <h2 className="card__title"><MdPrint style={{ verticalAlign: 'middle', marginLeft: 6 }} />طابعات التجهيز</h2>
+      <p style={{ fontSize: '0.85rem', color: 'var(--color-muted)', marginBottom: 16 }}>
+        أضف طابعات المطبخ أو الجريل أو التجهيز، ثم اربط كل صنف بطابعة أو أكثر من صفحة الأصناف. عند الطلب يتم تجميع كل أصناف الطابعة في إيصال تجهيز واحد.
+      </p>
 
       <form onSubmit={(e) => void handleAddPrinter(e)} className="settings-form-grid" style={{ marginBottom: 18 }}>
         <label className="field">
@@ -1177,6 +1185,7 @@ function PrintersTab({ settings }: { settings: AppSettings }): React.ReactElemen
         </div>
       )}
     </div>
+    </>
   )
 }
 
@@ -1185,7 +1194,7 @@ export function SettingsPage(): React.ReactElement {
   const [cashiers, setCashiers] = useState<AppUser[]>([])
 
   // ── Receipt ─────────────────────────────────────────────────────────────
-  const [receiptForm, setReceiptForm] = useState({ restaurantNameAr: '', currencySymbol: '', phoneNumber: '', receiptFooterAr: '', taxRate: '', defaultDeliveryFee: '', maxCashierDiscountPct: '' })
+  const [receiptForm, setReceiptForm] = useState({ restaurantNameAr: '', currencySymbol: '', phoneNumber: '', receiptFooterAr: '', taxRate: '', serviceRate: '', defaultDeliveryFee: '', maxCashierDiscountPct: '' })
   const [receiptSaving, setReceiptSaving] = useState(false)
   const [receiptMsg, setReceiptMsg] = useState<string | null>(null)
 
@@ -1233,6 +1242,7 @@ export function SettingsPage(): React.ReactElement {
         phoneNumber: s.phoneNumber ?? '',
         receiptFooterAr: s.receiptFooterAr ?? '',
         taxRate: s.taxRate != null && s.taxRate > 0 ? String(s.taxRate) : '',
+        serviceRate: s.serviceRate != null && s.serviceRate > 0 ? String(s.serviceRate) : '',
         defaultDeliveryFee: s.defaultDeliveryFee != null && s.defaultDeliveryFee > 0 ? String(s.defaultDeliveryFee) : '',
         maxCashierDiscountPct: s.maxCashierDiscountPct != null && s.maxCashierDiscountPct < 100 ? String(s.maxCashierDiscountPct) : ''
       })
@@ -1280,6 +1290,7 @@ export function SettingsPage(): React.ReactElement {
         phoneNumber: receiptForm.phoneNumber.trim() || undefined,
         receiptFooterAr: receiptForm.receiptFooterAr.trim() || undefined,
         taxRate: receiptForm.taxRate ? Number(receiptForm.taxRate) : 0,
+        serviceRate: receiptForm.serviceRate ? Number(receiptForm.serviceRate) : 0,
         defaultDeliveryFee: receiptForm.defaultDeliveryFee ? Number(receiptForm.defaultDeliveryFee) : 0,
         maxCashierDiscountPct: receiptForm.maxCashierDiscountPct ? Number(receiptForm.maxCashierDiscountPct) : undefined
       }
@@ -1542,6 +1553,10 @@ export function SettingsPage(): React.ReactElement {
                 <label className="field">
                   <span>ضريبة القيمة المضافة % (0 = بدون ضريبة)</span>
                   <input type="number" min="0" max="100" step="0.1" value={receiptForm.taxRate} onChange={(e) => setReceiptForm((f) => ({ ...f, taxRate: e.target.value }))} placeholder="0" />
+                </label>
+                <label className="field">
+                  <span>نسبة الخدمة % (0 = بدون خدمة)</span>
+                  <input type="number" min="0" max="100" step="0.1" value={receiptForm.serviceRate} onChange={(e) => setReceiptForm((f) => ({ ...f, serviceRate: e.target.value }))} placeholder="0" />
                 </label>
                 <label className="field">
                   <span>رسوم التوصيل الافتراضية</span>

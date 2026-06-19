@@ -4,6 +4,7 @@
 import type { Supplier, SupplierTransaction, SupplierTransactionType } from '@shared/types'
 import { COLLECTIONS } from '@shared/constants/collections'
 import { cacheDocs, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
+import { dbDelete } from '@renderer/lib/db/sqlite-db'
 import { generateId } from '@renderer/lib/utils/id'
 
 export async function listSuppliers(activeOnly = false): Promise<Supplier[]> {
@@ -39,6 +40,14 @@ export async function updateSupplier(
   const cached = suppliers.find((s) => s.id === id)
   if (!cached) return
   await cacheDocs(COLLECTIONS.suppliers, [{ ...cached, ...patch, updatedAt: Date.now() }])
+}
+
+export async function deleteSupplier(id: string): Promise<void> {
+  const transactions = await listSupplierTransactions(id)
+  await Promise.all([
+    dbDelete(COLLECTIONS.suppliers, id),
+    ...transactions.map((tx) => dbDelete(COLLECTIONS.supplierTransactions, tx.id))
+  ])
 }
 
 export async function recordSupplierTransaction(params: {

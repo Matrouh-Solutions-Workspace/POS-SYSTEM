@@ -23,7 +23,8 @@ import {
   orderTotal,
   lineTotal,
   computeDiscount,
-  computeTax
+  computeTax,
+  computeService
 } from '@shared/services/order-calculator'
 import { COLLECTIONS } from '@shared/constants/collections'
 import { SETTINGS_DOC_ID } from '@shared/schema/firestore-schema'
@@ -49,6 +50,7 @@ export async function getSettings(): Promise<AppSettings> {
     autoLockMinutes: 5,
     nextOrderNumber: 1,
     taxRate: 0,
+    serviceRate: 0,
     defaultDeliveryFee: 0,
     networkMode: 'standalone',
     masterServerPort: 47831,
@@ -87,6 +89,7 @@ export async function updateSettings(
       | 'pinEnabled'
       | 'autoLockMinutes'
       | 'taxRate'
+      | 'serviceRate'
       | 'defaultDeliveryFee'
       | 'maxCashierDiscountPct'
       | 'keyboardShortcuts'
@@ -169,7 +172,9 @@ export async function completeOrder(params: {
   const afterDiscount = subtotal - discountAmount
   const taxRate = settings.taxRate ?? 0
   const taxAmount = computeTax(afterDiscount, taxRate)
-  const total = orderTotal(subtotal, discountAmount, taxAmount, deliveryFee)
+  const serviceRate = settings.serviceRate ?? 0
+  const serviceAmount = computeService(afterDiscount, serviceRate)
+  const total = orderTotal(subtotal, discountAmount, taxAmount, deliveryFee, serviceAmount)
 
   if (orderType === 'takeaway' && !params.paymentMethod) {
     throw new Error('Payment method is required for takeaway orders')
@@ -219,6 +224,8 @@ export async function completeOrder(params: {
     discountAmount: discountAmount > 0 ? discountAmount : undefined,
     taxRate: taxRate > 0 ? taxRate : undefined,
     taxAmount: taxAmount > 0 ? taxAmount : undefined,
+    serviceRate: serviceRate > 0 ? serviceRate : undefined,
+    serviceAmount: serviceAmount > 0 ? serviceAmount : undefined,
     deliveryFee: deliveryFee > 0 ? deliveryFee : undefined,
     total,
     noteAr: params.orderNoteAr,
@@ -463,8 +470,10 @@ export async function editOrderItems(params: {
   const afterDiscount = subtotal - discountAmount
   const taxRate = settings.taxRate ?? 0
   const taxAmount = computeTax(afterDiscount, taxRate)
+  const serviceRate = settings.serviceRate ?? 0
+  const serviceAmount = computeService(afterDiscount, serviceRate)
   const deliveryFee = order.deliveryFee ?? 0
-  const total = orderTotal(subtotal, discountAmount, taxAmount, deliveryFee)
+  const total = orderTotal(subtotal, discountAmount, taxAmount, deliveryFee, serviceAmount)
 
   const now = Date.now()
   const updatedOrder: Order = {
@@ -472,6 +481,8 @@ export async function editOrderItems(params: {
     subtotal,
     discountAmount: discountAmount > 0 ? discountAmount : undefined,
     taxAmount: taxAmount > 0 ? taxAmount : undefined,
+    serviceRate: serviceRate > 0 ? serviceRate : undefined,
+    serviceAmount: serviceAmount > 0 ? serviceAmount : undefined,
     total,
     noteAr: params.orderNoteAr ?? order.noteAr,
     updatedAt: now
@@ -706,7 +717,8 @@ export async function refundOrder(params: {
 
   const refundDiscountAmt = Math.round((original.discountAmount ?? 0) * ratio * 100) / 100
   const refundTaxAmt = Math.round((original.taxAmount ?? 0) * ratio * 100) / 100
-  const refundAmount = Math.round((refundSubtotal - refundDiscountAmt + refundTaxAmt) * 100) / 100
+  const refundServiceAmt = Math.round((original.serviceAmount ?? 0) * ratio * 100) / 100
+  const refundAmount = Math.round((refundSubtotal - refundDiscountAmt + refundTaxAmt + refundServiceAmt) * 100) / 100
 
   const now = Date.now()
   const refundId = generateId()
@@ -733,6 +745,7 @@ export async function refundOrder(params: {
     subtotal: -refundSubtotal,
     discountAmount: refundDiscountAmt > 0 ? -refundDiscountAmt : undefined,
     taxAmount: refundTaxAmt > 0 ? -refundTaxAmt : undefined,
+    serviceAmount: refundServiceAmt > 0 ? -refundServiceAmt : undefined,
     total: -refundAmount,
     noteAr: `استرداد من طلب #${original.orderCode ?? original.orderNumber}: ${params.reasonAr}`,
     createdAt: now,

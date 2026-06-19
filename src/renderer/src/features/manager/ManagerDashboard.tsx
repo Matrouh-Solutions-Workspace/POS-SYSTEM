@@ -39,7 +39,7 @@ export function ManagerDashboard(): React.ReactElement {
       </div>
 
       <section className="dashboard-tiles" aria-label="أقسام الإدارة">
-        {MANAGER_NAV.map((item) => (
+        {MANAGER_NAV.filter((item) => item.to !== '/manager').map((item) => (
           <button key={item.to} type="button" className="dashboard-tile" onClick={() => navigate(item.to)}>
             <span className="dashboard-tile__label">{item.label}</span>
             {item.hint && <span className="dashboard-tile__hint">{item.hint}</span>}

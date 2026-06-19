@@ -8,8 +8,9 @@ import {
   unarchiveShifts,
   type ShiftSummary
 } from '@renderer/features/shifts/shift-service'
+import { getSettings } from '@renderer/features/orders/order-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
-import { MdArchive, MdLock, MdRefresh, MdUnarchive } from 'react-icons/md'
+import { MdArchive, MdLock, MdPrint, MdRefresh, MdUnarchive } from 'react-icons/md'
 
 type ShiftViewMode = 'active' | 'archived'
 
@@ -24,8 +25,53 @@ function paymentStatusLabel(status?: string): string {
 }
 
 function orderPlaceLabel(order: ShiftSummary['orders'][number]): string {
+  if (order.orderType === 'delivery') return 'دليفري'
   if (order.orderType !== 'dine_in') return 'تيك أواي'
   return [order.tableCategoryAr, order.tableNameAr].filter(Boolean).join(' / ') || 'صالة'
+}
+
+function shiftOrderTypeSummary(summary: ShiftSummary): Record<'dine_in' | 'delivery' | 'takeaway', number> {
+  return summary.completedOrders.reduce((acc, order) => {
+    if (order.orderType === 'dine_in') acc.dine_in += 1
+    else if (order.orderType === 'delivery') acc.delivery += 1
+    else acc.takeaway += 1
+    return acc
+  }, { dine_in: 0, delivery: 0, takeaway: 0 })
+}
+
+function buildShiftReceiptHtml(summary: ShiftSummary, currency: string): string {
+  const typeCounts = shiftOrderTypeSummary(summary)
+  const rows = summary.orders.map((order) => `
+    <tr>
+      <td>${order.orderCode ?? order.orderNumber}</td>
+      <td>${orderPlaceLabel(order)}</td>
+      <td>${orderStatusLabel(order.status)}</td>
+      <td>${order.total.toFixed(2)} ${currency}</td>
+    </tr>
+  `).join('')
+  return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8" />
+    <style>
+      @page { size: 80mm 297mm; margin: 0; }
+      body { font-family: Tahoma, Arial, sans-serif; font-size: 12px; margin: 8px; color: #000; }
+      h1, h2 { text-align: center; margin: 4px 0; }
+      .line { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      th, td { border-bottom: 1px dashed #999; padding: 3px; text-align: right; }
+      .total { border-top: 2px solid #000; margin-top: 6px; padding-top: 6px; font-weight: 900; }
+    </style></head><body>
+      <h1>ملخص الشيفت</h1>
+      <h2>${summary.shift.cashierName}</h2>
+      <div class="line"><span>البداية</span><span>${new Date(summary.shift.openedAt).toLocaleString('ar-EG')}</span></div>
+      <div class="line"><span>النهاية</span><span>${summary.shift.closedAt ? new Date(summary.shift.closedAt).toLocaleString('ar-EG') : '-'}</span></div>
+      <div class="line"><span>المتوقع في الدرج</span><span>${summary.expectedCash.toFixed(2)} ${currency}</span></div>
+      <div class="line"><span>دخل البطاقة المتوقع</span><span>${summary.cardRevenue.toFixed(2)} ${currency}</span></div>
+      <div class="line total"><span>إجمالي الإيراد</span><span>${summary.revenue.toFixed(2)} ${currency}</span></div>
+      <hr />
+      <div class="line"><span>صالة</span><span>${typeCounts.dine_in}</span></div>
+      <div class="line"><span>دليفري</span><span>${typeCounts.delivery}</span></div>
+      <div class="line"><span>تيك أواي</span><span>${typeCounts.takeaway}</span></div>
+      <table><thead><tr><th>الأوردر</th><th>النوع</th><th>الحالة</th><th>الإجمالي</th></tr></thead><tbody>${rows}</tbody></table>
+    </body></html>`
 }
 
 export function ShiftsPage(): React.ReactElement {
@@ -81,6 +127,13 @@ export function ShiftsPage(): React.ReactElement {
     setMessage('تم إلغاء أرشفة الشيفت')
     setSelected(null)
     await load()
+  }
+
+  async function printSelectedShift(): Promise<void> {
+    if (!selected) return
+    const settings = await getSettings()
+    const result = await window.electronAPI.printReceipt(buildShiftReceiptHtml(selected, settings.currencySymbol))
+    setMessage(result.ok ? 'تم إرسال ملخص الشيفت للطباعة' : (result.error ?? 'فشل طباعة ملخص الشيفت'))
   }
 
   if (loading) return <p className="app-loading">جاري التحميل...</p>
@@ -166,7 +219,12 @@ export function ShiftsPage(): React.ReactElement {
 
       {selected && (
         <div className="card">
-          <h2 className="card__title">ملخص شيفت {selected.shift.cashierName}</h2>
+          <div className="page-toolbar" style={{ justifyContent: 'space-between' }}>
+            <h2 className="card__title" style={{ margin: 0 }}>ملخص شيفت {selected.shift.cashierName}</h2>
+            <button type="button" className="btn btn--secondary" onClick={() => void printSelectedShift()}>
+              <MdPrint /> طباعة ملخص الشيفت
+            </button>
+          </div>
           <div className="stats-grid">
             <div className="stat-card"><div className="stat-card__label">إجمالي الإيراد</div><div className="stat-card__value">{selected.revenue.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">فلوس الدرج الكلي</div><div className="stat-card__value">{selected.drawerTotal.toFixed(2)}</div></div>
@@ -178,6 +236,18 @@ export function ShiftsPage(): React.ReactElement {
             <div className="stat-card"><div className="stat-card__label">طلبات ملغية</div><div className="stat-card__value">{selected.cancelledOrders.length}</div></div>
             <div className="stat-card"><div className="stat-card__label">توريدات مخزون</div><div className="stat-card__value">{selected.suppliedInventory.length}</div></div>
           </div>
+          {(() => {
+            const typeCounts = shiftOrderTypeSummary(selected)
+            return (
+              <div className="stats-grid">
+                <div className="stat-card"><div className="stat-card__label">طلبات الصالة</div><div className="stat-card__value">{typeCounts.dine_in}</div></div>
+                <div className="stat-card"><div className="stat-card__label">طلبات الدليفري</div><div className="stat-card__value">{typeCounts.delivery}</div></div>
+                <div className="stat-card"><div className="stat-card__label">طلبات التيك أواي</div><div className="stat-card__value">{typeCounts.takeaway}</div></div>
+                <div className="stat-card"><div className="stat-card__label">المتوقع في الدرج</div><div className="stat-card__value">{selected.expectedCash.toFixed(2)}</div></div>
+                <div className="stat-card"><div className="stat-card__label">دخل البطاقة المتوقع</div><div className="stat-card__value">{selected.cardRevenue.toFixed(2)}</div></div>
+              </div>
+            )
+          })()}
 
           {/* Cash reconciliation */}
           <div className="card" style={{ background: '#f0fdf4', borderColor: '#22c55e', marginBottom: 12 }}>

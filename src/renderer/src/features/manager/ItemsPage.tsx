@@ -136,6 +136,16 @@ function CategoriesTab({ categories, onRefresh, setMessage }: {
   const [editingName, setEditingName] = useState('')
   const [editingParentId, setEditingParentId] = useState('')
   const [savingOrder, setSavingOrder] = useState(false)
+  const childCategoriesByParent = categories.reduce<Record<string, MenuCategory[]>>((acc, category) => {
+    if (!category.parentId) return acc
+    acc[category.parentId] = [...(acc[category.parentId] ?? []), category]
+    return acc
+  }, {})
+  const rootCategoryIds = new Set(categories.filter((category) => !category.parentId).map((category) => category.id))
+  const visibleCategories = categories.flatMap((category) => {
+    if (category.parentId) return []
+    return [category, ...(childCategoriesByParent[category.id] ?? [])]
+  }).concat(categories.filter((category) => category.parentId && !rootCategoryIds.has(category.parentId)))
 
   async function addCategory(e: FormEvent): Promise<void> {
     e.preventDefault()
@@ -188,8 +198,10 @@ function CategoriesTab({ categories, onRefresh, setMessage }: {
         <h2 className="card__title">التصنيفات ({categories.length})</h2>
         {categories.length === 0 && <p className="report-empty">لا توجد تصنيفات بعد</p>}
         <ul className="category-list">
-          {categories.map((c, idx) => (
-            <li key={c.id} className="category-list__item">
+          {visibleCategories.map((c) => {
+            const idx = categories.findIndex((category) => category.id === c.id)
+            return (
+            <li key={c.id} className="category-list__item" style={c.parentId ? { marginInlineStart: 28, borderInlineStart: '3px solid var(--color-border)', background: '#f8fafc' } : undefined}>
               <div className="sort-arrows">
                 <button type="button" className="sort-arrow-btn" disabled={idx === 0} onClick={() => void moveCat(idx, -1)} aria-label="أعلى"><MdArrowUpward /></button>
                 <button type="button" className="sort-arrow-btn" disabled={idx === categories.length - 1} onClick={() => void moveCat(idx, 1)} aria-label="أسفل"><MdArrowDownward /></button>
@@ -206,7 +218,7 @@ function CategoriesTab({ categories, onRefresh, setMessage }: {
               ) : (
                 <span style={{ flex: 1 }}>
                   {c.nameAr}
-                  {c.parentId && <em style={{ color: 'var(--color-muted)', fontSize: '0.78rem', marginRight: 6 }}>← {categories.find((p) => p.id === c.parentId)?.nameAr}</em>}
+                  {c.parentId && <em style={{ color: 'var(--color-muted)', fontSize: '0.78rem', marginRight: 6 }}>فرعي من {categories.find((p) => p.id === c.parentId)?.nameAr}</em>}
                   {!c.active && <em style={{ color: 'var(--color-muted)', fontSize: '0.78rem', marginRight: 6 }}>(معطّل)</em>}
                 </span>
               )}
@@ -226,7 +238,8 @@ function CategoriesTab({ categories, onRefresh, setMessage }: {
                 )}
               </div>
             </li>
-          ))}
+            )
+          })}
         </ul>
       </div>
     </div>
@@ -647,6 +660,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
   formRef: React.RefObject<HTMLFormElement | null>
 }): React.ReactElement {
   const [editingItem, setEditingItem] = useState<ItemEditState | null>(null)
+  const [showCreateModal, setShowCreateModal] = useState(false)
   const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null)
   const [recipeLines, setRecipeLines] = useState<RecipeLine[]>([])
   const [savingOrder, setSavingOrder] = useState(false)
@@ -699,6 +713,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
           ? cloneItemFormForRepeat(f)
           : { ...defaultItemForm, categoryId: f.categoryId, weightedPriceOptions: [newWeightedOption(true)] }
       ))
+      if (!shouldRepeat) setShowCreateModal(false)
       setMessage(shouldRepeat ? 'تم حفظ الصنف مع الإبقاء على البيانات' : 'تم حفظ الصنف')
       await onRefresh()
     } catch (err) { setMessage(err instanceof Error ? err.message : 'فشل') }
@@ -979,10 +994,21 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
 
       <CategoriesTab categories={categories} onRefresh={onRefresh} setMessage={setMessage} />
 
-      {/* ── Add item form ── */}
       <div className="card">
-        <h2 className="card__title">إضافة صنف</h2>
-        <form ref={formRef} onSubmit={(e) => void addItem(e)}>
+        <div className="page-toolbar" style={{ justifyContent: 'space-between' }}>
+          <h2 className="card__title" style={{ margin: 0 }}>الأصناف</h2>
+          <button type="button" className="btn btn--primary" onClick={() => setShowCreateModal(true)}>+ إضافة صنف</button>
+        </div>
+      </div>
+
+      {showCreateModal && (
+        <div className="modal-overlay" onClick={() => setShowCreateModal(false)}>
+          <div className="modal" style={{ maxWidth: 980 }} onClick={(e) => e.stopPropagation()}>
+            <div className="order-details__header">
+              <h2 className="order-details__title">إضافة صنف</h2>
+              <button type="button" className="order-details__close" onClick={() => setShowCreateModal(false)} aria-label="إغلاق">×</button>
+            </div>
+            <form ref={formRef} onSubmit={(e) => void addItem(e)}>
           <div className="settings-form-grid">
             <label className="field">
               <span>التصنيف</span>
@@ -1109,7 +1135,9 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
             <button type="submit" className="btn btn--secondary" value="repeat">حفظ وتكرار</button>
           </div>
         </form>
-      </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Items table ── */}
       <div className="card">
@@ -1259,6 +1287,110 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
           </tbody>
         </table>
       </div>
+
+      {editingItem && (
+        <div className="modal-overlay" onClick={() => setEditingItem(null)}>
+          <div className="modal" style={{ maxWidth: 980 }} onClick={(e) => e.stopPropagation()}>
+            <div className="order-details__header">
+              <h2 className="order-details__title">تعديل صنف</h2>
+              <button type="button" className="order-details__close" onClick={() => setEditingItem(null)} aria-label="إغلاق">×</button>
+            </div>
+            <div className="settings-form-grid">
+              <label className="field">
+                <span>التصنيف</span>
+                <select value={editingItem.categoryId} onChange={(e) => setEditingItem({ ...editingItem, categoryId: e.target.value })}>
+                  {categories.map((c) => <option key={c.id} value={c.id}>{c.nameAr}</option>)}
+                </select>
+              </label>
+              <label className="field">
+                <span>اسم الصنف</span>
+                <input value={editingItem.nameAr} onChange={(e) => setEditingItem({ ...editingItem, nameAr: e.target.value })} autoFocus />
+              </label>
+              <label className="field">
+                <span>نوع الصنف</span>
+                <select value={editingItem.itemType} onChange={(e) => setEditingItem({ ...editingItem, itemType: e.target.value as MenuItemType, productType: 'recipe' })}>
+                  {(Object.entries(ITEM_TYPE_LABELS) as [MenuItemType, string][]).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </label>
+              {editingItem.itemType === 'product' && (
+                <label className="field">
+                  <span>نوع المنتج</span>
+                  <select value={editingItem.productType} onChange={(e) => setEditingItem({ ...editingItem, productType: e.target.value as ProductType })}>
+                    {(Object.entries(PRODUCT_TYPE_LABELS) as [ProductType, string][]).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
+                </label>
+              )}
+              {needsLinkedStock(editingItem.itemType, editingItem.productType) && (
+                <label className="field">
+                  <span>رصيد المخزون المرتبط</span>
+                  <select value={editingItem.linkedIngredientId} onChange={(e) => setEditingItem({ ...editingItem, linkedIngredientId: e.target.value })}>
+                    <option value="">بدون ربط مخزون</option>
+                    {ingredients.filter((i) => i.active).map((i) => <option key={i.id} value={i.id}>{i.nameAr} ({i.unit})</option>)}
+                  </select>
+                </label>
+              )}
+              {!editingItem.isWeighted && (
+                <label className="field">
+                  <span>السعر</span>
+                  <input type="number" min="0" step="0.01" value={editingItem.price} onChange={(e) => setEditingItem({ ...editingItem, price: e.target.value })} />
+                </label>
+              )}
+              <label className="field">
+                <span>الحالة</span>
+                <select value={editingItem.active ? 'active' : 'inactive'} onChange={(e) => setEditingItem({ ...editingItem, active: e.target.value === 'active' })}>
+                  <option value="active">مفعّل</option>
+                  <option value="inactive">معطّل</option>
+                </select>
+              </label>
+              {editingItem.itemType === 'product' && (
+                <label className="field field--checkbox settings-form-grid__full">
+                  <input type="checkbox" checked={editingItem.isWeighted} onChange={(e) => setEditingItem({ ...editingItem, isWeighted: e.target.checked, weightedPriceOptions: e.target.checked && editingItem.weightedPriceOptions.length === 0 ? [newWeightedOption(true)] : editingItem.weightedPriceOptions })} />
+                  <span>منتج ميزان</span>
+                </label>
+              )}
+            </div>
+
+            {editingItem.itemType !== 'raw_material' && renderSizeSection(editingItem.sizeOptions, editingItem.isWeighted, false)}
+            {editingItem.itemType !== 'raw_material' && renderAttachmentsSection(editingItem.attachments, false)}
+            {renderPrinterSection(editingItem.kitchenPrinterIds, false)}
+
+            {editingItem.itemType === 'product' && editingItem.isWeighted && (
+              <div className="weighted-pricing-editor">
+                <h3>أسعار الميزان</h3>
+                {editingItem.weightedPriceOptions.map((o, idx) => (
+                  <div key={o.id} className="weighted-pricing-row">
+                    <input value={o.label} onChange={(e) => setEditingItem((p) => p ? { ...p, weightedPriceOptions: p.weightedPriceOptions.map((w, i) => i === idx ? { ...w, label: e.target.value } : w) } : p)} placeholder="اسم الزر" />
+                    <input type="number" min="1" step="1" value={o.weightGrams} onChange={(e) => setEditingItem((p) => p ? { ...p, weightedPriceOptions: p.weightedPriceOptions.map((w, i) => i === idx ? { ...w, weightGrams: e.target.value } : w) } : p)} placeholder="جرام" />
+                    <input type="number" min="0" step="0.01" value={o.price} onChange={(e) => setEditingItem((p) => p ? { ...p, weightedPriceOptions: p.weightedPriceOptions.map((w, i) => i === idx ? { ...w, price: e.target.value } : w) } : p)} placeholder="السعر" />
+                    <button type="button" className="btn btn--danger btn--sm" onClick={() => setEditingItem((p) => p ? { ...p, weightedPriceOptions: p.weightedPriceOptions.filter((_, i) => i !== idx) } : p)}><MdClose /></button>
+                  </div>
+                ))}
+                <button type="button" className="btn btn--secondary btn--sm" onClick={() => setEditingItem((p) => p ? { ...p, weightedPriceOptions: [...p.weightedPriceOptions, newWeightedOption()] } : p)}>+ سعر ميزان</button>
+                <label className="field field--checkbox" style={{ marginTop: 8 }}>
+                  <input type="checkbox" checked={editingItem.allowCustomWeight} onChange={(e) => setEditingItem({ ...editingItem, allowCustomWeight: e.target.checked })} />
+                  <span>السماح بوزن مخصص</span>
+                </label>
+                {editingItem.allowCustomWeight && (
+                  <label className="field">
+                    <span>سعر الكيلو للوزن المخصص</span>
+                    <input type="number" min="0" step="0.01" value={editingItem.customWeightUnitPrice} onChange={(e) => setEditingItem({ ...editingItem, customWeightUnitPrice: e.target.value })} />
+                  </label>
+                )}
+              </div>
+            )}
+
+            {showEditRecipeSection && (
+              <p style={{ fontSize: '0.82rem', color: 'var(--color-muted)', fontStyle: 'italic' }}>
+                لتعديل مكوّنات الوصفة اضغط "الوصفة" بعد حفظ بيانات الصنف.
+              </p>
+            )}
+            <div className="form-actions">
+              <button type="button" className="btn btn--primary" onClick={() => void saveItemEdit()}><MdCheck /> حفظ</button>
+              <button type="button" className="btn btn--secondary" onClick={() => setEditingItem(null)}><MdClose /> إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Recipe modal */}
       {editingRecipeId && (
