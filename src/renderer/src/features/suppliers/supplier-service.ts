@@ -13,6 +13,14 @@ function audit(actor: AuditActor | undefined, params: Parameters<typeof import('
   void import('@renderer/features/audit/audit-service').then(({ logAudit }) => logAudit(params))
 }
 
+const SUPPLIER_TX_LABELS: Record<SupplierTransactionType, string> = {
+  purchase_credit: 'توريد على الحساب',
+  payment: 'دفعة للمورد',
+  debt_increase: 'زيادة مديونية',
+  debt_decrease: 'تقليل مديونية',
+  settlement: 'تصفية حساب'
+}
+
 export async function listSuppliers(activeOnly = false): Promise<Supplier[]> {
   let suppliers = await getCachedDocs<Supplier>(COLLECTIONS.suppliers)
   suppliers = suppliers.sort((a, b) => a.nameAr.localeCompare(b.nameAr, 'ar'))
@@ -111,7 +119,7 @@ export async function recordSupplierTransaction(params: {
     actorName: params.actor ? actorAuditName(params.actor) : params.createdBy,
     targetId: tx.id,
     targetType: 'supplier',
-    detailAr: `حركة مورد — ${supplierName} — النوع ${params.type} — المبلغ ${params.amount}${params.noteAr ? ` — ملاحظة: ${params.noteAr}` : ''}`
+    detailAr: `حركة مورد — ${supplierName} — ${SUPPLIER_TX_LABELS[params.type]} — المبلغ ${params.amount}${params.noteAr ? ` — ملاحظة: ${params.noteAr}` : ''}`
   })
   return tx
 }

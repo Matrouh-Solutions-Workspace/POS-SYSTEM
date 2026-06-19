@@ -27,7 +27,7 @@ import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { InventoryActionModal, type InventoryActionType } from './InventoryActionModal'
 import { MdAdd, MdEdit, MdCheck, MdClose, MdInventory, MdKitchen, MdRemove, MdSwapVert, MdWarning } from 'react-icons/md'
 import { usePageState } from '@renderer/features/tabs/page-state-store'
-import { listSuppliers } from '@renderer/features/suppliers/supplier-service'
+import { listSuppliers, recordSupplierTransaction } from '@renderer/features/suppliers/supplier-service'
 
 const UNITS = ['جرام', 'كيلوجرام', 'قطعة', 'مل', 'لتر']
 
@@ -44,6 +44,7 @@ function StockTab({ stocks, ingredients, suppliers, onRefresh, setMessage }: {
   const [ingredientId, setIngredientId] = useState('')
   const [supplierId, setSupplierId] = useState('')
   const [qty, setQty] = useState('')
+  const [debtAmount, setDebtAmount] = useState('')
   const [note, setNote] = useState('')
   const [modal, setModal] = useState<{ stock: IngredientStock; action: InventoryActionType } | null>(null)
 
@@ -55,8 +56,19 @@ function StockTab({ stocks, ingredients, suppliers, onRefresh, setMessage }: {
     e.preventDefault()
     const ing = activeIngredients.find((i) => i.id === ingredientId)
     if (!ing) return
+    const debt = Math.max(0, Number(debtAmount) || 0)
     await recordPurchase({ ingredientId: ing.id, quantity: Number(qty), unit: ing.unit, noteAr: note || undefined, createdBy: user.id, supplierId: supplierId || undefined, actor: user })
-    setQty(''); setNote('')
+    if (supplierId && debt > 0) {
+      await recordSupplierTransaction({
+        supplierId,
+        type: 'purchase_credit',
+        amount: debt,
+        noteAr: note || `توريد مخزون: ${ing.nameAr}`,
+        createdBy: user.id,
+        actor: user
+      })
+    }
+    setQty(''); setDebtAmount(''); setNote('')
     setMessage('تم تسجيل الشراء')
     await onRefresh()
   }
@@ -106,6 +118,18 @@ function StockTab({ stocks, ingredients, suppliers, onRefresh, setMessage }: {
           <label className="field">
             <span>الكمية المشتراة</span>
             <input className="stock-qty-input" type="number" min="0.01" step="any" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="مثال: 5" required />
+          </label>
+          <label className="field">
+            <span>مديونية على المورد</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={debtAmount}
+              onChange={(e) => setDebtAmount(e.target.value)}
+              placeholder={supplierId ? 'مثال: 250' : 'اختر موردًا أولًا'}
+              disabled={!supplierId}
+            />
           </label>
           <label className="field">
             <span>ملاحظة (اختياري)</span>

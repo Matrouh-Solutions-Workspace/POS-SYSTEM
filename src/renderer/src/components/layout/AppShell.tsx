@@ -6,7 +6,7 @@ import { SyncStatusBadge } from '@renderer/features/sync/SyncStatusBadge'
 import { MdLogout, type NavItem } from '@renderer/config/navigation'
 import {
   MdSystemUpdate, MdClose, MdExpandMore, MdExpandLess,
-  MdLock, MdNewReleases, MdChevronLeft, MdChevronRight
+  MdLock, MdNewReleases, MdChevronLeft, MdChevronRight, MdPointOfSale, MdDashboard
 } from 'react-icons/md'
 import { triggerCheckNow, useUpdateState } from '@renderer/components/UpdateNotification'
 import { openWhatsNew } from '@renderer/components/WhatsNewModal'
@@ -19,6 +19,7 @@ import { useSplitStore, mkTabId } from '@renderer/features/tabs/split-store'
 import { useGlobalKeyboardShortcuts } from '@renderer/features/keyboard/use-keyboard-shortcuts'
 import { useTabShortcuts } from '@renderer/features/keyboard/use-tab-shortcuts'
 import { useKeyboardStore } from '@renderer/features/keyboard/keyboard-store'
+import { hasPermission } from '@shared/types/user'
 
 const SIDEBAR_COLLAPSE_PREF_KEY = 'abdokofta.sidebarCollapsePreference'
 type SidebarCollapsePreference = 'expanded' | 'collapsed'
@@ -31,6 +32,7 @@ interface AppShellProps {
 export function AppShell({ nav, children }: AppShellProps): React.ReactElement {
   const displayName = useAuthStore((s) => s.user?.displayName)
   const userRole = useAuthStore((s) => s.user?.role)
+  const user = useAuthStore((s) => s.user)
   const navigate = useNavigate()
   const location = useLocation()
   const [currentVersion, setCurrentVersion] = useState<string>('...')
@@ -173,7 +175,7 @@ export function AppShell({ nav, children }: AppShellProps): React.ReactElement {
 
   async function handleLogout(): Promise<void> {
     const user = useAuthStore.getState().user
-    await logoutUser(user ? { id: user.id, displayName: user.displayName } : undefined)
+    await logoutUser(user ? { id: user.id, displayName: user.displayName, username: user.username } : undefined)
     // Clear tab state so the next user doesn't see the previous user's tabs
     useSplitStore.getState().reset()
     useAuthStore.getState().setUser(null)
@@ -200,6 +202,10 @@ export function AppShell({ nav, children }: AppShellProps): React.ReactElement {
   const primaryPane = panes[0]
   // Use router location as source of truth for sidebar active state
   const focusedActivePath = location.pathname
+  const canSwitchPosManager = Boolean(user && user.role === 'manager' && hasPermission(user, 'pos'))
+  const switchTarget = location.pathname.startsWith('/pos') ? '/manager' : '/pos'
+  const switchLabel = location.pathname.startsWith('/pos') ? 'لوحة التحكم' : 'واجهة البيع'
+  const SwitchIcon = location.pathname.startsWith('/pos') ? MdDashboard : MdPointOfSale
 
   return (
     <div className="app-shell">
@@ -311,6 +317,11 @@ export function AppShell({ nav, children }: AppShellProps): React.ReactElement {
               <MdLock aria-hidden="true" /> قفل الشاشة
             </button>
           )}
+          {!sidebarCollapsed && canSwitchPosManager && (
+            <button type="button" className="btn btn--secondary btn--sm app-sidebar__switch-btn" onClick={() => navigate(switchTarget)}>
+              <SwitchIcon aria-hidden="true" /> {switchLabel}
+            </button>
+          )}
           {sidebarCollapsed && pinEnabled && userRole === 'cashier' && (
             <button
               type="button"
@@ -319,6 +330,16 @@ export function AppShell({ nav, children }: AppShellProps): React.ReactElement {
               title="قفل الشاشة"
             >
               <MdLock />
+            </button>
+          )}
+          {sidebarCollapsed && canSwitchPosManager && (
+            <button
+              type="button"
+              className="app-sidebar__icon-btn"
+              onClick={() => navigate(switchTarget)}
+              title={switchLabel}
+            >
+              <SwitchIcon />
             </button>
           )}
 

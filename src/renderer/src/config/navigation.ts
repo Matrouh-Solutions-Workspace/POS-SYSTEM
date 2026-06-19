@@ -1,4 +1,6 @@
 import type { IconType } from 'react-icons'
+import type { AppUser } from '@shared/types'
+import { hasPermission } from '@shared/types/user'
 import {
   MdPointOfSale,
   MdHistory,
@@ -84,4 +86,20 @@ export const MANAGER_NAV: NavItem[] = [
 
 export function navLinkEnd(item: NavItem): boolean {
   return item.end ?? (item.to === '/manager' || item.to === '/pos')
+}
+
+export function buildNavForUser(user: AppUser): NavItem[] {
+  if (user.role === 'manager') {
+    return [
+      { to: '/pos', label: 'واجهة البيع', hint: 'إنشاء الطلبات والبيع', icon: MdPointOfSale, iconKey: 'MdPointOfSale' },
+      ...MANAGER_NAV
+    ]
+  }
+  if (user.role === 'supervisor') return SUPERVISOR_NAV
+  return CASHIER_NAV.filter((item) => {
+    if (item.to === '/pos') return hasPermission(user, 'pos')
+    if (item.to === '/pos/history') return hasPermission(user, 'order_history')
+    if (item.to === '/pos/inventory') return hasPermission(user, 'cashier_inventory')
+    return true
+  })
 }

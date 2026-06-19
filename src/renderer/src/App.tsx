@@ -13,7 +13,7 @@ import { PinLockScreen } from '@renderer/components/PinLockScreen'
 import { usePinBootstrap } from '@renderer/features/auth/use-pin-bootstrap'
 import { applyThemeColor } from '@renderer/features/theme/theme-store'
 import { getSettings } from '@renderer/features/orders/order-service'
-import { CASHIER_NAV, MANAGER_NAV, SUPERVISOR_NAV } from '@renderer/config/navigation'
+import { buildNavForUser, CASHIER_NAV, MANAGER_NAV, SUPERVISOR_NAV } from '@renderer/config/navigation'
 import { ErrorBoundary } from '@renderer/components/ErrorBoundary'
 import { useArrowFocusNavigation } from '@renderer/features/accessibility/use-arrow-focus-navigation'
 
@@ -86,24 +86,27 @@ const FloorPlanPage = lazy(() =>
 )
 
 function CashierLayout(): React.ReactElement {
+  const user = useAuthStore((s) => s.user)
   return (
-    <AppShell nav={CASHIER_NAV}>
+    <AppShell nav={user ? buildNavForUser(user) : CASHIER_NAV}>
       <Outlet />
     </AppShell>
   )
 }
 
 function SupervisorLayout(): React.ReactElement {
+  const user = useAuthStore((s) => s.user)
   return (
-    <AppShell nav={SUPERVISOR_NAV}>
+    <AppShell nav={user ? buildNavForUser(user) : SUPERVISOR_NAV}>
       <Outlet />
     </AppShell>
   )
 }
 
 function ManagerLayout(): React.ReactElement {
+  const user = useAuthStore((s) => s.user)
   return (
-    <AppShell nav={MANAGER_NAV}>
+    <AppShell nav={user ? buildNavForUser(user) : MANAGER_NAV}>
       <Outlet />
     </AppShell>
   )
@@ -266,7 +269,7 @@ export default function App(): React.ReactElement {
         />
         <Route path="/" element={<RootRedirect />} />
 
-        <Route element={<ProtectedRoute roles={['cashier']} />}>
+        <Route element={<ProtectedRoute roles={['cashier', 'supervisor', 'manager']} permission="pos" />}>
           <Route element={<CashierLayout />}>
             <Route path="/pos" element={<LazyPage><PosPage /></LazyPage>} />
             <Route path="/pos/history" element={<LazyPage><OrderHistoryPage /></LazyPage>} />

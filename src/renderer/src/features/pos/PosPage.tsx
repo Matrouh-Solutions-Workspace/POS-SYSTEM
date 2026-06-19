@@ -393,10 +393,12 @@ function CloseShiftModal({
 
 function OccupiedTableModal({
   tableNameAr,
+  order,
   onConfirm,
   onCancel
 }: {
   tableNameAr: string
+  order?: Order
   onConfirm: () => void
   onCancel: () => void
 }): React.ReactElement {
@@ -408,10 +410,10 @@ function OccupiedTableModal({
           <button type="button" className="order-details__close" onClick={onCancel} aria-label="إغلاق">✕</button>
         </div>
         <p style={{ marginBottom: 20, fontSize: '0.9rem' }}>
-          الترابيزة <strong>{tableNameAr}</strong> عليها طلب غير مدفوع. هل تريد إضافة طلب جديد عليها؟
+          الترابيزة <strong>{tableNameAr}</strong> عليها طلب مفتوح{order ? ` #${orderReference(order)}` : ''}. سيتم إضافة الأصناف الحالية إلى نفس الطلب بدل إنشاء طلب جديد.
         </p>
         <div className="modal-actions">
-          <button type="button" className="btn btn--primary" onClick={onConfirm}>نعم، أضف طلب</button>
+          <button type="button" className="btn btn--primary" onClick={onConfirm}>إضافة على الطلب المفتوح</button>
           <button type="button" className="btn btn--secondary" onClick={onCancel}>إلغاء</button>
         </div>
       </div>
@@ -445,6 +447,7 @@ export function PosPage(): React.ReactElement {
   const [items, setItems] = useState<MenuItem[]>([])
   const [unavailableItems, setUnavailableItems] = useState<Map<string, string>>(new Map())
   const [lowStockItems, setLowStockItems] = useState<Set<string>>(new Set())
+  const [posLogoUrl, setPosLogoUrl] = useState('/image.png')
   const [selectedCategory, setSelectedCategory] = useState<string | 'all'>('all')
   const [search, setSearch] = useState('')
 
@@ -550,21 +553,24 @@ export function PosPage(): React.ReactElement {
   // Occupied table confirmation modal
   const [occupiedTableModal, setOccupiedTableModal] = useState(false)
   const [pendingOccupiedTable, setPendingOccupiedTable] = useState<DiningTable | null>(null)
+  const [pendingOccupiedOrder, setPendingOccupiedOrder] = useState<Order | null>(null)
 
   // ── Load menu & tables ────────────────────────────────────────────────
 
   const load = useCallback(async () => {
-    const [cats, menu, stocks, diningTables, unpaid] = await Promise.all([
+    const [cats, menu, stocks, diningTables, unpaid, settings] = await Promise.all([
       listCategories(),
       listMenuItems(true),
       getIngredientStocks(),
       listDiningTables(),
-      listUnpaidDineInOrders()
+      listUnpaidDineInOrders(),
+      getSettings()
     ])
     setCategories(cats.filter((c) => c.active))
     setItems(menu)
     setTables(diningTables)
     setUnpaidOrders(unpaid)
+    setPosLogoUrl(settings.receiptLogoDataUrl || settings.receiptLogoProcessedDataUrl || '/image.png')
     if (diningTables.length > 0) setSelectedTableId((prev) => prev || diningTables[0]!.id)
 
     const outOfStock = new Map<string, string>()
@@ -926,6 +932,48 @@ export function PosPage(): React.ReactElement {
     }
   }
 
+  async function appendToDineInOrder(order: Order): Promise<void> {
+    setLoading(true)
+    setMessage('')
+    try {
+      const existingItems = await getOrderItems(order.id)
+      const lines: CartLine[] = [
+        ...existingItems.map((item) => ({
+          menuItemId: item.menuItemId,
+          nameAr: item.nameAr,
+          unitPrice: item.unitPrice,
+          quantity: item.quantity,
+          sizeLabelAr: item.sizeLabelAr,
+          attachmentForMenuItemId: item.attachmentForMenuItemId,
+          unitLabel: item.unitLabel,
+          weightGrams: item.weightGrams,
+          noteAr: item.noteAr
+        })),
+        ...cart
+      ]
+      const updatedOrder = await editOrderItems({
+        orderId: order.id,
+        cashierId: user.id,
+        lines,
+        orderNoteAr: orderNote || order.noteAr
+      })
+      const [orderItems, settings, unpaid] = await Promise.all([
+        getOrderItems(updatedOrder.id),
+        getSettings(),
+        listUnpaidDineInOrders()
+      ])
+      setCart([])
+      setOrderNote('')
+      setUnpaidOrders(unpaid)
+      setMessage(`تمت إضافة الأصناف إلى طلب الصالة #${orderReference(updatedOrder)}`)
+      printKitchenAfterSave(updatedOrder, orderItems, settings, 'تم تحديث طلب الصالة')
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'فشل إضافة الأصناف للطلب')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // ── Checkout dispatcher ───────────────────────────────────────────────
 
   async function handleCheckout(method?: 'cash' | 'card'): Promise<void> {
@@ -936,6 +984,7 @@ export function PosPage(): React.ReactElement {
 
       if (occupiedTableIds.has(selectedTable.id)) {
         // Show modal instead of window.confirm
+        setPendingOccupiedOrder(unpaidOrders.find((order) => order.tableId === selectedTable.id) ?? null)
         setPendingOccupiedTable(selectedTable)
         setOccupiedTableModal(true)
         return
@@ -1054,17 +1103,24 @@ export function PosPage(): React.ReactElement {
       {occupiedTableModal && pendingOccupiedTable && (
         <OccupiedTableModal
           tableNameAr={pendingOccupiedTable.nameAr}
+          order={pendingOccupiedOrder ?? undefined}
           onConfirm={async () => {
-            const table = pendingOccupiedTable
+            const order = pendingOccupiedOrder
             setOccupiedTableModal(false)
             setPendingOccupiedTable(null)
-            const action = async (): Promise<void> => submitDineIn(table)
+            setPendingOccupiedOrder(null)
+            if (!order) {
+              setMessage('لم يتم العثور على الطلب المفتوح لهذه الترابيزة')
+              return
+            }
+            const action = async (): Promise<void> => appendToDineInOrder(order)
             const ready = await ensureShiftOrPrompt(action)
             if (ready) await action()
           }}
           onCancel={() => {
             setOccupiedTableModal(false)
             setPendingOccupiedTable(null)
+            setPendingOccupiedOrder(null)
           }}
         />
       )}
@@ -1320,7 +1376,7 @@ export function PosPage(): React.ReactElement {
         <div className="pos-cart__lines">
           {cart.length === 0 && (
             <div className="pos-cart__empty">
-              <img src="/image.png" alt="شعار المطعم" className="pos-cart__logo" />
+              <img src={posLogoUrl} alt="شعار المطعم" className="pos-cart__logo" />
               <p className="pos-cart__empty-text">أضف أصنافًا من القائمة</p>
             </div>
           )}

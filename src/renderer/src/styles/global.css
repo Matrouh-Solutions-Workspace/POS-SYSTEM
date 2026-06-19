@@ -3111,9 +3111,24 @@ textarea {
 }
 
 .cashier-history .table-checkbox {
+  appearance: auto;
+  -webkit-appearance: auto;
   display: inline-block;
+  width: 18px;
+  height: 18px;
+  min-height: unset;
   margin: 0;
+  accent-color: var(--color-primary);
+  background: initial !important;
+  border: initial !important;
+  border-radius: initial;
   cursor: pointer;
+}
+
+.cashier-history .table-checkbox::after,
+.cashier-history .table-checkbox:checked::after {
+  content: none !important;
+  display: none !important;
 }
 
 .cashier-history__row--selected td {

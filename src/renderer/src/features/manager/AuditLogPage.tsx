@@ -4,8 +4,11 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { listAuditEntries, type AuditDateRange } from '@renderer/features/audit/audit-service'
-import type { AuditEntry, AuditAction } from '@shared/types'
+import type { AppUser, AuditEntry, AuditAction, Ingredient, InventoryTransaction, ItemAddon, ItemSize, KitchenPrinter, MenuCategory, MenuItem, Order, Supplier, SupplierTransaction } from '@shared/types'
 import { listAllAccounts } from '@renderer/features/auth/auth-service'
+import { COLLECTIONS } from '@shared/constants/collections'
+import { getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
+import { orderReference } from '@shared/services/order-reference'
 
 const RANGE_OPTIONS: { value: AuditDateRange; label: string }[] = [
   { value: 'today', label: 'اليوم' },
@@ -119,6 +122,8 @@ const ACTION_BADGE: Record<AuditAction, string> = {
 export function AuditLogPage(): React.ReactElement {
   const [entries, setEntries] = useState<AuditEntry[]>([])
   const [usernamesById, setUsernamesById] = useState<Record<string, string>>({})
+  const [targetNames, setTargetNames] = useState<Record<string, string>>({})
+  const [detailsEntry, setDetailsEntry] = useState<AuditEntry | null>(null)
   const [range, setRange] = useState<AuditDateRange>('today')
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -128,9 +133,10 @@ export function AuditLogPage(): React.ReactElement {
 
   useEffect(() => {
     setLoading(true)
-    void Promise.all([listAuditEntries(range), listAllAccounts()]).then(([data, users]) => {
+    void Promise.all([listAuditEntries(range), listAllAccounts()]).then(async ([data, users]) => {
       setEntries(data)
       setUsernamesById(Object.fromEntries(users.map((user) => [user.id, user.username])))
+      setTargetNames(await buildTargetNameMap(data, users))
       setLoading(false)
     })
   }, [range])
@@ -141,6 +147,17 @@ export function AuditLogPage(): React.ReactElement {
     if (entry.actorId === 'system') return entry.actorName
     const localUser = entry.actorId.match(/^local_(.+?)(?:_\d+)?$/)
     return localUser?.[1] ?? entry.actorName
+  }
+
+  function targetKey(entry: AuditEntry): string | null {
+    return entry.targetType && entry.targetId ? `${entry.targetType}:${entry.targetId}` : null
+  }
+
+  function targetLabel(entry: AuditEntry): string {
+    const key = targetKey(entry)
+    if (key && targetNames[key]) return targetNames[key]
+    if (entry.targetType === 'settings') return 'إعدادات المطعم'
+    return entry.targetId ?? '-'
   }
 
   const actors = useMemo(() => {
@@ -156,6 +173,7 @@ export function AuditLogPage(): React.ReactElement {
     const matchesText = !q ||
       entry.actorName.includes(q) ||
       actorLabel(entry).includes(q) ||
+      targetLabel(entry).includes(q) ||
       entry.detailAr.includes(q) ||
       entry.targetId?.includes(q) ||
       ACTION_LABELS[entry.action].includes(q)
@@ -252,7 +270,7 @@ export function AuditLogPage(): React.ReactElement {
                   <th>المستخدم</th>
                   <th>الحدث</th>
                   <th>العنصر</th>
-                  <th>التفاصيل</th>
+                  <th>إجراء</th>
                 </tr>
               </thead>
               <tbody>
@@ -274,10 +292,12 @@ export function AuditLogPage(): React.ReactElement {
                     </td>
                     <td style={{ fontSize: '0.82rem', color: 'var(--color-muted)' }}>
                       {entry.targetType ? TARGET_LABELS[entry.targetType] : '-'}
-                      {entry.targetId ? <code dir="ltr" style={{ display: 'block', marginTop: 4 }}>{entry.targetId}</code> : null}
+                      {entry.targetId ? <span style={{ display: 'block', marginTop: 4, color: 'var(--color-text)', fontWeight: 700 }}>{targetLabel(entry)}</span> : null}
                     </td>
-                    <td style={{ fontSize: '0.85rem', color: 'var(--color-muted)', maxWidth: 320, wordBreak: 'break-word' }}>
-                      {entry.detailAr}
+                    <td>
+                      <button type="button" className="btn btn--secondary btn--sm" onClick={() => setDetailsEntry(entry)}>
+                        عرض التفاصيل
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -286,6 +306,89 @@ export function AuditLogPage(): React.ReactElement {
           </div>
         )}
       </div>
+      {detailsEntry && (
+        <div className="modal-overlay" onClick={() => setDetailsEntry(null)}>
+          <div className="modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+            <div className="order-details__header">
+              <h2 className="order-details__title">تفاصيل الحدث</h2>
+              <button type="button" className="order-details__close" onClick={() => setDetailsEntry(null)} aria-label="إغلاق">✕</button>
+            </div>
+            <div className="order-details__meta">
+              <div className="order-details__meta-row"><span className="order-details__meta-label">الوقت</span><span>{new Date(detailsEntry.createdAt).toLocaleString('ar-EG')}</span></div>
+              <div className="order-details__meta-row"><span className="order-details__meta-label">المستخدم</span><span dir="ltr">{actorLabel(detailsEntry)}</span></div>
+              <div className="order-details__meta-row"><span className="order-details__meta-label">الحدث</span><span>{ACTION_LABELS[detailsEntry.action] ?? detailsEntry.action}</span></div>
+              <div className="order-details__meta-row"><span className="order-details__meta-label">العنصر</span><span>{detailsEntry.targetType ? `${TARGET_LABELS[detailsEntry.targetType]} — ${targetLabel(detailsEntry)}` : '-'}</span></div>
+              {detailsEntry.targetId && (
+                <div className="order-details__meta-row"><span className="order-details__meta-label">المعرّف</span><code dir="ltr">{detailsEntry.targetId}</code></div>
+              )}
+            </div>
+            <p style={{ margin: '14px 0 0', lineHeight: 1.8, color: 'var(--color-text)' }}>{detailsEntry.detailAr}</p>
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button type="button" className="btn btn--primary btn--sm" onClick={() => setDetailsEntry(null)}>إغلاق</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
+}
+
+async function buildTargetNameMap(entries: AuditEntry[], users: AppUser[]): Promise<Record<string, string>> {
+  const needs = new Set(entries.map((entry) => entry.targetType).filter(Boolean))
+  const [
+    orders,
+    categories,
+    menuItems,
+    sizes,
+    addons,
+    ingredients,
+    inventoryTransactions,
+    suppliers,
+    supplierTransactions,
+    printers
+  ] = await Promise.all([
+    needs.has('order') ? getCachedDocs<Order>(COLLECTIONS.orders) : Promise.resolve([]),
+    needs.has('menu_category') ? getCachedDocs<MenuCategory>(COLLECTIONS.menuCategories) : Promise.resolve([]),
+    needs.has('menu_item') ? getCachedDocs<MenuItem>(COLLECTIONS.menuItems) : Promise.resolve([]),
+    needs.has('item_size') ? getCachedDocs<ItemSize>(COLLECTIONS.itemSizes) : Promise.resolve([]),
+    needs.has('item_addon') ? getCachedDocs<ItemAddon>(COLLECTIONS.itemAddons) : Promise.resolve([]),
+    needs.has('ingredient') || needs.has('inventory') ? getCachedDocs<Ingredient>(COLLECTIONS.ingredients) : Promise.resolve([]),
+    needs.has('inventory') ? getCachedDocs<InventoryTransaction>(COLLECTIONS.inventoryTransactions) : Promise.resolve([]),
+    needs.has('supplier') ? getCachedDocs<Supplier>(COLLECTIONS.suppliers) : Promise.resolve([]),
+    needs.has('supplier') ? getCachedDocs<SupplierTransaction>(COLLECTIONS.supplierTransactions) : Promise.resolve([]),
+    needs.has('printer') ? getCachedDocs<KitchenPrinter>(COLLECTIONS.kitchenPrinters) : Promise.resolve([])
+  ])
+
+  const usersById = new Map(users.map((user) => [user.id, user.username]))
+  const ordersById = new Map(orders.map((order) => [order.id, `طلب #${orderReference(order)}`]))
+  const categoriesById = new Map(categories.map((category) => [category.id, category.nameAr]))
+  const menuItemsById = new Map(menuItems.map((item) => [item.id, item.nameAr]))
+  const sizesById = new Map(sizes.map((size) => [size.id, size.nameAr]))
+  const addonsById = new Map(addons.map((addon) => [addon.id, addon.nameAr]))
+  const ingredientsById = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient.nameAr]))
+  const suppliersById = new Map(suppliers.map((supplier) => [supplier.id, supplier.nameAr]))
+  const printersById = new Map(printers.map((printer) => [printer.id, printer.name]))
+  const inventoryById = new Map(inventoryTransactions.map((tx) => [tx.id, ingredientsById.get(tx.ingredientId) ?? 'حركة مخزون']))
+  const supplierTxById = new Map(supplierTransactions.map((tx) => [tx.id, suppliersById.get(tx.supplierId) ?? 'حركة مورد']))
+
+  const map: Record<string, string> = {}
+  for (const entry of entries) {
+    if (!entry.targetType || !entry.targetId) continue
+    const key = `${entry.targetType}:${entry.targetId}`
+    const value =
+      entry.targetType === 'order' ? ordersById.get(entry.targetId) :
+      entry.targetType === 'user' ? usersById.get(entry.targetId) :
+      entry.targetType === 'menu_category' ? categoriesById.get(entry.targetId) :
+      entry.targetType === 'menu_item' ? menuItemsById.get(entry.targetId) :
+      entry.targetType === 'item_size' ? sizesById.get(entry.targetId) :
+      entry.targetType === 'item_addon' ? addonsById.get(entry.targetId) :
+      entry.targetType === 'ingredient' ? ingredientsById.get(entry.targetId) :
+      entry.targetType === 'inventory' ? inventoryById.get(entry.targetId) :
+      entry.targetType === 'supplier' ? supplierTxById.get(entry.targetId) ?? suppliersById.get(entry.targetId) :
+      entry.targetType === 'printer' ? printersById.get(entry.targetId) :
+      entry.targetType === 'settings' ? 'إعدادات المطعم' :
+      undefined
+    if (value) map[key] = value
+  }
+  return map
 }

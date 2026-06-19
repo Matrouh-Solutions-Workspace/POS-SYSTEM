@@ -17,6 +17,7 @@ import {
 import { printReceipt } from '@renderer/features/receipt/receipt-builder'
 import { orderReference } from '@shared/services/order-reference'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
+import { getOpenShiftForCashier } from '@renderer/features/shifts/shift-service'
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -308,8 +309,8 @@ export function OrderHistoryPage(): React.ReactElement {
   const currency = 'ج.م'
 
   async function load(): Promise<void> {
-    const loaded = await listOrders(300)
-    setOrders(loaded)
+    const [loaded, shift] = await Promise.all([listOrders(300), getOpenShiftForCashier(user.id)])
+    setOrders(shift ? loaded.filter((order) => order.shiftId === shift.id) : [])
     setLoading(false)
   }
 
