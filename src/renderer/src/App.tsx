@@ -13,9 +13,18 @@ import { PinLockScreen } from '@renderer/components/PinLockScreen'
 import { usePinBootstrap } from '@renderer/features/auth/use-pin-bootstrap'
 import { applyThemeColor } from '@renderer/features/theme/theme-store'
 import { getSettings } from '@renderer/features/orders/order-service'
-import { buildNavForUser, CASHIER_NAV, MANAGER_NAV, SUPERVISOR_NAV } from '@renderer/config/navigation'
+import {
+  buildNavForUser,
+  buildSupervisorNavForUser,
+  defaultManagerPathForUser,
+  hasManagerModeAccess,
+  CASHIER_NAV,
+  MANAGER_NAV,
+  SUPERVISOR_NAV
+} from '@renderer/config/navigation'
 import { ErrorBoundary } from '@renderer/components/ErrorBoundary'
 import { useArrowFocusNavigation } from '@renderer/features/accessibility/use-arrow-focus-navigation'
+import { MANAGEMENT_PERMISSIONS, POS_PERMISSIONS, hasPermission } from '@shared/types/user'
 
 const LoginPage = lazy(() =>
   import('@renderer/features/auth/LoginPage').then((m) => ({ default: m.LoginPage }))
@@ -88,7 +97,7 @@ const FloorPlanPage = lazy(() =>
 function CashierLayout(): React.ReactElement {
   const user = useAuthStore((s) => s.user)
   return (
-    <AppShell nav={user ? buildNavForUser(user) : CASHIER_NAV}>
+    <AppShell nav={user ? buildNavForUser(user, 'pos') : CASHIER_NAV}>
       <Outlet />
     </AppShell>
   )
@@ -97,7 +106,7 @@ function CashierLayout(): React.ReactElement {
 function SupervisorLayout(): React.ReactElement {
   const user = useAuthStore((s) => s.user)
   return (
-    <AppShell nav={user ? buildNavForUser(user) : SUPERVISOR_NAV}>
+    <AppShell nav={user ? buildSupervisorNavForUser(user) : SUPERVISOR_NAV}>
       <Outlet />
     </AppShell>
   )
@@ -106,7 +115,7 @@ function SupervisorLayout(): React.ReactElement {
 function ManagerLayout(): React.ReactElement {
   const user = useAuthStore((s) => s.user)
   return (
-    <AppShell nav={user ? buildNavForUser(user) : MANAGER_NAV}>
+    <AppShell nav={user ? buildNavForUser(user, 'manager') : MANAGER_NAV}>
       <Outlet />
     </AppShell>
   )
@@ -117,8 +126,11 @@ function RootRedirect(): React.ReactElement {
   const loading = useAuthStore((s) => s.loading)
   if (loading) return <PageLoader />
   if (!user) return <Navigate to="/login" replace />
-  if (user.role === 'manager') return <Navigate to="/manager" replace />
-  return <Navigate to="/pos" replace />
+  if (hasManagerModeAccess(user)) return <Navigate to={defaultManagerPathForUser(user)} replace />
+  if (hasPermission(user, 'pos')) return <Navigate to="/pos" replace />
+  if (hasPermission(user, 'order_history')) return <Navigate to="/pos/history" replace />
+  if (hasPermission(user, 'cashier_inventory')) return <Navigate to="/pos/inventory" replace />
+  return <Navigate to="/login" replace />
 }
 
 function LazyPage({ children }: { children: React.ReactNode }): React.ReactElement {
@@ -269,27 +281,47 @@ export default function App(): React.ReactElement {
         />
         <Route path="/" element={<RootRedirect />} />
 
-        <Route element={<ProtectedRoute roles={['cashier', 'supervisor', 'manager']} permission="pos" />}>
+        <Route element={<ProtectedRoute anyPermission={POS_PERMISSIONS} />}>
           <Route element={<CashierLayout />}>
-            <Route path="/pos" element={<LazyPage><PosPage /></LazyPage>} />
-            <Route path="/pos/history" element={<LazyPage><OrderHistoryPage /></LazyPage>} />
-            <Route path="/pos/inventory" element={<LazyPage><CashierInventoryPage /></LazyPage>} />
+            <Route element={<ProtectedRoute permission="pos" />}>
+              <Route path="/pos" element={<LazyPage><PosPage /></LazyPage>} />
+            </Route>
+            <Route element={<ProtectedRoute permission="order_history" />}>
+              <Route path="/pos/history" element={<LazyPage><OrderHistoryPage /></LazyPage>} />
+            </Route>
+            <Route element={<ProtectedRoute permission="cashier_inventory" />}>
+              <Route path="/pos/inventory" element={<LazyPage><CashierInventoryPage /></LazyPage>} />
+            </Route>
           </Route>
         </Route>
 
         <Route element={<ProtectedRoute roles={['supervisor']} />}>
           <Route element={<SupervisorLayout />}>
-            <Route path="/supervisor/pos" element={<LazyPage><PosPage /></LazyPage>} />
-            <Route path="/supervisor/history" element={<LazyPage><OrderHistoryPage /></LazyPage>} />
-            <Route path="/supervisor/inventory" element={<LazyPage><CashierInventoryPage /></LazyPage>} />
-            <Route path="/supervisor/shifts" element={<LazyPage><ShiftsPage /></LazyPage>} />
-            <Route path="/supervisor/purchases" element={<LazyPage><PurchasesPage /></LazyPage>} />
-            <Route path="/supervisor/suppliers" element={<LazyPage><SuppliersPage /></LazyPage>} />
-            <Route path="/supervisor/reports" element={<LazyPage><ReportsPage /></LazyPage>} />
+            <Route element={<ProtectedRoute permission="pos" />}>
+              <Route path="/supervisor/pos" element={<LazyPage><PosPage /></LazyPage>} />
+            </Route>
+            <Route element={<ProtectedRoute permission="order_history" />}>
+              <Route path="/supervisor/history" element={<LazyPage><OrderHistoryPage /></LazyPage>} />
+            </Route>
+            <Route element={<ProtectedRoute permission="cashier_inventory" />}>
+              <Route path="/supervisor/inventory" element={<LazyPage><CashierInventoryPage /></LazyPage>} />
+            </Route>
+            <Route element={<ProtectedRoute permission="manage_shifts" />}>
+              <Route path="/supervisor/shifts" element={<LazyPage><ShiftsPage /></LazyPage>} />
+            </Route>
+            <Route element={<ProtectedRoute permission="manage_purchases" />}>
+              <Route path="/supervisor/purchases" element={<LazyPage><PurchasesPage /></LazyPage>} />
+            </Route>
+            <Route element={<ProtectedRoute permission="manage_suppliers" />}>
+              <Route path="/supervisor/suppliers" element={<LazyPage><SuppliersPage /></LazyPage>} />
+            </Route>
+            <Route element={<ProtectedRoute permission="view_reports" />}>
+              <Route path="/supervisor/reports" element={<LazyPage><ReportsPage /></LazyPage>} />
+            </Route>
           </Route>
         </Route>
 
-        <Route element={<ProtectedRoute roles={['manager']} />}>
+        <Route element={<ProtectedRoute anyPermission={MANAGEMENT_PERMISSIONS} />}>
           <Route element={<ManagerLayout />}>
             <Route
               path="/manager"
@@ -299,86 +331,32 @@ export default function App(): React.ReactElement {
                 </LazyPage>
               }
             />
-            <Route
-              path="/manager/items"
-              element={
-                <LazyPage>
-                  <ItemsPage />
-                </LazyPage>
-              }
-            />
-            <Route
-              path="/manager/purchases"
-              element={
-                <LazyPage>
-                  <PurchasesPage />
-                </LazyPage>
-              }
-            />
-            <Route
-              path="/manager/cashiers"
-              element={
-                <LazyPage>
-                  <AccountsPage />
-                </LazyPage>
-              }
-            />
-            <Route
-              path="/manager/shifts"
-              element={
-                <LazyPage>
-                  <ShiftsPage />
-                </LazyPage>
-              }
-            />
-            <Route
-              path="/manager/suppliers"
-              element={
-                <LazyPage>
-                  <SuppliersPage />
-                </LazyPage>
-              }
-            />
-            <Route
-              path="/manager/reports"
-              element={
-                <LazyPage>
-                  <ReportsPage />
-                </LazyPage>
-              }
-            />
-            <Route
-              path="/manager/settings"
-              element={
-                <LazyPage>
-                  <SettingsPage />
-                </LazyPage>
-              }
-            />
-            <Route
-              path="/manager/cashier-history"
-              element={
-                <LazyPage>
-                  <CashierHistoryPage />
-                </LazyPage>
-              }
-            />
-            <Route
-              path="/manager/audit"
-              element={
-                <LazyPage>
-                  <AuditLogPage />
-                </LazyPage>
-              }
-            />
-            <Route
-              path="/manager/tables"
-              element={
-                <LazyPage>
-                  <FloorPlanPage />
-                </LazyPage>
-              }
-            />
+            <Route element={<ProtectedRoute permission="manage_menu" />}>
+              <Route path="/manager/items" element={<LazyPage><ItemsPage /></LazyPage>} />
+            </Route>
+            <Route element={<ProtectedRoute permission="manage_purchases" />}>
+              <Route path="/manager/purchases" element={<LazyPage><PurchasesPage /></LazyPage>} />
+            </Route>
+            <Route element={<ProtectedRoute permission="manage_accounts" />}>
+              <Route path="/manager/cashiers" element={<LazyPage><AccountsPage /></LazyPage>} />
+            </Route>
+            <Route element={<ProtectedRoute permission="manage_shifts" />}>
+              <Route path="/manager/shifts" element={<LazyPage><ShiftsPage /></LazyPage>} />
+            </Route>
+            <Route element={<ProtectedRoute permission="manage_suppliers" />}>
+              <Route path="/manager/suppliers" element={<LazyPage><SuppliersPage /></LazyPage>} />
+            </Route>
+            <Route element={<ProtectedRoute permission="view_reports" />}>
+              <Route path="/manager/reports" element={<LazyPage><ReportsPage /></LazyPage>} />
+            </Route>
+            <Route element={<ProtectedRoute permission="manage_settings" />}>
+              <Route path="/manager/settings" element={<LazyPage><SettingsPage /></LazyPage>} />
+              <Route path="/manager/audit" element={<LazyPage><AuditLogPage /></LazyPage>} />
+              <Route path="/manager/tables" element={<LazyPage><FloorPlanPage /></LazyPage>} />
+            </Route>
+            <Route element={<ProtectedRoute anyPermission={['order_history', 'view_reports']} />}>
+              <Route path="/manager/cashier-history" element={<LazyPage><CashierHistoryPage /></LazyPage>} />
+            </Route>
           </Route>
         </Route>
 

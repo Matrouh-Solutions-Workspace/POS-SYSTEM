@@ -99,6 +99,22 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   manage_settings:   'تعديل اسم المطعم والعملة والألوان والترابيزات'
 }
 
+export const POS_PERMISSIONS: Permission[] = [
+  'pos',
+  'order_history',
+  'cashier_inventory'
+]
+
+export const MANAGEMENT_PERMISSIONS: Permission[] = [
+  'view_reports',
+  'manage_shifts',
+  'manage_menu',
+  'manage_purchases',
+  'manage_suppliers',
+  'manage_accounts',
+  'manage_settings'
+]
+
 /** Permission groups for UI display */
 export const PERMISSION_GROUPS: { label: string; perms: Permission[] }[] = [
   {
@@ -130,6 +146,10 @@ export function hasPermission(user: AppUser | null, permission: Permission): boo
   // Otherwise check the stored permissions array
   const perms = user.permissions ?? ROLE_PRESET_PERMISSIONS[user.role] ?? []
   return perms.includes(permission)
+}
+
+export function hasAnyPermission(user: AppUser | null, permissions: Permission[]): boolean {
+  return permissions.some((permission) => hasPermission(user, permission))
 }
 
 /** Get the effective permission list for a user */

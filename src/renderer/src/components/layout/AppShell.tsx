@@ -20,6 +20,7 @@ import { useGlobalKeyboardShortcuts } from '@renderer/features/keyboard/use-keyb
 import { useTabShortcuts } from '@renderer/features/keyboard/use-tab-shortcuts'
 import { useKeyboardStore } from '@renderer/features/keyboard/keyboard-store'
 import { hasPermission } from '@shared/types/user'
+import { defaultManagerPathForUser, hasManagerModeAccess } from '@renderer/config/navigation'
 
 const SIDEBAR_COLLAPSE_PREF_KEY = 'abdokofta.sidebarCollapsePreference'
 type SidebarCollapsePreference = 'expanded' | 'collapsed'
@@ -202,8 +203,8 @@ export function AppShell({ nav, children }: AppShellProps): React.ReactElement {
   const primaryPane = panes[0]
   // Use router location as source of truth for sidebar active state
   const focusedActivePath = location.pathname
-  const canSwitchPosManager = Boolean(user && user.role === 'manager' && hasPermission(user, 'pos'))
-  const switchTarget = location.pathname.startsWith('/pos') ? '/manager' : '/pos'
+  const canSwitchPosManager = Boolean(user && hasPermission(user, 'pos') && hasManagerModeAccess(user))
+  const switchTarget = user && location.pathname.startsWith('/pos') ? defaultManagerPathForUser(user) : '/pos'
   const switchLabel = location.pathname.startsWith('/pos') ? 'لوحة التحكم' : 'واجهة البيع'
   const SwitchIcon = location.pathname.startsWith('/pos') ? MdDashboard : MdPointOfSale
 
