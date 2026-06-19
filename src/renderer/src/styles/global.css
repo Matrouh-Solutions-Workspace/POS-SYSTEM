@@ -3102,6 +3102,20 @@ textarea {
   border-top: 1px solid var(--color-border-light);
 }
 
+.cashier-history__table th:first-child,
+.cashier-history__table td:first-child {
+  width: 44px;
+  min-width: 44px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.cashier-history .table-checkbox {
+  display: inline-block;
+  margin: 0;
+  cursor: pointer;
+}
+
 .cashier-history__row--selected td {
   background: var(--color-primary-soft);
 }

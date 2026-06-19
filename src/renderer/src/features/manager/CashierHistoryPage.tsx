@@ -221,6 +221,7 @@ export function CashierHistoryPage(): React.ReactElement {
           <div className="cashier-history__selection-bar">
             <label className="cashier-history__select-all" htmlFor="select-all">
               <input
+                className="table-checkbox"
                 type="checkbox"
                 id="select-all"
                 checked={selected.size === filtered.length && filtered.length > 0}
@@ -265,10 +266,10 @@ export function CashierHistoryPage(): React.ReactElement {
                     <div className="cashier-history__cashier-header">
                       <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                         <input
+                          className="table-checkbox"
                           type="checkbox"
                           checked={allCashierSelected}
                           onChange={() => selectDateCashier(cashierOrders)}
-                          style={{ width: 15, height: 15 }}
                         />
                         <span className="cashier-history__cashier-name">{cashierName}</span>
                       </label>
@@ -292,10 +293,10 @@ export function CashierHistoryPage(): React.ReactElement {
                           <tr key={o.id} className={selected.has(o.id) ? 'cashier-history__row--selected' : ''}>
                             <td>
                               <input
+                                className="table-checkbox"
                                 type="checkbox"
                                 checked={selected.has(o.id)}
                                 onChange={() => toggleSelect(o.id)}
-                                style={{ width: 15, height: 15, cursor: 'pointer' }}
                               />
                             </td>
                             <td>
