@@ -121,8 +121,12 @@ function readSettingsNetworkMode(): string {
   }
 }
 
+export function isMasterStoreMode(): boolean {
+  return readSettingsNetworkMode() === 'master'
+}
+
 function shouldEnqueueOutbox(): boolean {
-  return readSettingsNetworkMode() !== 'master'
+  return isMasterStoreMode()
 }
 
 function readSettingsDocument(): Record<string, unknown> | null {
@@ -193,7 +197,7 @@ export function initLocalStore(): LocalStoreStatus {
   try {
     const database = openDatabase()
     const row = database.prepare(
-      "SELECT COUNT(*) AS count FROM sync_outbox WHERE status = 'pending'"
+      "SELECT COUNT(*) AS count FROM sync_outbox WHERE status = 'pending' OR (status = 'failed' AND attempts < 10)"
     ).get() as { count?: number } | undefined
     return { ok: true, path: dbPath(), pendingOutbox: Number(row?.count ?? 0) }
   } catch (e) {
@@ -262,7 +266,7 @@ export function deleteCachedDocument(collectionName: string, documentId: string)
 }
 
 // ---------------------------------------------------------------------------
-// Sync outbox — queue writes that need to be uploaded to Firebase
+// Sync outbox — queue master-device writes for the configured HTTP API
 // ---------------------------------------------------------------------------
 
 export interface OutboxEntry {
@@ -278,7 +282,7 @@ export interface OutboxEntry {
   synced_at: number | null
 }
 
-/** Enqueue a document write for Firebase upload */
+/** Enqueue a document write for master-device API sync */
 export function enqueueOutbox(
   entityType: string,
   entityId: string,
@@ -352,7 +356,7 @@ export function resetFailedOutbox(): void {
 export function countPendingOutbox(): number {
   const database = openDatabase()
   const row = database.prepare(
-    "SELECT COUNT(*) AS count FROM sync_outbox WHERE status = 'pending'"
+    "SELECT COUNT(*) AS count FROM sync_outbox WHERE status = 'pending' OR (status = 'failed' AND attempts < 10)"
   ).get() as { count?: number } | undefined
   return Number(row?.count ?? 0)
 }
@@ -401,7 +405,7 @@ export interface BatchOperation {
 /**
  * Execute an array of document operations atomically.
  * All writes succeed together or all are rolled back.
- * Also enqueues every operation in the outbox for Firebase sync.
+ * Also enqueues every operation in the outbox for API sync on the master device.
  */
 export function executeBatch(operations: BatchOperation[]): { ok: boolean; error?: string } {
   if (!operations.length) return { ok: true }

@@ -1,13 +1,12 @@
 /**
- * Background Firebase upload listener.
+ * Background HTTP API sync listener.
  *
  * Polls the outbox every 30 s and on network-online events.
- * Upload is attempted via the Admin SDK through IPC (main process),
- * so no direct Firebase fetch from the renderer — zero CORS issues.
+ * Upload is performed through IPC by the Electron main process.
  */
 import { useEffect } from 'react'
 import { useSyncStore } from './sync-store'
-import { getPendingUploadCount, uploadOutboxToFirebase } from './outbox-uploader'
+import { getPendingUploadCount, uploadOutboxToApi } from './outbox-uploader'
 import { getSettings } from '@renderer/features/orders/order-service'
 
 export function useSyncListener(): void {
@@ -20,7 +19,7 @@ export function useSyncListener(): void {
       if (disposed) return
 
       const settings = await getSettings().catch(() => null)
-      if (settings?.networkMode === 'master' || settings?.networkMode === 'side') {
+      if (settings?.networkMode !== 'master') {
         setPendingUpload(0)
         return
       }
@@ -41,7 +40,7 @@ export function useSyncListener(): void {
       if (!navigator.onLine) return
 
       try {
-        await uploadOutboxToFirebase()
+        await uploadOutboxToApi()
         const remaining = await getPendingUploadCount()
         setPendingUpload(remaining)
       } catch (e) {

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Local SQLite seed — no Firebase needed.
+ * Local SQLite seed.
  *
  * Writes all demo data directly into the app's SQLite cache file so the
- * app works fully offline without ever connecting to Firebase.
+ * app works fully offline without requiring cloud sync.
  *
  * Also writes offline-auth credentials into a seed_auth table so the
  * app can bootstrap localStorage on first launch.

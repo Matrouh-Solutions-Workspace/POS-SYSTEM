@@ -353,13 +353,7 @@ function startBackupScheduler(): void {
   backupScheduler = setInterval(tick, 60 * 60 * 1000)
 }
 
-import {
-  deleteAuthUser,
-  ensureAuthUser,
-  readAdminDocument,
-  resetAuthUserPassword,
-  writeAdminDocument
-} from './firebase-admin'
+import { pushOutboxToApi } from './api-sync'
 import { initAutoUpdater } from './auto-updater'
 import {
   createActivationRequestFile,
@@ -381,13 +375,9 @@ import {
   readIngredientStocks,
   getLocalStoreStatus,
   initLocalStore,
-  markOutboxFailed,
-  markOutboxSynced,
   readCachedDocument,
   readCachedDocuments,
-  readPendingOutbox,
   resetDatabase,
-  resetFailedOutbox,
   runConfiguredBackup,
   deleteAuthCredentialForUser,
   storeAuthCredential,
@@ -578,37 +568,10 @@ app.whenReady().then(() => {
     return restoreDatabase(result.filePaths[0]!)
   })
 
-  // Sync outbox: read pending entries for Firebase background upload
-  ipcMain.handle('outbox:get-pending', () => {
-    if (isSideMode()) return []
-    return readPendingOutbox()
-  })
-
-  // Sync outbox: enqueue a document for Firebase upload
+  // Sync outbox: enqueue a document for master-device API upload
   ipcMain.handle('outbox:enqueue', (_, entityType: string, entityId: string, operation: 'set' | 'delete', payload: unknown) => {
     if (isSideMode()) return { ok: true as const }
     enqueueOutbox(entityType, entityId, operation, payload)
-    return { ok: true as const }
-  })
-
-  // Sync outbox: mark entries synced
-  ipcMain.handle('outbox:mark-synced', (_, ids: string[]) => {
-    if (isSideMode()) return { ok: true as const }
-    markOutboxSynced(ids)
-    return { ok: true as const }
-  })
-
-  // Sync outbox: mark entries failed
-  ipcMain.handle('outbox:mark-failed', (_, ids: string[]) => {
-    if (isSideMode()) return { ok: true as const }
-    markOutboxFailed(ids)
-    return { ok: true as const }
-  })
-
-  // Sync outbox: reset failed entries for retry
-  ipcMain.handle('outbox:reset-failed', () => {
-    if (isSideMode()) return { ok: true as const }
-    resetFailedOutbox()
     return { ok: true as const }
   })
 
@@ -617,6 +580,8 @@ app.whenReady().then(() => {
     if (isSideMode()) return { count: 0 }
     return { count: countPendingOutbox() }
   })
+
+  ipcMain.handle('api-sync:push', () => pushOutboxToApi())
 
   // DEV ONLY — wipe all SQLite data so the app boots as fresh
   ipcMain.handle('dev:reset-database', () => {
@@ -705,55 +670,6 @@ app.whenReady().then(() => {
 
   ipcMain.handle('print:pdf-report', async (_, html: string, suggestedName: string) => {
     return exportHtmlToPdf(html, suggestedName)
-  })
-
-  ipcMain.handle('auth:delete-user', async (_, uid: string) => {
-    try {
-      await deleteAuthUser(uid)
-      return { ok: true as const }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      return { ok: false as const, error: message }
-    }
-  })
-
-  ipcMain.handle('auth:reset-password', async (_, uid: string, newPassword: string) => {
-    try {
-      await resetAuthUserPassword(uid, newPassword)
-      return { ok: true as const }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      return { ok: false as const, error: message }
-    }
-  })
-
-  ipcMain.handle('auth:ensure-user', async (_, params: { uid: string; email: string; password: string; displayName: string }) => {
-    try {
-      await ensureAuthUser(params)
-      return { ok: true as const }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      return { ok: false as const, error: message }
-    }
-  })
-
-  ipcMain.handle('admin:get-document', async (_, collectionName: string, documentId: string) => {
-    try {
-      return { ok: true as const, data: await readAdminDocument(collectionName, documentId) }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      return { ok: false as const, error: message }
-    }
-  })
-
-  ipcMain.handle('admin:set-document', async (_, collectionName: string, documentId: string, data: unknown) => {
-    try {
-      await writeAdminDocument(collectionName, documentId, data)
-      return { ok: true as const }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      return { ok: false as const, error: message }
-    }
   })
 
   createWindow()

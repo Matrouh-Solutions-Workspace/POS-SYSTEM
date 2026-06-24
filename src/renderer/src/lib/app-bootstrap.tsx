@@ -21,8 +21,7 @@ export async function bootstrapApp(): Promise<void> {
     return
   }
 
-  // SQLite is the primary database — no Firebase initialisation required at boot.
-  // Firebase is initialised lazily by the background upload service when online.
+  // SQLite is primary; optional cloud sync starts in the background.
   root.render(
     <StrictMode>
       <App />

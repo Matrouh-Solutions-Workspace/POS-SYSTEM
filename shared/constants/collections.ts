@@ -1,4 +1,4 @@
-/** Firestore collection names — shared with future React Native app */
+/** Stable entity collection names shared across local storage and API sync. */
 export const COLLECTIONS = {
   users: 'users',
   menuCategories: 'menu_categories',
@@ -23,3 +23,5 @@ export const COLLECTIONS = {
 } as const
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS]
+
+export const SETTINGS_DOC_ID = 'app'

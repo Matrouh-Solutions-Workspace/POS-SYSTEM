@@ -27,7 +27,7 @@ import {
   computeService
 } from '@shared/services/order-calculator'
 import { COLLECTIONS } from '@shared/constants/collections'
-import { SETTINGS_DOC_ID } from '@shared/schema/firestore-schema'
+import { SETTINGS_DOC_ID } from '@shared/constants/collections'
 import { RESTAURANT_NAME_AR } from '@shared/constants/branding'
 import type { AppSettings } from '@shared/types'
 import { cacheDocs, getCachedDoc, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'

@@ -1,6 +1,6 @@
 /**
  * Menu service — SQLite primary database.
- * All reads/writes go to SQLite first; Firebase receives changes via outbox.
+ * All reads/writes go to SQLite first; the master can mirror changes through the API outbox.
  */
 import type { MenuCategory, MenuItem, Recipe, RecipeLine } from '@shared/types'
 import { COLLECTIONS } from '@shared/constants/collections'

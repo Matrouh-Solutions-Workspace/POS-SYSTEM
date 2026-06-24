@@ -158,7 +158,7 @@ export function getUserPermissions(user: AppUser): Permission[] {
   return user.permissions ?? ROLE_PRESET_PERMISSIONS[user.role] ?? []
 }
 
-/** Convert a username to a Firebase-compatible email */
+/** Convert a username to the app's internal email-shaped identifier. */
 export function usernameToEmail(username: string): string {
   return `${username.toLowerCase().trim()}@abdokofta.local`
 }

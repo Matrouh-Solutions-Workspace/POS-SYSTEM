@@ -12,6 +12,7 @@ import {
 import {
   cacheDocuments,
   deleteCachedDocument,
+  enqueueOutbox,
   executeBatch,
   readCachedDocument,
   readCachedDocuments,
@@ -240,14 +241,22 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         collectionName?: string
         documents?: Array<{ id: string; data: unknown }>
       }
-      cacheDocuments(body.collectionName ?? '', body.documents ?? [])
+      const collectionName = body.collectionName ?? ''
+      const documents = body.documents ?? []
+      cacheDocuments(collectionName, documents)
+      for (const document of documents) {
+        enqueueOutbox(collectionName, document.id, 'set', document.data)
+      }
       ok(res, { ok: true })
       return
     }
 
     if (req.method === 'POST' && url.pathname === '/db/delete') {
       const body = await readBody(req) as { collectionName?: string; documentId?: string }
-      const deleted = deleteCachedDocument(body.collectionName ?? '', body.documentId ?? '')
+      const collectionName = body.collectionName ?? ''
+      const documentId = body.documentId ?? ''
+      const deleted = deleteCachedDocument(collectionName, documentId)
+      if (documentId) enqueueOutbox(collectionName, documentId, 'delete', { id: documentId })
       if (body.collectionName === 'users' && body.documentId) deleteAuthCredentialForUser(body.documentId)
       ok(res, { ok: true, deleted })
       return

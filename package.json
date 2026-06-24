@@ -13,17 +13,11 @@
     "preview:prod": "npm run build && electron .",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
-    "seed": "tsx scripts/seed.ts",
-    "seed:demo": "tsx scripts/seed-demo.ts",
     "seed:local": "node --experimental-sqlite scripts/seed-local.mjs",
-    "deploy:rules": "tsx scripts/deploy-rules.ts",
-    "verify:login": "tsx scripts/verify-login.ts",
-    "setup:firebase": "tsx scripts/setup-firebase.ts"
+    "seed": "npm run seed:local"
   },
   "dependencies": {
     "electron-updater": "6.8.3",
-    "firebase": "^11.6.0",
-    "firebase-admin": "^13.4.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-icons": "5.6.0",

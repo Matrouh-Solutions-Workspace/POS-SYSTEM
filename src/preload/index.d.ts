@@ -75,25 +75,6 @@ export interface ElectronAPI {
       copies: number
     }
   ) => Promise<{ ok: boolean; error?: string; code?: string }>
-  // Auth admin
-  deleteAuthUser: (uid: string) => Promise<{ ok: boolean; error?: string }>
-  resetAuthUserPassword: (uid: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>
-  ensureAuthUser: (params: {
-    uid: string
-    email: string
-    password: string
-    displayName: string
-  }) => Promise<{ ok: boolean; error?: string }>
-  getAdminDocument: (
-    collectionName: string,
-    documentId: string
-  ) => Promise<{ ok: boolean; data?: unknown | null; error?: string }>
-  setAdminDocument: (
-    collectionName: string,
-    documentId: string,
-    data: unknown
-  ) => Promise<{ ok: boolean; error?: string }>
-
   // App version & control
   getAppVersion: () => Promise<string>
   restartApp: () => Promise<void>
@@ -154,12 +135,17 @@ export interface ElectronAPI {
   getIngredientStocks: () => Promise<Array<{ ingredient_id: string; quantity: number }>>
 
   // Sync outbox
-  outboxGetPending: () => Promise<unknown[]>
   outboxEnqueue: (entityType: string, entityId: string, operation: 'set' | 'delete', payload: unknown) => Promise<{ ok: boolean }>
-  outboxMarkSynced: (ids: string[]) => Promise<{ ok: boolean }>
-  outboxMarkFailed: (ids: string[]) => Promise<{ ok: boolean }>
-  outboxResetFailed: () => Promise<{ ok: boolean }>
   outboxCountPending: () => Promise<{ count: number }>
+  pushApiSync: () => Promise<{
+    ok: boolean
+    enabled: boolean
+    uploaded: number
+    failed: number
+    pending: number
+    skipped?: 'disabled' | 'not_master' | 'invalid_license' | 'empty'
+    error?: string
+  }>
   devResetDatabase: () => Promise<{ ok: boolean; error?: string }>
 
   // Auto-updater — actions

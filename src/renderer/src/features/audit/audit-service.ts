@@ -2,7 +2,7 @@
  * Audit log service — REQ-7.
  *
  * Every significant system action is recorded here.
- * Entries are written to SQLite (synced to Firebase via outbox).
+ * Entries are written to SQLite and queued for optional master-device API sync.
  * Entries are NEVER modified or deleted — append-only.
  */
 import type { AuditAction, AuditEntry } from '@shared/types'

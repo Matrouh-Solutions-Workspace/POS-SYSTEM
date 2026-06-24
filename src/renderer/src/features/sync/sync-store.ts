@@ -1,15 +1,15 @@
 /**
- * Sync store — tracks background Firebase upload status.
+ * Sync store — tracks background HTTP API upload status.
  *
  * SQLite is always the primary database; this store only reflects
- * the background upload state to Firebase.
+ * the background upload state to the configured API.
  */
 import { create } from 'zustand'
 
 export type SyncStatus = 'idle' | 'uploading' | 'upload_error'
 
 interface SyncState {
-  /** Number of documents waiting to be uploaded to Firebase */
+  /** Number of documents waiting to be uploaded to the API */
   pendingUpload: number
   status: SyncStatus
   syncProgress: number | null
@@ -43,7 +43,7 @@ export function isAppOffline(): boolean {
   return false
 }
 
-/** No-op — kept for backwards compat, no Firebase write tracking needed */
+/** No-op — kept for backwards compatibility */
 export async function trackWrite<T>(fn: () => Promise<T>): Promise<T> {
   return fn()
 }

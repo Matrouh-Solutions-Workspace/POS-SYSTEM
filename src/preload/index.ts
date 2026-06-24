@@ -19,17 +19,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('print:test-default-printer', kind),
   printReport: (html: string, options?: { pageSize: 'A4' | 'Letter'; orientation: 'portrait' | 'landscape'; copies: number }): Promise<{ ok: boolean; error?: string; code?: string }> =>
     ipcRenderer.invoke('print:report', html, options),
-  deleteAuthUser: (uid: string): Promise<{ ok: boolean; error?: string }> =>
-    ipcRenderer.invoke('auth:delete-user', uid),
-  resetAuthUserPassword: (uid: string, newPassword: string): Promise<{ ok: boolean; error?: string }> =>
-    ipcRenderer.invoke('auth:reset-password', uid, newPassword),
-  ensureAuthUser: (params: { uid: string; email: string; password: string; displayName: string }): Promise<{ ok: boolean; error?: string }> =>
-    ipcRenderer.invoke('auth:ensure-user', params),
-  getAdminDocument: (collectionName: string, documentId: string): Promise<{ ok: boolean; data?: unknown | null; error?: string }> =>
-    ipcRenderer.invoke('admin:get-document', collectionName, documentId),
-  setAdminDocument: (collectionName: string, documentId: string, data: unknown): Promise<{ ok: boolean; error?: string }> =>
-    ipcRenderer.invoke('admin:set-document', collectionName, documentId, data),
-
   // App version & control
   getAppVersion: (): Promise<string> =>
     ipcRenderer.invoke('app:get-version'),
@@ -101,18 +90,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('local-store:get-stocks'),
 
   // Sync outbox
-  outboxGetPending: (): Promise<unknown[]> =>
-    ipcRenderer.invoke('outbox:get-pending'),
   outboxEnqueue: (entityType: string, entityId: string, operation: 'set' | 'delete', payload: unknown): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('outbox:enqueue', entityType, entityId, operation, payload),
-  outboxMarkSynced: (ids: string[]): Promise<{ ok: boolean }> =>
-    ipcRenderer.invoke('outbox:mark-synced', ids),
-  outboxMarkFailed: (ids: string[]): Promise<{ ok: boolean }> =>
-    ipcRenderer.invoke('outbox:mark-failed', ids),
-  outboxResetFailed: (): Promise<{ ok: boolean }> =>
-    ipcRenderer.invoke('outbox:reset-failed'),
   outboxCountPending: (): Promise<{ count: number }> =>
     ipcRenderer.invoke('outbox:count-pending'),
+  pushApiSync: (): Promise<{
+    ok: boolean
+    enabled: boolean
+    uploaded: number
+    failed: number
+    pending: number
+    skipped?: 'disabled' | 'not_master' | 'invalid_license' | 'empty'
+    error?: string
+  }> => ipcRenderer.invoke('api-sync:push'),
   devResetDatabase: (): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('dev:reset-database'),
 

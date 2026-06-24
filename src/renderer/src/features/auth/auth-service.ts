@@ -1,8 +1,7 @@
 /**
- * Authentication service — SQLite primary, Firebase background.
+ * Authentication service — SQLite primary.
  *
- * All user data is stored in SQLite. Firebase Auth is only used
- * in the background to keep the cloud in sync.
+ * All user data and credentials are stored locally.
  */
 import type { AppUser, AppUserCreate, UserRole } from '@shared/types'
 import { usernameToEmail } from '@shared/types/user'
@@ -118,7 +117,7 @@ export async function restoreSessionFromLocal(): Promise<AppUser | null> {
   return user
 }
 
-/** Login with username + password — reads from SQLite, no Firebase required */
+/** Login with username + password from the local credential store. */
 export async function loginAndLoadUser(username: string, password: string): Promise<AppUser> {
   const normalized = normalizeUsername(username)
   const passwordHash = await sha256(`${normalized}:${password}`)
@@ -269,20 +268,6 @@ export async function createAccount(
     })
   )
 
-  // Background: create in Firebase Auth (fire-and-forget)
-  void (async () => {
-    try {
-      await window.electronAPI.ensureAuthUser({
-        uid: user.id,
-        email: user.email,
-        password: data.password,
-        displayName: user.displayName
-      })
-    } catch {
-      // Best-effort — user already saved locally
-    }
-  })()
-
   return user
 }
 
@@ -360,10 +345,6 @@ export async function resetCashierPassword(userId: string, newPassword: string, 
     )
   }
 
-  // Background: update Firebase Auth password (fire-and-forget)
-  void window.electronAPI.resetAuthUserPassword(userId, newPassword).catch(() => {
-    // Best-effort
-  })
 }
 
 export async function deleteAccount(userId: string, currentUserId: string): Promise<void> {
@@ -388,7 +369,6 @@ export async function deleteAccount(userId: string, currentUserId: string): Prom
   }
 
   writeAuthCache(readAuthCache().filter((e) => e.userId !== userId))
-  void window.electronAPI.deleteAuthUser(userId).catch(() => {})
 }
 
 // ---------------------------------------------------------------------------

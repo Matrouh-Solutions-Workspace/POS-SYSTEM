@@ -1,6 +1,6 @@
 /**
  * Restores the user session from SQLite on app load.
- * No Firebase Auth dependency — session is stored locally.
+ * The session is stored locally.
  */
 import { useEffect } from 'react'
 import { useAuthStore } from './auth-store'
