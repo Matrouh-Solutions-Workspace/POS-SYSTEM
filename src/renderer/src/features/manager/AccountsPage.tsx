@@ -143,6 +143,8 @@ function CreateAccountForm({ currentUser, onCreated, onCancel }: {
     role: 'cashier' as UserRole
   })
   const [perms, setPerms] = useState<Permission[]>([...ROLE_PRESET_PERMISSIONS.cashier])
+  const [allowCashRounding, setAllowCashRounding] = useState(false)
+  const [maxCashRoundingDifference, setMaxCashRoundingDifference] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -170,6 +172,10 @@ function CreateAccountForm({ currentUser, onCreated, onCancel }: {
           cashierCode: form.cashierCode.trim().toUpperCase() || undefined,
           role: form.role,
           permissions: perms,
+          allowCashRounding,
+          maxCashRoundingDifference: allowCashRounding && maxCashRoundingDifference
+            ? Number(maxCashRoundingDifference)
+            : undefined,
           password: form.password
         },
         currentUser.id
@@ -222,6 +228,16 @@ function CreateAccountForm({ currentUser, onCreated, onCancel }: {
           </div>
           <PresetBar onSelect={setPerms} />
           <PermissionPicker value={perms} onChange={setPerms} />
+          <div className="settings-form-grid" style={{ marginTop: 12 }}>
+            <label className="field field--checkbox">
+              <input type="checkbox" checked={allowCashRounding} onChange={(event) => setAllowCashRounding(event.target.checked)} />
+              <span>السماح بتقريب الدفع النقدي</span>
+            </label>
+            <label className="field">
+              <span>حد الموظف (فارغ = الحد العام)</span>
+              <input type="number" min="0" step="0.01" disabled={!allowCashRounding} value={maxCashRoundingDifference} onChange={(event) => setMaxCashRoundingDifference(event.target.value)} placeholder="مثال: 5.00" />
+            </label>
+          </div>
         </div>
 
         {error && <p className="form-error">{error}</p>}
@@ -260,6 +276,10 @@ function AccountCard({ account, currentUser, onRefresh, setMessage }: {
   const [editName, setEditName] = useState(account.displayName)
   const [editCode, setEditCode] = useState(account.cashierCode ?? '')
   const [editPerms, setEditPerms] = useState<Permission[]>(getUserPermissions(account))
+  const [editAllowCashRounding, setEditAllowCashRounding] = useState(account.allowCashRounding ?? false)
+  const [editMaxCashRoundingDifference, setEditMaxCashRoundingDifference] = useState(
+    account.maxCashRoundingDifference != null ? String(account.maxCashRoundingDifference) : ''
+  )
 
   // Password edit
   const [editPassword, setEditPassword] = useState('')
@@ -275,6 +295,8 @@ function AccountCard({ account, currentUser, onRefresh, setMessage }: {
       setEditName(account.displayName)
       setEditCode(account.cashierCode ?? '')
       setEditPerms(getUserPermissions(account))
+      setEditAllowCashRounding(account.allowCashRounding ?? false)
+      setEditMaxCashRoundingDifference(account.maxCashRoundingDifference != null ? String(account.maxCashRoundingDifference) : '')
     }
     setEditPassword('')
     setEditPin('')
@@ -294,7 +316,11 @@ function AccountCard({ account, currentUser, onRefresh, setMessage }: {
       await updateUserProfile(account.id, {
         displayName: editName.trim(),
         cashierCode: editCode.trim().toUpperCase() || undefined,
-        permissions: account.role === 'manager' ? undefined : editPerms
+        permissions: account.role === 'manager' ? undefined : editPerms,
+        allowCashRounding: account.role === 'manager' ? true : editAllowCashRounding,
+        maxCashRoundingDifference: editAllowCashRounding && editMaxCashRoundingDifference
+          ? Number(editMaxCashRoundingDifference)
+          : undefined
       }, currentUser)
       setMessage('تم تعديل بيانات الحساب')
       cancelEdit()
@@ -357,6 +383,9 @@ function AccountCard({ account, currentUser, onRefresh, setMessage }: {
           <span className={ROLE_BADGE_CLASS[account.role]}>{ROLE_LABELS[account.role]}</span>
           {account.cashierCode && <span className="code-badge" dir="ltr">{account.cashierCode}</span>}
           {account.pinHash && <span className="pin-badge">PIN ✓</span>}
+          {(account.role === 'manager' || account.allowCashRounding) && (
+            <span className="code-badge">تقريب نقدي{account.maxCashRoundingDifference != null ? ` ≤ ${account.maxCashRoundingDifference}` : ''}</span>
+          )}
           <span className="perm-count-badge">{effectivePerms.length} صلاحية</span>
         </div>
       </div>
@@ -413,6 +442,16 @@ function AccountCard({ account, currentUser, onRefresh, setMessage }: {
               </div>
               <PresetBar onSelect={setEditPerms} />
               <PermissionPicker value={editPerms} onChange={setEditPerms} />
+              <div className="settings-form-grid" style={{ marginTop: 12 }}>
+                <label className="field field--checkbox">
+                  <input type="checkbox" checked={editAllowCashRounding} onChange={(event) => setEditAllowCashRounding(event.target.checked)} />
+                  <span>السماح بتقريب الدفع النقدي</span>
+                </label>
+                <label className="field">
+                  <span>حد الموظف (فارغ = الحد العام)</span>
+                  <input type="number" min="0" step="0.01" disabled={!editAllowCashRounding} value={editMaxCashRoundingDifference} onChange={(event) => setEditMaxCashRoundingDifference(event.target.value)} placeholder="مثال: 5.00" />
+                </label>
+              </div>
             </div>
           )}
           {account.role === 'manager' && (

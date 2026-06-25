@@ -18,6 +18,10 @@ import { printReceipt } from '@renderer/features/receipt/receipt-builder'
 import { orderReference } from '@shared/services/order-reference'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { getOpenShiftForCashier } from '@renderer/features/shifts/shift-service'
+import {
+  getCashRoundingAccess,
+  type CashRoundingAccess
+} from '@renderer/features/rounding/cash-rounding-service'
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -297,6 +301,14 @@ export function OrderHistoryPage(): React.ReactElement {
   const [splitModal, setSplitModal] = useState<Order | null>(null)
   const [splitCash, setSplitCash] = useState('')
   const [splitCard, setSplitCard] = useState('')
+  const [cashPaymentTarget, setCashPaymentTarget] = useState<Order | null>(null)
+  const [cashRoundedTotal, setCashRoundedTotal] = useState('')
+  const [cashRoundingReason, setCashRoundingReason] = useState('')
+  const [cashRoundingAccess, setCashRoundingAccess] = useState<CashRoundingAccess>({
+    enabled: false,
+    allowed: false,
+    maxDifference: 0
+  })
 
   // Edit order modal
   const [editModal, setEditModal] = useState<{ order: Order; items: OrderItem[] } | null>(null)
@@ -364,6 +376,50 @@ export function OrderHistoryPage(): React.ReactElement {
       printReceipt(paid, items, settings).catch(() => {})
     } catch (e) {
       showMsg(e instanceof Error ? e.message : 'فشل تسجيل الدفع', 'error')
+    }
+  }
+
+  async function openCashPayment(order: Order): Promise<void> {
+    setCashRoundingAccess(await getCashRoundingAccess(user))
+    setCashPaymentTarget(order)
+    setCashRoundedTotal('')
+    setCashRoundingReason('')
+  }
+
+  async function confirmCashPayment(): Promise<void> {
+    if (!cashPaymentTarget) return
+    const target = cashRoundedTotal.trim() ? Number(cashRoundedTotal) : cashPaymentTarget.total
+    const difference = Math.round((cashPaymentTarget.total - target) * 100) / 100
+    if (difference > 0) {
+      if (!cashRoundingAccess.allowed) {
+        showMsg(cashRoundingAccess.reason ?? 'غير مصرح باستخدام التقريب', 'error')
+        return
+      }
+      if (difference > cashRoundingAccess.maxDifference + 0.001) {
+        showMsg(`فرق التقريب يتجاوز الحد المسموح (${cashRoundingAccess.maxDifference.toFixed(2)})`, 'error')
+        return
+      }
+      if (!cashRoundingReason.trim()) {
+        showMsg('سبب التقريب مطلوب', 'error')
+        return
+      }
+    }
+    try {
+      const paid = await markOrderPaid({
+        orderId: cashPaymentTarget.id,
+        cashierId: user.id,
+        paymentMethod: 'cash',
+        roundedTotal: difference > 0 ? target : undefined,
+        roundingReason: difference > 0 ? cashRoundingReason.trim() : undefined
+      })
+      if (!paid) return
+      const [items, settings] = await Promise.all([getOrderItems(paid.id), getSettings()])
+      setCashPaymentTarget(null)
+      showMsg('تم تسجيل الدفع النقدي')
+      await load()
+      printReceipt(paid, items, settings).catch(() => {})
+    } catch (cause) {
+      showMsg(cause instanceof Error ? cause.message : 'فشل تسجيل الدفع', 'error')
     }
   }
 
@@ -596,7 +652,7 @@ export function OrderHistoryPage(): React.ReactElement {
                             <button
                               type="button"
                               className="btn btn--primary btn--sm"
-                              onClick={() => void handleMarkPaid(order, 'cash')}
+                              onClick={() => void openCashPayment(order)}
                             >
                               نقدي
                             </button>
@@ -789,6 +845,39 @@ export function OrderHistoryPage(): React.ReactElement {
               <button type="button" className="btn btn--secondary" onClick={() => setSplitModal(null)}>
                 إلغاء
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {cashPaymentTarget && (
+        <div className="modal-overlay" onClick={() => setCashPaymentTarget(null)}>
+          <div className="modal" style={{ maxWidth: 420 }} onClick={(event) => event.stopPropagation()}>
+            <div className="order-details__header">
+              <h2 className="order-details__title">دفع نقدي — #{orderReference(cashPaymentTarget)}</h2>
+              <button type="button" className="order-details__close" onClick={() => setCashPaymentTarget(null)}>×</button>
+            </div>
+            <p style={{ fontWeight: 800 }}>إجمالي الطلب: {cashPaymentTarget.total.toFixed(2)} {currency}</p>
+            {cashRoundingAccess.enabled && (
+              cashRoundingAccess.allowed ? (
+                <>
+                  <label className="field">
+                    <span>الإجمالي بعد التقريب</span>
+                    <input type="number" min="0" max={cashPaymentTarget.total} step="0.01" value={cashRoundedTotal} onChange={(event) => setCashRoundedTotal(event.target.value)} placeholder={cashPaymentTarget.total.toFixed(2)} />
+                  </label>
+                  {cashRoundedTotal && Number(cashRoundedTotal) < cashPaymentTarget.total && (
+                    <label className="field">
+                      <span>سبب التقريب</span>
+                      <input value={cashRoundingReason} onChange={(event) => setCashRoundingReason(event.target.value)} placeholder="مثال: تسوية فكة" />
+                    </label>
+                  )}
+                  <p className="modal-hint">الحد المسموح: {cashRoundingAccess.maxDifference.toFixed(2)}</p>
+                </>
+              ) : <p className="modal-hint">{cashRoundingAccess.reason}</p>
+            )}
+            <div className="modal-actions">
+              <button type="button" className="btn btn--primary" onClick={() => void confirmCashPayment()}>تأكيد الدفع</button>
+              <button type="button" className="btn btn--secondary" onClick={() => setCashPaymentTarget(null)}>إلغاء</button>
             </div>
           </div>
         </div>

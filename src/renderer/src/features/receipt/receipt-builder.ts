@@ -223,6 +223,9 @@ function renderTotals(order: Order, cur: string): string {
   if (order.deliveryFee && order.deliveryFee > 0) {
     rows.push(`<div><span>رسوم التوصيل</span><span>${fm(order.deliveryFee, cur)}</span></div>`)
   }
+  if (order.roundingDifference && order.roundingDifference > 0) {
+    rows.push(`<div><span>تسوية تقريب نقدي</span><span>- ${fm(order.roundingDifference, cur)}</span></div>`)
+  }
   rows.push(`<div class="grand-total"><strong>الإجمالي</strong><strong>${fm(order.total, cur)}</strong></div>`)
   return rows.join('')
 }

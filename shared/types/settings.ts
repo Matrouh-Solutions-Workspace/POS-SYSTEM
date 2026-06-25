@@ -20,6 +20,10 @@ export interface AppSettings {
   employeePerformanceTrackingEnabled?: boolean
   /** Earliest timestamp included in performance collection after enabling. */
   employeePerformanceTrackingStartedAt?: number
+  /** Allow controlled reductions to cash transaction totals. */
+  cashRoundingEnabled?: boolean
+  /** Global maximum amount that may be removed from a cash total. */
+  maxCashRoundingDifference?: number
   /**
    * Maximum discount % a cashier can apply without manager override.
    * undefined or 100 means no limit.

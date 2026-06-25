@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  AppSettings,
   DiningTable,
   DiscountType,
   MenuCategory,
@@ -28,7 +29,8 @@ import {
   orderSubtotal,
   orderTotal,
   computeDiscount,
-  computeTax
+  computeTax,
+  computeService
 } from '@shared/services/order-calculator'
 import { orderReference } from '@shared/services/order-reference'
 import {
@@ -39,6 +41,10 @@ import {
   type ShiftClosurePreview
 } from '@renderer/features/shifts/shift-service'
 import { FloorMapPicker } from './FloorMapPicker'
+import {
+  getCashRoundingAccess,
+  type CashRoundingAccess
+} from '@renderer/features/rounding/cash-rounding-service'
 
 // ── Local cart line type ──────────────────────────────────────────────────
 
@@ -374,6 +380,7 @@ function CloseShiftModal({
           <div className="stat-card"><div className="stat-card__label">مبيعات بطاقة</div><div className="stat-card__value">{preview.cardSales.toFixed(2)}</div></div>
           <div className="stat-card"><div className="stat-card__label">مرتجعات نقدية</div><div className="stat-card__value">{preview.cashRefunds.toFixed(2)}</div></div>
           <div className="stat-card"><div className="stat-card__label">تسويات الكاش</div><div className="stat-card__value">{preview.cashAdjustments.toFixed(2)}</div></div>
+          <div className="stat-card"><div className="stat-card__label">تسويات التقريب</div><div className="stat-card__value">{preview.roundingAdjustments.toFixed(2)}</div></div>
           <div className="stat-card"><div className="stat-card__label">الكاش المتوقع</div><div className="stat-card__value">{preview.expectedCash.toFixed(2)}</div></div>
         </div>
 
@@ -523,6 +530,14 @@ export function PosPage(): React.ReactElement {
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
   const [customerAddress, setCustomerAddress] = useState('')
+  const [posSettings, setPosSettings] = useState<AppSettings | null>(null)
+  const [roundingAccess, setRoundingAccess] = useState<CashRoundingAccess>({
+    enabled: false,
+    allowed: false,
+    maxDifference: 0
+  })
+  const [roundedTotal, setRoundedTotal] = useState('')
+  const [roundingReason, setRoundingReason] = useState('')
 
   // ── REQ-3: Hold / Park orders ────────────────────────────────────────
   const [heldOrders, setHeldOrders] = useState<HeldOrder[]>([])
@@ -593,19 +608,22 @@ export function PosPage(): React.ReactElement {
   // ── Load menu & tables ────────────────────────────────────────────────
 
   const load = useCallback(async () => {
-    const [cats, menu, stocks, diningTables, unpaid, settings] = await Promise.all([
+    const [cats, menu, stocks, diningTables, unpaid, settings, access] = await Promise.all([
       listCategories(),
       listMenuItems(true),
       getIngredientStocks(),
       listDiningTables(),
       listUnpaidDineInOrders(),
-      getSettings()
+      getSettings(),
+      getCashRoundingAccess(user)
     ])
     setCategories(cats.filter((c) => c.active))
     setItems(menu)
     setTables(diningTables)
     setUnpaidOrders(unpaid)
     setPosLogoUrl(settings.receiptLogoDataUrl || settings.receiptLogoProcessedDataUrl || '/image.png')
+    setPosSettings(settings)
+    setRoundingAccess(access)
     if (diningTables.length > 0) setSelectedTableId((prev) => prev || diningTables[0]!.id)
 
     const outOfStock = new Map<string, string>()
@@ -650,7 +668,7 @@ export function PosPage(): React.ReactElement {
     )
     setUnavailableItems(unavailable)
     setLowStockItems(lowItems)
-  }, [])
+  }, [user])
 
   useEffect(() => { void load() }, [load])
 
@@ -687,14 +705,27 @@ export function PosPage(): React.ReactElement {
     discountValue ? discountType : undefined,
     discountValue ? Number(discountValue) : undefined
   )
-  const taxAmt = computeTax(subtotal - discountAmt, 0) // actual tax rate applied at submit time
+  const taxAmt = computeTax(subtotal - discountAmt, posSettings?.taxRate ?? 0)
+  const serviceAmt = computeService(subtotal - discountAmt, posSettings?.serviceRate ?? 0)
   const deliveryFeeNum = orderType === 'delivery' ? (Number(deliveryFee) || 0) : 0
-  const total = orderTotal(subtotal, discountAmt, taxAmt, deliveryFeeNum)
+  const total = orderTotal(subtotal, discountAmt, taxAmt, deliveryFeeNum, serviceAmt)
+  const roundedTotalNum = roundedTotal.trim() === '' ? total : Number(roundedTotal)
+  const roundingDifference = Math.round((total - roundedTotalNum) * 100) / 100
+  const roundingApplied = checkoutMethod === 'cash' && roundedTotal.trim() !== '' && Math.abs(roundingDifference) >= 0.001
+  const roundingInvalid = roundingApplied && (
+    !roundingAccess.allowed ||
+    !Number.isFinite(roundedTotalNum) ||
+    roundedTotalNum < 0 ||
+    roundedTotalNum > total ||
+    roundingDifference > roundingAccess.maxDifference + 0.001 ||
+    !roundingReason.trim()
+  )
+  const checkoutTotal = roundingApplied && !roundingInvalid ? roundedTotalNum : total
 
   // REQ-1: change due when cash payment
   const cashReceivedNum = Number(cashReceived) || 0
-  const changeDue = checkoutMethod === 'cash' ? Math.max(0, cashReceivedNum - total) : 0
-  const cashInsufficient = checkoutMethod === 'cash' && cashReceived.trim() !== '' && cashReceivedNum < total
+  const changeDue = checkoutMethod === 'cash' ? Math.max(0, cashReceivedNum - checkoutTotal) : 0
+  const cashInsufficient = checkoutMethod === 'cash' && cashReceived.trim() !== '' && cashReceivedNum < checkoutTotal
 
   // REQ-6: discount over-limit check
   const isDiscountLimited = user.role === 'cashier' && maxDiscountPct != null && maxDiscountPct < 100
@@ -822,6 +853,8 @@ export function PosPage(): React.ReactElement {
     setCustomerName('')
     setCustomerPhone('')
     setCustomerAddress('')
+    setRoundedTotal('')
+    setRoundingReason('')
   }
 
   // ── REQ-2: Ensure shift open with opening cash prompt ─────────────────
@@ -885,8 +918,20 @@ export function PosPage(): React.ReactElement {
 
     // REQ-1 validation: cash received must cover the total
     if (checkoutMethod === 'cash') {
-      if (cashReceived.trim() !== '' && cashReceivedNum < total) {
+      if (cashReceived.trim() !== '' && cashReceivedNum < checkoutTotal) {
         setMessage('المبلغ المستلم أقل من الإجمالي')
+        return
+      }
+      if (roundingInvalid) {
+        setMessage(
+          !roundingAccess.allowed
+            ? (roundingAccess.reason ?? 'غير مصرح باستخدام التقريب')
+            : roundingDifference > roundingAccess.maxDifference
+              ? `فرق التقريب يتجاوز الحد المسموح (${roundingAccess.maxDifference.toFixed(2)})`
+              : !roundingReason.trim()
+                ? 'سبب التقريب مطلوب'
+                : 'قيمة التقريب غير صالحة'
+        )
         return
       }
     }
@@ -917,7 +962,9 @@ export function PosPage(): React.ReactElement {
         deliveryFee: orderType === 'delivery' ? Number(deliveryFee) || 0 : undefined,
         customerName: customerName || undefined,
         customerPhone: customerPhone || undefined,
-        customerAddress: customerAddress || undefined
+        customerAddress: customerAddress || undefined,
+        roundedTotal: roundingApplied ? roundedTotalNum : undefined,
+        roundingReason: roundingApplied ? roundingReason.trim() : undefined
       })
       const [orderItems, settings] = await Promise.all([getOrderItems(order.id), getSettings()])
       setCart([])
@@ -1036,7 +1083,11 @@ export function PosPage(): React.ReactElement {
       if (method) setCheckoutMethod(method)
       else if (orderType === 'delivery') setCheckoutMethod('cash')
       // REQ-6: load discount limit
-      void getSettings().then((s) => setMaxDiscountPct(s.maxCashierDiscountPct))
+      void Promise.all([getSettings(), getCashRoundingAccess(user)]).then(([settings, access]) => {
+        setMaxDiscountPct(settings.maxCashierDiscountPct)
+        setPosSettings(settings)
+        setRoundingAccess(access)
+      })
       setCheckoutOpen(true)
     }
     const ready = await ensureShiftOrPrompt(action)
@@ -1656,7 +1707,14 @@ export function PosPage(): React.ReactElement {
                       key={m}
                       type="button"
                       className={`order-type-toggle__btn${checkoutMethod === m ? ' order-type-toggle__btn--active' : ''}`}
-                      onClick={() => { setCheckoutMethod(m); setCashReceived('') }}
+                      onClick={() => {
+                        setCheckoutMethod(m)
+                        setCashReceived('')
+                        if (m !== 'cash') {
+                          setRoundedTotal('')
+                          setRoundingReason('')
+                        }
+                      }}
                     >
                       {m === 'cash' ? 'نقدي' : m === 'card' ? 'بطاقة' : 'تقسيم'}
                     </button>
@@ -1666,11 +1724,47 @@ export function PosPage(): React.ReactElement {
                 {/* REQ-1: Cash received + change calculator */}
                 {checkoutMethod === 'cash' && (
                   <div style={{ marginTop: 10 }}>
+                    {roundingAccess.enabled && (
+                      <div style={{ border: '1.5px solid var(--color-border-light)', borderRadius: 4, padding: 10, marginBottom: 10 }}>
+                        <div style={{ fontWeight: 800, marginBottom: 6 }}>تقريب الدفع النقدي</div>
+                        {roundingAccess.allowed ? (
+                          <div className="settings-form-grid">
+                            <label className="field">
+                              <span>الإجمالي بعد التقريب</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max={total}
+                                step="0.01"
+                                value={roundedTotal}
+                                onChange={(event) => setRoundedTotal(event.target.value)}
+                                placeholder={total.toFixed(2)}
+                              />
+                            </label>
+                            <label className="field">
+                              <span>السبب</span>
+                              <input
+                                value={roundingReason}
+                                onChange={(event) => setRoundingReason(event.target.value)}
+                                disabled={!roundingApplied}
+                                placeholder="مثال: تسوية فكة"
+                              />
+                            </label>
+                            <div className="settings-form-grid__full" style={{ fontSize: '0.82rem', color: roundingInvalid ? 'var(--color-danger)' : 'var(--color-muted)' }}>
+                              الحد المسموح: {roundingAccess.maxDifference.toFixed(2)}
+                              {roundingApplied && ` — الفرق: ${roundingDifference.toFixed(2)}`}
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="modal-hint" style={{ margin: 0 }}>{roundingAccess.reason}</p>
+                        )}
+                      </div>
+                    )}
                     <label className="field" style={{ margin: 0 }}>
                       <span>المبلغ المستلم من العميل</span>
                       <input
                         type="number"
-                        min={total}
+                        min={checkoutTotal}
                         step="0.01"
                         value={cashReceived}
                         onChange={(e) => setCashReceived(e.target.value)}
@@ -1838,6 +1932,21 @@ export function PosPage(): React.ReactElement {
                   <span>رسوم التوصيل</span><span>{deliveryFeeNum.toFixed(2)}</span>
                 </div>
               )}
+              {taxAmt > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                  <span>الضريبة</span><span>{taxAmt.toFixed(2)}</span>
+                </div>
+              )}
+              {serviceAmt > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                  <span>الخدمة</span><span>{serviceAmt.toFixed(2)}</span>
+                </div>
+              )}
+              {roundingApplied && !roundingInvalid && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--color-danger)' }}>
+                  <span>تسوية تقريب نقدي</span><span>- {roundingDifference.toFixed(2)}</span>
+                </div>
+              )}
               <div style={{
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -1848,7 +1957,7 @@ export function PosPage(): React.ReactElement {
                 paddingTop: 6
               }}>
                 <span>الإجمالي</span>
-                <span>{total.toFixed(2)}</span>
+                <span>{checkoutTotal.toFixed(2)}</span>
               </div>
             </div>
 
@@ -1858,7 +1967,7 @@ export function PosPage(): React.ReactElement {
               <button
                 type="button"
                 className="btn btn--primary"
-                disabled={loading || cashInsufficient || discountOverLimit}
+                disabled={loading || cashInsufficient || discountOverLimit || roundingInvalid}
                 onClick={() => void submitCheckout()}
               >
                 {loading ? 'جارٍ...' : 'تأكيد الطلب'}

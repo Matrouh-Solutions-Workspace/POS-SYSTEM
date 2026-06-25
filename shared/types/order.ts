@@ -28,6 +28,9 @@ export interface Order {
   serviceAmount?: number   // computed service amount stored for receipts
   deliveryFee?: number
   total: number            // subtotal - discountAmount + taxAmount + serviceAmount + deliveryFee
+  originalTotal?: number
+  roundingDifference?: number
+  roundingReason?: string
   noteAr?: string
   // Delivery customer info
   customerName?: string

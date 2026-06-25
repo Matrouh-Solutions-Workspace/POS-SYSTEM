@@ -4,6 +4,7 @@
 import type {
   AppSettings,
   AppUser,
+  CashRoundingTransaction,
   CashDrawerTransaction,
   InventoryTransaction,
   Order,
@@ -36,6 +37,7 @@ export interface ShiftSummary {
   cashDifference?: number
   cashRevenue: number
   cardRevenue: number
+  roundingAdjustments: number
   expenses: number
   itemSummary: Array<{
     key: string
@@ -60,6 +62,7 @@ export interface ShiftClosurePreview {
   cashRefunds: number
   cardRefunds: number
   cashAdjustments: number
+  roundingAdjustments: number
   expectedCash: number
   ordersCount: number
   totalSales: number
@@ -181,10 +184,11 @@ export async function ensureOpenShift(params: {
 }
 
 export async function getShiftClosurePreview(shift: Shift): Promise<ShiftClosurePreview> {
-  const [allOrders, payments, cashTransactions] = await Promise.all([
+  const [allOrders, payments, cashTransactions, roundingRecords] = await Promise.all([
     getCachedDocs<Order>(COLLECTIONS.orders),
     getCachedDocs<Payment>(COLLECTIONS.payments),
-    listCashDrawerTransactions()
+    listCashDrawerTransactions(),
+    getCachedDocs<CashRoundingTransaction>(COLLECTIONS.cashRoundingTransactions)
   ])
   const orders = allOrders.filter((order) => orderBelongsToShift(order, shift))
   const orderIds = new Set(orders.map((order) => order.id))
@@ -200,9 +204,14 @@ export async function getShiftClosurePreview(shift: Shift): Promise<ShiftClosure
     return paid + 0.01 < order.total
   })
   const shiftPayments = payments.filter((payment) => orderIds.has(payment.orderId))
-  const cashSales = shiftPayments
+  const netCashSales = shiftPayments
     .filter((payment) => payment.method === 'cash' && payment.amount > 0)
     .reduce((sum, payment) => sum + payment.amount, 0)
+  const roundingAmount = roundingRecords
+    .filter((record) => record.shiftId === shift.id)
+    .reduce((sum, record) => sum + record.differenceAmount, 0)
+  const cashSales = netCashSales + roundingAmount
+  const roundingAdjustments = -roundingAmount
   const cardSales = shiftPayments
     .filter((payment) => payment.method === 'card' && payment.amount > 0)
     .reduce((sum, payment) => sum + payment.amount, 0)
@@ -257,7 +266,8 @@ export async function getShiftClosurePreview(shift: Shift): Promise<ShiftClosure
     cashRefunds,
     cardRefunds,
     cashAdjustments,
-    expectedCash: openingCash + cashSales - cashRefunds + cashAdjustments,
+    roundingAdjustments,
+    expectedCash: openingCash + cashSales - cashRefunds + cashAdjustments + roundingAdjustments,
     ordersCount: completed.length,
     totalSales: completed.reduce((sum, order) => sum + order.total, 0) - refundAmount
   }
@@ -316,6 +326,7 @@ export async function closeShift(
     cardSales: closure.cardSales,
     refunds: closure.cashRefunds + closure.cardRefunds,
     cashAdjustments: closure.cashAdjustments,
+    roundingAdjustments: closure.roundingAdjustments,
     expectedCash: closure.expectedCash,
     actualCash: closingCash,
     difference: cashDifference ?? 0,
@@ -384,12 +395,13 @@ export async function getUnarchivedShiftCount(): Promise<number> {
 }
 
 export async function getShiftSummary(shift: Shift): Promise<ShiftSummary> {
-  const [allOrders, allOrderItems, inventoryTransactions, cashTransactions, ingredients] = await Promise.all([
+  const [allOrders, allOrderItems, inventoryTransactions, cashTransactions, ingredients, roundingRecords] = await Promise.all([
     listOrders(2000),
     getCachedDocs<OrderItem>(COLLECTIONS.orderItems),
     listInventoryTransactions(),
     listCashDrawerTransactions(),
-    listIngredients()
+    listIngredients(),
+    getCachedDocs<CashRoundingTransaction>(COLLECTIONS.cashRoundingTransactions)
   ])
 
   const orders = allOrders
@@ -455,6 +467,9 @@ export async function getShiftSummary(shift: Shift): Promise<ShiftSummary> {
   const cardRevenue = shiftPayments
     .filter((p) => p.method === 'card')
     .reduce((sum, p) => sum + p.amount, 0)
+  const roundingAdjustments = -roundingRecords
+    .filter((record) => record.shiftId === shift.id)
+    .reduce((sum, record) => sum + record.differenceAmount, 0)
 
   // Cash reconciliation
   const openingCash = shift.openingCash ?? 0
@@ -481,6 +496,7 @@ export async function getShiftSummary(shift: Shift): Promise<ShiftSummary> {
     cashDifference,
     cashRevenue,
     cardRevenue,
+    roundingAdjustments,
     expenses,
     itemSummary,
     suppliedInventory: suppliedInventory.map(withName),

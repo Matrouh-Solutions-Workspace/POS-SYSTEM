@@ -25,6 +25,10 @@ export interface AppUser {
   role: UserRole
   /** Explicit permissions — if set, overrides role defaults */
   permissions?: Permission[]
+  /** Explicit employee authorization to reduce cash totals through rounding. */
+  allowCashRounding?: boolean
+  /** Optional employee limit; the lower of this and the global limit applies. */
+  maxCashRoundingDifference?: number
   active: boolean
   pinHash?: string        // SHA-256 of the 4-digit PIN, undefined = no PIN set
   createdAt: number
@@ -37,6 +41,8 @@ export interface AppUserCreate {
   cashierCode?: string
   role: UserRole
   permissions: Permission[]
+  allowCashRounding?: boolean
+  maxCashRoundingDifference?: number
   password: string
 }
 

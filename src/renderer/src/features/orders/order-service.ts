@@ -4,7 +4,9 @@
  * All multi-table writes use dbBatch() for atomicity.
  */
 import type {
+  AppUser,
   CashDrawerTransaction,
+  CashRoundingTransaction,
   DiningTable,
   DiscountType,
   InventoryTransaction,
@@ -35,7 +37,7 @@ import { dbBatch, type DbBatchOp } from '@renderer/lib/db/sqlite-db'
 import { generateId } from '@renderer/lib/utils/id'
 import { actorAuditName, describePatch, type AuditActor } from '@renderer/features/audit/audit-service'
 import { getRecipe } from '../menu/menu-service'
-import { ensureOpenShift } from '../shifts/shift-service'
+import { ensureOpenShift, getOpenShiftForCashier } from '../shifts/shift-service'
 import { nextLocalShiftOrderReference } from '@renderer/lib/offline/order-number'
 
 // ---------------------------------------------------------------------------
@@ -55,6 +57,8 @@ export async function getSettings(): Promise<AppSettings> {
     defaultDeliveryFee: 0,
     shiftManagementEnabled: false,
     employeePerformanceTrackingEnabled: false,
+    cashRoundingEnabled: false,
+    maxCashRoundingDifference: 5,
     networkMode: 'standalone',
     masterServerPort: 47831,
     sideDisconnectPolicy: 'block_actions',
@@ -97,6 +101,8 @@ export async function updateSettings(
       | 'shiftManagementEnabled'
       | 'employeePerformanceTrackingEnabled'
       | 'employeePerformanceTrackingStartedAt'
+      | 'cashRoundingEnabled'
+      | 'maxCashRoundingDifference'
       | 'maxCashierDiscountPct'
       | 'keyboardShortcuts'
       | 'networkMode'
@@ -181,6 +187,8 @@ export async function completeOrder(params: {
   customerName?: string
   customerPhone?: string
   customerAddress?: string
+  roundedTotal?: number
+  roundingReason?: string
 }): Promise<Order> {
   const settings = await getSettings()
   const subtotal = orderSubtotal(params.lines)
@@ -193,7 +201,9 @@ export async function completeOrder(params: {
   const taxAmount = computeTax(afterDiscount, taxRate)
   const serviceRate = settings.serviceRate ?? 0
   const serviceAmount = computeService(afterDiscount, serviceRate)
-  const total = orderTotal(subtotal, discountAmount, taxAmount, deliveryFee, serviceAmount)
+  const originalTotal = orderTotal(subtotal, discountAmount, taxAmount, deliveryFee, serviceAmount)
+  let total = originalTotal
+  let roundingDifference = 0
 
   if (orderType === 'takeaway' && !params.paymentMethod) {
     throw new Error('Payment method is required for takeaway orders')
@@ -207,6 +217,19 @@ export async function completeOrder(params: {
     cashierName: params.cashierName,
     cashierCode: params.cashierCode
   })
+  let roundingRecord: CashRoundingTransaction | null = null
+  if (params.roundedTotal != null && Math.abs(params.roundedTotal - originalTotal) >= 0.001) {
+    if (orderType !== 'takeaway' || params.paymentMethod !== 'cash') {
+      throw new Error('تقريب الإجمالي متاح للدفع النقدي الكامل فقط')
+    }
+    const cashier = await getCachedDoc<AppUser>(COLLECTIONS.users, params.cashierId)
+    if (!cashier) throw new Error('تعذر التحقق من صلاحية التقريب')
+    const { getCashRoundingAccess, validateCashRounding } = await import('../rounding/cash-rounding-service')
+    const access = await getCashRoundingAccess(cashier)
+    roundingDifference = validateCashRounding(originalTotal, params.roundedTotal, access)
+    if (!params.roundingReason?.trim()) throw new Error('سبب التقريب مطلوب')
+    total = Math.round(params.roundedTotal * 100) / 100
+  }
 
   const existingOrders = (await getCachedDocs<Order>(COLLECTIONS.orders)).filter(
     (o) => o.shiftId === shift.id
@@ -247,6 +270,9 @@ export async function completeOrder(params: {
     serviceAmount: serviceAmount > 0 ? serviceAmount : undefined,
     deliveryFee: deliveryFee > 0 ? deliveryFee : undefined,
     total,
+    originalTotal: roundingDifference > 0 ? originalTotal : undefined,
+    roundingDifference: roundingDifference > 0 ? roundingDifference : undefined,
+    roundingReason: roundingDifference > 0 ? params.roundingReason?.trim() : undefined,
     noteAr: params.orderNoteAr,
     customerName: params.customerName,
     customerPhone: params.customerPhone,
@@ -271,6 +297,25 @@ export async function completeOrder(params: {
     lineTotal: lineTotal(line.unitPrice, line.quantity),
     noteAr: line.noteAr
   }))
+  if (roundingDifference > 0) {
+    const network = await window.electronAPI.getNetworkStatus().catch(() => null) as {
+      mode?: string
+      side?: { deviceName?: string }
+    } | null
+    roundingRecord = {
+      id: generateId(),
+      orderId,
+      shiftId: shift.id,
+      userId: params.cashierId,
+      username: params.cashierName,
+      deviceId: network?.side?.deviceName?.trim() || (network?.mode === 'side' ? 'Side POS' : 'Master POS'),
+      originalAmount: originalTotal,
+      finalAmount: total,
+      differenceAmount: roundingDifference,
+      reason: params.roundingReason!.trim(),
+      createdAt: now
+    }
+  }
 
   // Build payments (supports split)
   const payments: Payment[] = []
@@ -311,7 +356,13 @@ export async function completeOrder(params: {
     ...orderItems.map((oi) => ({ collection: COLLECTIONS.orderItems, id: oi.id, data: oi, op: 'set' as const })),
     ...payments.map((p) => ({ collection: COLLECTIONS.payments, id: p.id, data: p, op: 'set' as const })),
     ...inventoryTransactions.map((t) => ({ collection: COLLECTIONS.inventoryTransactions, id: t.id, data: t, op: 'set' as const })),
-    ...drawerTransactions.map((d) => ({ collection: COLLECTIONS.cashDrawerTransactions, id: d.id, data: d, op: 'set' as const }))
+    ...drawerTransactions.map((d) => ({ collection: COLLECTIONS.cashDrawerTransactions, id: d.id, data: d, op: 'set' as const })),
+    ...(roundingRecord ? [{
+      collection: COLLECTIONS.cashRoundingTransactions,
+      id: roundingRecord.id,
+      data: roundingRecord,
+      op: 'set' as const
+    }] : [])
   ]
   await dbBatch(batchOps)
 
@@ -336,6 +387,18 @@ export async function completeOrder(params: {
         targetId: orderId,
         targetType: 'order',
         detailAr: `خصم ${params.discountType === 'percent' ? `${params.discountValue}%` : `${discountAmount.toFixed(2)} ثابت`} على طلب — إجمالي: ${total.toFixed(2)}`
+      })
+    )
+  }
+  if (roundingRecord) {
+    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+      logAudit({
+        action: 'cash_rounding_applied',
+        actorId: params.cashierId,
+        actorName: params.cashierName,
+        targetId: orderId,
+        targetType: 'order',
+        detailAr: `تقريب نقدي لطلب #${order.orderCode ?? order.orderNumber}: من ${originalTotal.toFixed(2)} إلى ${total.toFixed(2)} — ${roundingRecord.reason}`
       })
     )
   }
@@ -434,15 +497,53 @@ export async function markOrderPaid(params: {
   paymentMethod: 'cash' | 'card' | 'split'
   cashPaid?: number
   cardPaid?: number
+  roundedTotal?: number
+  roundingReason?: string
 }): Promise<Order | null> {
   const order = await getCachedDoc<Order>(COLLECTIONS.orders, params.orderId)
   if (!order || order.status === 'cancelled') return null
 
   const now = Date.now()
+  const originalTotal = order.total
+  let finalTotal = originalTotal
+  let roundingRecord: CashRoundingTransaction | null = null
+  if (params.roundedTotal != null && Math.abs(params.roundedTotal - originalTotal) >= 0.001) {
+    if (params.paymentMethod !== 'cash') throw new Error('تقريب الإجمالي متاح للدفع النقدي الكامل فقط')
+    const cashier = await getCachedDoc<AppUser>(COLLECTIONS.users, params.cashierId)
+    if (!cashier) throw new Error('تعذر التحقق من صلاحية التقريب')
+    const { getCashRoundingAccess, validateCashRounding } = await import('../rounding/cash-rounding-service')
+    const access = await getCashRoundingAccess(cashier)
+    const difference = validateCashRounding(originalTotal, params.roundedTotal, access)
+    if (!params.roundingReason?.trim()) throw new Error('سبب التقريب مطلوب')
+    finalTotal = Math.round(params.roundedTotal * 100) / 100
+    const network = await window.electronAPI.getNetworkStatus().catch(() => null) as {
+      mode?: string
+      side?: { deviceName?: string }
+    } | null
+    const shiftId = order.shiftId ?? (await getOpenShiftForCashier(params.cashierId))?.id
+    if (!shiftId) throw new Error('لا يوجد شيفت مفتوح لتسجيل التقريب')
+    roundingRecord = {
+      id: generateId(),
+      orderId: order.id,
+      shiftId,
+      userId: params.cashierId,
+      username: cashier.username,
+      deviceId: network?.side?.deviceName?.trim() || (network?.mode === 'side' ? 'Side POS' : 'Master POS'),
+      originalAmount: originalTotal,
+      finalAmount: finalTotal,
+      differenceAmount: difference,
+      reason: params.roundingReason.trim(),
+      createdAt: now
+    }
+  }
   const paidOrder: Order = {
     ...order,
     status: 'completed',
     paymentStatus: params.paymentMethod === 'split' ? 'split' : 'paid',
+    total: finalTotal,
+    originalTotal: roundingRecord ? originalTotal : order.originalTotal,
+    roundingDifference: roundingRecord ? roundingRecord.differenceAmount : order.roundingDifference,
+    roundingReason: roundingRecord ? roundingRecord.reason : order.roundingReason,
     paidAt: now,
     completedAt: now,
     updatedAt: now
@@ -455,7 +556,7 @@ export async function markOrderPaid(params: {
     if (cashAmt > 0) payments.push({ id: generateId(), orderId: order.id, amount: cashAmt, method: 'cash', createdAt: now })
     if (cardAmt > 0) payments.push({ id: generateId(), orderId: order.id, amount: cardAmt, method: 'card', createdAt: now })
   } else {
-    payments.push({ id: generateId(), orderId: order.id, amount: order.total, method: params.paymentMethod, createdAt: now })
+    payments.push({ id: generateId(), orderId: order.id, amount: finalTotal, method: params.paymentMethod, createdAt: now })
   }
 
   const drawerTransactions: CashDrawerTransaction[] = payments
@@ -474,7 +575,13 @@ export async function markOrderPaid(params: {
   await dbBatch([
     { collection: COLLECTIONS.orders, id: paidOrder.id, data: paidOrder, op: 'set' },
     ...payments.map((p) => ({ collection: COLLECTIONS.payments, id: p.id, data: p, op: 'set' as const })),
-    ...drawerTransactions.map((d) => ({ collection: COLLECTIONS.cashDrawerTransactions, id: d.id, data: d, op: 'set' as const }))
+    ...drawerTransactions.map((d) => ({ collection: COLLECTIONS.cashDrawerTransactions, id: d.id, data: d, op: 'set' as const })),
+    ...(roundingRecord ? [{
+      collection: COLLECTIONS.cashRoundingTransactions,
+      id: roundingRecord.id,
+      data: roundingRecord,
+      op: 'set' as const
+    }] : [])
   ])
   void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
     logAudit({
@@ -483,9 +590,21 @@ export async function markOrderPaid(params: {
       actorName: order.cashierName,
       targetId: order.id,
       targetType: 'order',
-      detailAr: `تحصيل طلب #${order.orderCode ?? order.orderNumber} — ${order.total.toFixed(2)}`
+      detailAr: `تحصيل طلب #${order.orderCode ?? order.orderNumber} — ${paidOrder.total.toFixed(2)}`
     })
   )
+  if (roundingRecord) {
+    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+      logAudit({
+        action: 'cash_rounding_applied',
+        actorId: params.cashierId,
+        actorName: roundingRecord.username,
+        targetId: order.id,
+        targetType: 'order',
+        detailAr: `تقريب نقدي لطلب #${order.orderCode ?? order.orderNumber}: من ${originalTotal.toFixed(2)} إلى ${finalTotal.toFixed(2)} — ${roundingRecord.reason}`
+      })
+    )
+  }
   return paidOrder
 }
 
@@ -628,7 +747,7 @@ export async function cancelOrder(params: {
     amount: -payment.amount,
     method: payment.method,
     createdAt: now
-    }))
+  }))
   const cashToReverse = orderPayments
     .filter((payment) => payment.method === 'cash')
     .reduce((sum, payment) => sum + payment.amount, 0)
@@ -792,7 +911,9 @@ export async function refundOrder(params: {
   const refundDiscountAmt = Math.round((original.discountAmount ?? 0) * ratio * 100) / 100
   const refundTaxAmt = Math.round((original.taxAmount ?? 0) * ratio * 100) / 100
   const refundServiceAmt = Math.round((original.serviceAmount ?? 0) * ratio * 100) / 100
-  const refundAmount = Math.round((refundSubtotal - refundDiscountAmt + refundTaxAmt + refundServiceAmt) * 100) / 100
+  const refundBeforeRounding = Math.round((refundSubtotal - refundDiscountAmt + refundTaxAmt + refundServiceAmt) * 100) / 100
+  const refundRoundingShare = Math.round((original.roundingDifference ?? 0) * ratio * 100) / 100
+  const refundAmount = Math.max(0, Math.round((refundBeforeRounding - refundRoundingShare) * 100) / 100)
 
   const now = Date.now()
   const refundId = generateId()

@@ -35,7 +35,8 @@ const ACTIVITY_LABELS: Record<string, string> = {
   inventory_waste: 'تسجيل هدر',
   inventory_adjustment: 'تسوية مخزون',
   cash_in: 'إضافة نقدية',
-  cash_out: 'سحب نقدي'
+  cash_out: 'سحب نقدي',
+  cash_rounding_applied: 'تقريب دفع نقدي'
 }
 
 function minutesLabel(value: number): string {
@@ -221,9 +222,9 @@ export function EmployeePerformanceManagement(): React.ReactElement {
 
           {tab === 'closures' && (
             <table className="data-table">
-              <thead><tr><th>المستخدم</th><th>الافتتاح</th><th>كاش</th><th>بطاقة</th><th>مرتجعات</th><th>تسويات</th><th>المتوقع</th><th>الفعلي</th><th>الفرق</th><th>السبب</th><th>الاعتماد</th><th>التاريخ</th></tr></thead>
+              <thead><tr><th>المستخدم</th><th>الافتتاح</th><th>كاش</th><th>بطاقة</th><th>مرتجعات</th><th>تسويات</th><th>تقريب</th><th>المتوقع</th><th>الفعلي</th><th>الفرق</th><th>السبب</th><th>الاعتماد</th><th>التاريخ</th></tr></thead>
               <tbody>
-                {closures.length === 0 ? <tr><td colSpan={12}>لا توجد سجلات إغلاق في الفترة المحددة.</td></tr> : closures.map((record) => (
+                {closures.length === 0 ? <tr><td colSpan={13}>لا توجد سجلات إغلاق في الفترة المحددة.</td></tr> : closures.map((record) => (
                   <tr key={record.id}>
                     <td>{userMap.get(record.userId)?.username ?? record.userId}</td>
                     <td>{record.openingCash.toFixed(2)}</td>
@@ -231,6 +232,7 @@ export function EmployeePerformanceManagement(): React.ReactElement {
                     <td>{record.cardSales.toFixed(2)}</td>
                     <td>{record.refunds.toFixed(2)}</td>
                     <td>{record.cashAdjustments.toFixed(2)}</td>
+                    <td>{(record.roundingAdjustments ?? 0).toFixed(2)}</td>
                     <td>{record.expectedCash.toFixed(2)}</td>
                     <td>{record.actualCash.toFixed(2)}</td>
                     <td>{record.difference.toFixed(2)}</td>
@@ -244,6 +246,7 @@ export function EmployeePerformanceManagement(): React.ReactElement {
               </tbody>
             </table>
           )}
+
         </>
       )}
     </section>

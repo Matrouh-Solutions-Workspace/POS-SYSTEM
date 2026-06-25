@@ -18,6 +18,7 @@ export const COLLECTIONS = {
   employeeActivityLogs: 'employee_activity_logs',
   employeePerformanceDaily: 'employee_performance_daily',
   shiftClosureRecords: 'shift_closure_records',
+  cashRoundingTransactions: 'cash_rounding_transactions',
   cashDrawerTransactions: 'cash_drawer_transactions',
   suppliers: 'suppliers',
   supplierTransactions: 'supplier_transactions',

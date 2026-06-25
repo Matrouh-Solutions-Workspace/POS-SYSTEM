@@ -44,6 +44,7 @@ export interface ShiftClosureRecord {
   cardSales: number
   refunds: number
   cashAdjustments: number
+  roundingAdjustments?: number
   expectedCash: number
   actualCash: number
   difference: number
@@ -55,4 +56,18 @@ export interface ShiftClosureRecord {
   closedAt: number
   createdAt: number
   updatedAt: number
+}
+
+export interface CashRoundingTransaction {
+  id: string
+  orderId: string
+  shiftId: string
+  userId: string
+  username: string
+  deviceId: string
+  originalAmount: number
+  finalAmount: number
+  differenceAmount: number
+  reason: string
+  createdAt: number
 }

@@ -28,6 +28,7 @@ export type AuditAction =
   | 'shift_assignment_deleted'
   | 'overtime_recorded'
   | 'shift_difference_approved'
+  | 'cash_rounding_applied'
   | 'cash_in'
   | 'cash_out'
   | 'menu_category_created'

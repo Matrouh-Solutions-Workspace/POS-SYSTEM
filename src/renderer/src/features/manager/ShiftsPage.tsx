@@ -13,6 +13,7 @@ import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { MdArchive, MdLock, MdPrint, MdRefresh, MdUnarchive } from 'react-icons/md'
 import { WorkShiftManagement } from './WorkShiftManagement'
 import { EmployeePerformanceManagement } from './EmployeePerformanceManagement'
+import { CashRoundingReport } from './CashRoundingReport'
 
 type ShiftViewMode = 'active' | 'archived'
 
@@ -54,6 +55,7 @@ function buildShiftReceiptHtml(summary: ShiftSummary, currency: string): string 
       <div class="line"><span>النهاية</span><span>${summary.shift.closedAt ? new Date(summary.shift.closedAt).toLocaleString('ar-EG') : '-'}</span></div>
       <div class="line"><span>المتوقع في الدرج</span><span>${summary.expectedCash.toFixed(2)} ${currency}</span></div>
       <div class="line"><span>دخل البطاقة المتوقع</span><span>${summary.cardRevenue.toFixed(2)} ${currency}</span></div>
+      <div class="line"><span>تسويات التقريب</span><span>${summary.roundingAdjustments.toFixed(2)} ${currency}</span></div>
       <div class="line total"><span>إجمالي الإيراد</span><span>${summary.revenue.toFixed(2)} ${currency}</span></div>
       <hr />
       <div class="line"><span>صالة</span><span>${typeCounts.dine_in}</span></div>
@@ -139,6 +141,7 @@ export function ShiftsPage(): React.ReactElement {
     <div className="shifts-page">
       <WorkShiftManagement />
       <EmployeePerformanceManagement />
+      <CashRoundingReport />
       {message && <p className="form-message form-message--ok">{message}</p>}
       <div className="card">
         <div className="reports-filter__options" style={{ marginBottom: 12 }}>
@@ -229,6 +232,7 @@ export function ShiftsPage(): React.ReactElement {
             <div className="stat-card"><div className="stat-card__label">فلوس الدرج الكلي</div><div className="stat-card__value">{selected.drawerTotal.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">إيراد نقدي</div><div className="stat-card__value">{selected.cashRevenue.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">إيراد بطاقة</div><div className="stat-card__value">{selected.cardRevenue.toFixed(2)}</div></div>
+            <div className="stat-card"><div className="stat-card__label">تسويات التقريب</div><div className="stat-card__value">{selected.roundingAdjustments.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">المصروفات</div><div className="stat-card__value">{selected.expenses.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">كل الطلبات</div><div className="stat-card__value">{selected.orders.length}</div></div>
             <div className="stat-card"><div className="stat-card__label">طلبات مكتملة</div><div className="stat-card__value">{selected.completedOrders.length}</div></div>

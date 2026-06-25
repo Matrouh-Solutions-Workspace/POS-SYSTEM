@@ -243,6 +243,12 @@ export async function createAccount(
   _createdByManagerId: string
 ): Promise<AppUser> {
   const username = normalizeUsername(data.username)
+  if (
+    data.maxCashRoundingDifference != null &&
+    (!Number.isFinite(data.maxCashRoundingDifference) || data.maxCashRoundingDifference < 0)
+  ) {
+    throw new Error('حد تقريب النقدي غير صالح')
+  }
   const existing = await getCachedDocs<AppUser>(COLLECTIONS.users)
 
   // Check cashier code uniqueness locally
@@ -264,6 +270,8 @@ export async function createAccount(
     cashierCode: data.cashierCode?.toUpperCase(),
     role: data.role,
     permissions: data.permissions,
+    allowCashRounding: data.allowCashRounding ?? false,
+    maxCashRoundingDifference: data.maxCashRoundingDifference,
     active: true,
     createdAt: now,
     updatedAt: now
@@ -309,11 +317,17 @@ export async function updateUserActive(userId: string, active: boolean, actorId 
 
 export async function updateUserProfile(
   userId: string,
-  patch: Partial<Pick<AppUser, 'displayName' | 'username' | 'pinHash' | 'cashierCode' | 'role' | 'permissions'>>,
+  patch: Partial<Pick<AppUser, 'displayName' | 'username' | 'pinHash' | 'cashierCode' | 'role' | 'permissions' | 'allowCashRounding' | 'maxCashRoundingDifference'>>,
   actor?: AuditActor
 ): Promise<void> {
   const cached = await getCachedDoc<AppUser>(COLLECTIONS.users, userId)
   if (!cached) return
+  if (
+    patch.maxCashRoundingDifference != null &&
+    (!Number.isFinite(patch.maxCashRoundingDifference) || patch.maxCashRoundingDifference < 0)
+  ) {
+    throw new Error('حد تقريب النقدي غير صالح')
+  }
   const normalizedPatch = {
     ...patch,
     cashierCode: patch.cashierCode?.toUpperCase()

@@ -1200,7 +1200,7 @@ export function SettingsPage(): React.ReactElement {
   const [cashiers, setCashiers] = useState<AppUser[]>([])
 
   // ── Receipt ─────────────────────────────────────────────────────────────
-  const [receiptForm, setReceiptForm] = useState({ restaurantNameAr: '', currencySymbol: '', phoneNumber: '', receiptFooterAr: '', taxRate: '', serviceRate: '', defaultDeliveryFee: '', maxCashierDiscountPct: '' })
+  const [receiptForm, setReceiptForm] = useState({ restaurantNameAr: '', currencySymbol: '', phoneNumber: '', receiptFooterAr: '', taxRate: '', serviceRate: '', defaultDeliveryFee: '', maxCashierDiscountPct: '', cashRoundingEnabled: false, maxCashRoundingDifference: '5' })
   const [receiptSaving, setReceiptSaving] = useState(false)
   const [receiptMsg, setReceiptMsg] = useState<string | null>(null)
 
@@ -1250,7 +1250,9 @@ export function SettingsPage(): React.ReactElement {
         taxRate: s.taxRate != null && s.taxRate > 0 ? String(s.taxRate) : '',
         serviceRate: s.serviceRate != null && s.serviceRate > 0 ? String(s.serviceRate) : '',
         defaultDeliveryFee: s.defaultDeliveryFee != null && s.defaultDeliveryFee > 0 ? String(s.defaultDeliveryFee) : '',
-        maxCashierDiscountPct: s.maxCashierDiscountPct != null && s.maxCashierDiscountPct < 100 ? String(s.maxCashierDiscountPct) : ''
+        maxCashierDiscountPct: s.maxCashierDiscountPct != null && s.maxCashierDiscountPct < 100 ? String(s.maxCashierDiscountPct) : '',
+        cashRoundingEnabled: s.cashRoundingEnabled === true,
+        maxCashRoundingDifference: String(s.maxCashRoundingDifference ?? 5)
       })
       const color = s.primaryColor ?? DEFAULT_PRIMARY
       setSelectedColor(color)
@@ -1298,7 +1300,9 @@ export function SettingsPage(): React.ReactElement {
         taxRate: receiptForm.taxRate ? Number(receiptForm.taxRate) : 0,
         serviceRate: receiptForm.serviceRate ? Number(receiptForm.serviceRate) : 0,
         defaultDeliveryFee: receiptForm.defaultDeliveryFee ? Number(receiptForm.defaultDeliveryFee) : 0,
-        maxCashierDiscountPct: receiptForm.maxCashierDiscountPct ? Number(receiptForm.maxCashierDiscountPct) : undefined
+        maxCashierDiscountPct: receiptForm.maxCashierDiscountPct ? Number(receiptForm.maxCashierDiscountPct) : undefined,
+        cashRoundingEnabled: receiptForm.cashRoundingEnabled,
+        maxCashRoundingDifference: Math.max(0, Number(receiptForm.maxCashRoundingDifference) || 0)
       }
       await updateSettings(patch, user)
       setSettings((current) => current ? { ...current, ...patch, updatedAt: Date.now() } : current)
@@ -1571,6 +1575,14 @@ export function SettingsPage(): React.ReactElement {
                 <label className="field">
                   <span>الحد الأقصى لخصم الكاشير % (فارغ = بدون حد)</span>
                   <input type="number" min="0" max="100" step="1" value={receiptForm.maxCashierDiscountPct} onChange={(e) => setReceiptForm((f) => ({ ...f, maxCashierDiscountPct: e.target.value }))} placeholder="مثال: 20" />
+                </label>
+                <label className="field field--checkbox">
+                  <input type="checkbox" checked={receiptForm.cashRoundingEnabled} onChange={(event) => setReceiptForm((form) => ({ ...form, cashRoundingEnabled: event.target.checked }))} />
+                  <span>تفعيل تقريب الدفع النقدي</span>
+                </label>
+                <label className="field">
+                  <span>أقصى فرق تقريب مسموح</span>
+                  <input type="number" min="0" step="0.01" disabled={!receiptForm.cashRoundingEnabled} value={receiptForm.maxCashRoundingDifference} onChange={(event) => setReceiptForm((form) => ({ ...form, maxCashRoundingDifference: event.target.value }))} placeholder="5.00" />
                 </label>
               </div>
               <div className="form-actions">
