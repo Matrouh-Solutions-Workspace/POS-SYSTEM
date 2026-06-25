@@ -9,6 +9,7 @@ import type {
   CashRoundingTransaction,
   DiningTable,
   DiscountType,
+  InventoryBatch,
   InventoryTransaction,
   MenuItem,
   Order,
@@ -39,6 +40,7 @@ import { actorAuditName, describePatch, type AuditActor } from '@renderer/featur
 import { getRecipe } from '../menu/menu-service'
 import { ensureOpenShift, getOpenShiftForCashier } from '../shifts/shift-service'
 import { nextLocalShiftOrderReference } from '@renderer/lib/offline/order-number'
+import { planFifoConsumption, planFifoReversal } from '../inventory/fifo-service'
 
 // ---------------------------------------------------------------------------
 // Settings
@@ -181,6 +183,7 @@ export async function completeOrder(params: {
   paymentMethod?: 'cash' | 'card' | 'split'
   cashPaid?: number    // for split payment
   cardPaid?: number    // for split payment
+  cashReceived?: number
   discountType?: DiscountType
   discountValue?: number
   deliveryFee?: number
@@ -245,6 +248,15 @@ export async function completeOrder(params: {
   const now = Date.now()
   const orderId = generateId()
   const isPaid = orderType === 'takeaway'
+  const cashReceived = params.paymentMethod === 'cash'
+    ? Math.round((params.cashReceived ?? total) * 100) / 100
+    : undefined
+  if (isPaid && params.paymentMethod === 'cash' && cashReceived! < total) {
+    throw new Error('المبلغ المستلم أقل من إجمالي الطلب')
+  }
+  const cashChange = cashReceived == null
+    ? undefined
+    : Math.max(0, Math.round((cashReceived - total) * 100) / 100)
 
   const order: Order = {
     id: orderId,
@@ -273,6 +285,8 @@ export async function completeOrder(params: {
     originalTotal: roundingDifference > 0 ? originalTotal : undefined,
     roundingDifference: roundingDifference > 0 ? roundingDifference : undefined,
     roundingReason: roundingDifference > 0 ? params.roundingReason?.trim() : undefined,
+    cashPaidAmount: cashReceived,
+    cashChangeAmount: cashChange,
     noteAr: params.orderNoteAr,
     customerName: params.customerName,
     customerPhone: params.customerPhone,
@@ -318,19 +332,36 @@ export async function completeOrder(params: {
   }
 
   // Build payments (supports split)
+  const paymentNetwork = await window.electronAPI.getNetworkStatus().catch(() => null) as {
+    mode?: string
+    side?: { deviceName?: string }
+  } | null
+  const paymentDeviceId = paymentNetwork?.side?.deviceName?.trim() ||
+    (paymentNetwork?.mode === 'side' ? 'Side POS' : 'Master POS')
   const payments: Payment[] = []
   if (isPaid && params.paymentMethod) {
     if (params.paymentMethod === 'split') {
       const cashAmt = Math.round((params.cashPaid ?? 0) * 100) / 100
       const cardAmt = Math.round((params.cardPaid ?? 0) * 100) / 100
-      if (cashAmt > 0) payments.push({ id: generateId(), orderId, amount: cashAmt, method: 'cash', createdAt: now })
-      if (cardAmt > 0) payments.push({ id: generateId(), orderId, amount: cardAmt, method: 'card', createdAt: now })
+      if (cashAmt > 0) payments.push({ id: generateId(), orderId, amount: cashAmt, paidAmount: cashAmt, changeAmount: 0, employeeId: params.cashierId, shiftId: shift.id, deviceId: paymentDeviceId, method: 'cash', createdAt: now })
+      if (cardAmt > 0) payments.push({ id: generateId(), orderId, amount: cardAmt, paidAmount: cardAmt, changeAmount: 0, employeeId: params.cashierId, shiftId: shift.id, deviceId: paymentDeviceId, method: 'card', createdAt: now })
     } else {
-      payments.push({ id: generateId(), orderId, amount: total, method: params.paymentMethod as 'cash' | 'card', createdAt: now })
+      payments.push({
+        id: generateId(),
+        orderId,
+        amount: total,
+        paidAmount: params.paymentMethod === 'cash' ? cashReceived : total,
+        changeAmount: params.paymentMethod === 'cash' ? cashChange : 0,
+        employeeId: params.cashierId,
+        shiftId: shift.id,
+        deviceId: paymentDeviceId,
+        method: params.paymentMethod as 'cash' | 'card',
+        createdAt: now
+      })
     }
   }
 
-  const inventoryTransactions = await buildInventoryTransactions(
+  const inventoryPlan = await buildFifoInventoryTransactions(
     orderId, orderItems, params.cashierId, now, shift.id
   )
 
@@ -355,7 +386,8 @@ export async function completeOrder(params: {
     { collection: COLLECTIONS.orders, id: order.id, data: order, op: 'set' },
     ...orderItems.map((oi) => ({ collection: COLLECTIONS.orderItems, id: oi.id, data: oi, op: 'set' as const })),
     ...payments.map((p) => ({ collection: COLLECTIONS.payments, id: p.id, data: p, op: 'set' as const })),
-    ...inventoryTransactions.map((t) => ({ collection: COLLECTIONS.inventoryTransactions, id: t.id, data: t, op: 'set' as const })),
+    ...inventoryPlan.transactions.map((t) => ({ collection: COLLECTIONS.inventoryTransactions, id: t.id, data: t, op: 'set' as const })),
+    ...inventoryPlan.batches.map((batch) => ({ collection: COLLECTIONS.inventoryBatches, id: batch.id, data: batch, op: 'set' as const })),
     ...drawerTransactions.map((d) => ({ collection: COLLECTIONS.cashDrawerTransactions, id: d.id, data: d, op: 'set' as const })),
     ...(roundingRecord ? [{
       collection: COLLECTIONS.cashRoundingTransactions,
@@ -406,35 +438,40 @@ export async function completeOrder(params: {
   return order
 }
 
-async function buildInventoryTransactions(
+async function buildFifoInventoryTransactions(
   orderId: string,
   items: OrderItem[],
   createdBy: string,
   createdAt: number,
   shiftId?: string
-): Promise<InventoryTransaction[]> {
-  const transactions: InventoryTransaction[] = []
+): Promise<{ transactions: InventoryTransaction[]; batches: InventoryBatch[] }> {
+  const deductions: Array<{
+    ingredientId: string
+    quantity: number
+    unit: string
+    orderItemId: string
+    menuItemId: string
+  }> = []
   for (const item of items) {
     const lines = await buildInventoryLinesForOrderItem(item)
     for (const line of lines) {
-      transactions.push({
-        id: generateId(),
+      deductions.push({
         ingredientId: line.ingredientId,
         orderItemId: item.id,
         menuItemId: item.menuItemId,
-        type: 'sale' as const,
         quantity: line.quantity,
-        unit: line.unit,
-        referenceType: 'order' as const,
-        referenceId: orderId,
-        shiftId,
-        noteAr: 'خصم تلقائي من الطلب',
-        createdBy,
-        createdAt
+        unit: line.unit
       })
     }
   }
-  return transactions
+  return planFifoConsumption({
+    lines: deductions,
+    referenceId: orderId,
+    createdBy,
+    createdAt,
+    shiftId,
+    noteAr: 'خصم تلقائي من الطلب'
+  })
 }
 
 function stockQuantityForOrderItem(item: OrderItem, stockUnit: string): number {
@@ -497,6 +534,7 @@ export async function markOrderPaid(params: {
   paymentMethod: 'cash' | 'card' | 'split'
   cashPaid?: number
   cardPaid?: number
+  cashReceived?: number
   roundedTotal?: number
   roundingReason?: string
 }): Promise<Order | null> {
@@ -544,19 +582,45 @@ export async function markOrderPaid(params: {
     originalTotal: roundingRecord ? originalTotal : order.originalTotal,
     roundingDifference: roundingRecord ? roundingRecord.differenceAmount : order.roundingDifference,
     roundingReason: roundingRecord ? roundingRecord.reason : order.roundingReason,
+    cashPaidAmount: params.paymentMethod === 'cash'
+      ? Math.round((params.cashReceived ?? finalTotal) * 100) / 100
+      : order.cashPaidAmount,
+    cashChangeAmount: params.paymentMethod === 'cash'
+      ? Math.max(0, Math.round(((params.cashReceived ?? finalTotal) - finalTotal) * 100) / 100)
+      : order.cashChangeAmount,
     paidAt: now,
     completedAt: now,
     updatedAt: now
   }
 
+  const paidNetwork = await window.electronAPI.getNetworkStatus().catch(() => null) as {
+    mode?: string
+    side?: { deviceName?: string }
+  } | null
+  const paidDeviceId = paidNetwork?.side?.deviceName?.trim() ||
+    (paidNetwork?.mode === 'side' ? 'Side POS' : 'Master POS')
   const payments: Payment[] = []
+  if (params.paymentMethod === 'cash' && (params.cashReceived ?? finalTotal) < finalTotal) {
+    throw new Error('المبلغ المستلم أقل من إجمالي الطلب')
+  }
   if (params.paymentMethod === 'split') {
     const cashAmt = Math.round((params.cashPaid ?? 0) * 100) / 100
     const cardAmt = Math.round((params.cardPaid ?? 0) * 100) / 100
-    if (cashAmt > 0) payments.push({ id: generateId(), orderId: order.id, amount: cashAmt, method: 'cash', createdAt: now })
-    if (cardAmt > 0) payments.push({ id: generateId(), orderId: order.id, amount: cardAmt, method: 'card', createdAt: now })
+    if (cashAmt > 0) payments.push({ id: generateId(), orderId: order.id, amount: cashAmt, paidAmount: cashAmt, changeAmount: 0, employeeId: params.cashierId, shiftId: order.shiftId, deviceId: paidDeviceId, method: 'cash', createdAt: now })
+    if (cardAmt > 0) payments.push({ id: generateId(), orderId: order.id, amount: cardAmt, paidAmount: cardAmt, changeAmount: 0, employeeId: params.cashierId, shiftId: order.shiftId, deviceId: paidDeviceId, method: 'card', createdAt: now })
   } else {
-    payments.push({ id: generateId(), orderId: order.id, amount: finalTotal, method: params.paymentMethod, createdAt: now })
+    payments.push({
+      id: generateId(),
+      orderId: order.id,
+      amount: finalTotal,
+      paidAmount: params.paymentMethod === 'cash' ? paidOrder.cashPaidAmount : finalTotal,
+      changeAmount: params.paymentMethod === 'cash' ? paidOrder.cashChangeAmount : 0,
+      employeeId: params.cashierId,
+      shiftId: order.shiftId,
+      deviceId: paidDeviceId,
+      method: params.paymentMethod,
+      createdAt: now
+    })
   }
 
   const drawerTransactions: CashDrawerTransaction[] = payments
@@ -670,17 +734,34 @@ export async function editOrderItems(params: {
   // Reverse old inventory deductions, apply new ones
   const oldInventory = (await getCachedDocs<InventoryTransaction>(COLLECTIONS.inventoryTransactions))
     .filter((tx) => tx.referenceId === params.orderId && tx.type === 'sale')
-  const reversals: InventoryTransaction[] = oldInventory.map((tx) => ({
-    ...tx,
-    id: generateId(),
-    type: 'sale_reversal' as const,
-    quantity: -tx.quantity,
-    noteAr: 'عكس تعديل طلب',
-    createdAt: now
-  }))
-  const newInventory = await buildInventoryTransactions(
-    params.orderId, newItems, params.cashierId, now, order.shiftId
-  )
+  const editBatches = await getCachedDocs<InventoryBatch>(COLLECTIONS.inventoryBatches)
+  const editReversalPlan = await planFifoReversal(oldInventory, {
+    referenceId: params.orderId,
+    createdBy: params.cashierId,
+    createdAt: now,
+    noteAr: 'عكس مخزون قبل تعديل الطلب',
+    batches: editBatches
+  })
+  const editReversedById = new Map(editReversalPlan.batches.map((batch) => [batch.id, batch]))
+  const editBatchesAfterReversal = editBatches.map((batch) => editReversedById.get(batch.id) ?? batch)
+  const editDeductions = (await Promise.all(newItems.map(async (item) =>
+    (await buildInventoryLinesForOrderItem(item)).map((line) => ({
+      ...line,
+      orderItemId: item.id,
+      menuItemId: item.menuItemId
+    }))
+  ))).flat()
+  const editNewPlan = await planFifoConsumption({
+    lines: editDeductions,
+    referenceId: params.orderId,
+    createdBy: params.cashierId,
+    createdAt: now,
+    shiftId: order.shiftId,
+    noteAr: 'خصم مخزون بعد تعديل الطلب',
+    batches: editBatchesAfterReversal
+  })
+  const editBatchUpdates = new Map(editReversalPlan.batches.map((batch) => [batch.id, batch]))
+  editNewPlan.batches.forEach((batch) => editBatchUpdates.set(batch.id, batch))
 
   // Delete old order items then write new ones — all atomic
   const batchOps: DbBatchOp[] = [
@@ -690,8 +771,9 @@ export async function editOrderItems(params: {
     // write new items
     ...newItems.map((oi) => ({ collection: COLLECTIONS.orderItems, id: oi.id, data: oi, op: 'set' as const })),
     // inventory reversals and new deductions
-    ...reversals.map((t) => ({ collection: COLLECTIONS.inventoryTransactions, id: t.id, data: t, op: 'set' as const })),
-    ...newInventory.map((t) => ({ collection: COLLECTIONS.inventoryTransactions, id: t.id, data: t, op: 'set' as const }))
+    ...editReversalPlan.transactions.map((t) => ({ collection: COLLECTIONS.inventoryTransactions, id: t.id, data: t, op: 'set' as const })),
+    ...editNewPlan.transactions.map((t) => ({ collection: COLLECTIONS.inventoryTransactions, id: t.id, data: t, op: 'set' as const })),
+    ...Array.from(editBatchUpdates.values()).map((batch) => ({ collection: COLLECTIONS.inventoryBatches, id: batch.id, data: batch, op: 'set' as const }))
   ]
   await dbBatch(batchOps)
 
@@ -777,8 +859,9 @@ export async function cancelOrder(params: {
     cancelOps.push({ collection: COLLECTIONS.payments, id: payment.id, data: payment, op: 'set' })
   )
   if (params.inventoryMode === 'return') {
-    const reversals = await buildInventoryReversals(order.id, params.cancelledBy, now)
-    reversals.forEach((r) => cancelOps.push({ collection: COLLECTIONS.inventoryTransactions, id: r.id, data: r, op: 'set' }))
+    const reversalPlan = await buildFifoInventoryReversals(order.id, params.cancelledBy, now)
+    reversalPlan.transactions.forEach((r) => cancelOps.push({ collection: COLLECTIONS.inventoryTransactions, id: r.id, data: r, op: 'set' }))
+    reversalPlan.batches.forEach((batch) => cancelOps.push({ collection: COLLECTIONS.inventoryBatches, id: batch.id, data: batch, op: 'set' }))
   }
   await dbBatch(cancelOps)
 
@@ -795,26 +878,21 @@ export async function cancelOrder(params: {
   )
 }
 
-async function buildInventoryReversals(
+async function buildFifoInventoryReversals(
   orderId: string,
   createdBy: string,
   createdAt: number
-): Promise<InventoryTransaction[]> {
+): Promise<{ transactions: InventoryTransaction[]; batches: InventoryBatch[] }> {
   const allTxs = await getCachedDocs<InventoryTransaction>(COLLECTIONS.inventoryTransactions)
-  const saleTxs = allTxs.filter((tx) => tx.referenceId === orderId && tx.type === 'sale')
-  return saleTxs.map((tx) => ({
-    id: generateId(),
-    ingredientId: tx.ingredientId,
-    type: 'sale_reversal' as const,
-    quantity: -tx.quantity,
-    unit: tx.unit,
-    referenceType: 'order' as const,
-    referenceId: orderId,
-    shiftId: tx.shiftId,
-    noteAr: 'عكس خصم مخزون لطلب ملغي',
-    createdBy,
-    createdAt
-  }))
+  return planFifoReversal(
+    allTxs.filter((tx) => tx.referenceId === orderId && tx.type === 'sale'),
+    {
+      referenceId: orderId,
+      createdBy,
+      createdAt,
+      noteAr: 'عكس خصم مخزون لطلب ملغي'
+    }
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -1004,6 +1082,9 @@ export async function refundOrder(params: {
   // Inventory: restock refunded items via sale_reversal
   const inventoryReversals: InventoryTransaction[] = []
   const allInventoryTxs = await getCachedDocs<InventoryTransaction>(COLLECTIONS.inventoryTransactions)
+  const refundBatches = await getCachedDocs<InventoryBatch>(COLLECTIONS.inventoryBatches)
+  const refundBatchById = new Map(refundBatches.map((batch) => [batch.id, { ...batch }]))
+  const changedRefundBatches = new Map<string, InventoryBatch>()
   for (const line of params.lines) {
     const saleTxs = allInventoryTxs.filter((tx) =>
       tx.referenceId === params.originalOrderId &&
@@ -1014,17 +1095,26 @@ export async function refundOrder(params: {
     if (!originalItem || originalItem.quantity <= 0) continue
     const qtyRatio = line.quantity / originalItem.quantity
     for (const tx of saleTxs) {
+      const restoredQuantity = Math.abs(tx.quantity) * qtyRatio
+      const batch = tx.batchId ? refundBatchById.get(tx.batchId) : undefined
+      if (batch) {
+        batch.remainingQuantity = Math.min(batch.quantity, batch.remainingQuantity + restoredQuantity)
+        changedRefundBatches.set(batch.id, batch)
+      }
       inventoryReversals.push({
         id: generateId(),
         ingredientId: tx.ingredientId,
         orderItemId: line.orderItemId,
         menuItemId: line.menuItemId,
         type: 'sale_reversal',
-        quantity: Math.abs(tx.quantity) * qtyRatio,
+        quantity: restoredQuantity,
         unit: tx.unit,
         referenceType: 'order',
         referenceId: refundId,
         shiftId: original.shiftId,
+        batchId: tx.batchId,
+        unitCost: tx.unitCost,
+        totalCost: (tx.totalCost ?? Math.abs(tx.quantity) * (tx.unitCost ?? 0)) * qtyRatio,
         noteAr: `استرداد مخزون: ${params.reasonAr}`,
         createdBy: params.cashierId,
         createdAt: now
@@ -1039,7 +1129,8 @@ export async function refundOrder(params: {
     ...refundItems.map((ri) => ({ collection: COLLECTIONS.orderItems, id: ri.id, data: ri, op: 'set' as const })),
     ...refundPayments.map((payment) => ({ collection: COLLECTIONS.payments, id: payment.id, data: payment, op: 'set' as const })),
     ...(drawerTx ? [{ collection: COLLECTIONS.cashDrawerTransactions, id: drawerTx.id, data: drawerTx, op: 'set' as const }] : []),
-    ...inventoryReversals.map((r) => ({ collection: COLLECTIONS.inventoryTransactions, id: r.id, data: r, op: 'set' as const }))
+    ...inventoryReversals.map((r) => ({ collection: COLLECTIONS.inventoryTransactions, id: r.id, data: r, op: 'set' as const })),
+    ...Array.from(changedRefundBatches.values()).map((batch) => ({ collection: COLLECTIONS.inventoryBatches, id: batch.id, data: batch, op: 'set' as const }))
   ])
 
   // Audit

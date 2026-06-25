@@ -52,6 +52,15 @@ export interface MenuItem {
   updatedAt: number
 }
 
+export interface ProductImage {
+  id: string
+  productId: string
+  imagePath: string
+  uploadedBy: string
+  createdAt: number
+  updatedAt: number
+}
+
 export interface MenuItemSizeOption {
   id: string
   /** Master size id — references ItemSize.id */

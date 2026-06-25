@@ -73,6 +73,29 @@ type ItemEditState = {
   isWeighted: boolean; weightedPriceOptions: WeightedPriceOptionForm[]
   allowCustomWeight: boolean; customWeightUnitPrice: string; active: boolean
   kitchenPrinterIds: string[]
+  imageUrl: string
+}
+
+async function optimizeProductImage(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) throw new Error('اختر ملف صورة صالح')
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error('تعذر قراءة الصورة'))
+    reader.readAsDataURL(file)
+  })
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const value = new Image()
+    value.onload = () => resolve(value)
+    value.onerror = () => reject(new Error('تعذر معالجة الصورة'))
+    value.src = dataUrl
+  })
+  const scale = Math.min(1, 640 / Math.max(image.width, image.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(image.width * scale))
+  canvas.height = Math.max(1, Math.round(image.height * scale))
+  canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/webp', 0.82)
 }
 
 function newWeightedOption(kiloPreset = false): WeightedPriceOptionForm {
@@ -596,6 +619,7 @@ export type ItemFormState = {
   customWeightUnitPrice: string
   kitchenPrinterIds: string[]
   lines: RecipeLineForm[]
+  imageUrl: string
 }
 
 export const defaultItemForm: ItemFormState = {
@@ -612,6 +636,7 @@ export const defaultItemForm: ItemFormState = {
   allowCustomWeight: false,
   customWeightUnitPrice: '',
   kitchenPrinterIds: [],
+  imageUrl: '',
   lines: [{ ingredientId: '', quantity: '', unit: 'جرام' }]
 }
 
@@ -711,6 +736,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
         allowCustomWeight: itemForm.isWeighted ? itemForm.allowCustomWeight : undefined,
         customWeightUnitPrice: itemForm.isWeighted && itemForm.allowCustomWeight ? Number(itemForm.customWeightUnitPrice) : undefined,
         kitchenPrinterIds: itemForm.kitchenPrinterIds,
+        imageUrl: itemForm.imageUrl || undefined,
         lines: recipeLines,
         sortOrder: items.length,
         actor: user
@@ -752,6 +778,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
       allowCustomWeight: editingItem.isWeighted ? editingItem.allowCustomWeight : false,
       customWeightUnitPrice: editingItem.isWeighted && editingItem.allowCustomWeight ? Number(editingItem.customWeightUnitPrice) : undefined,
       kitchenPrinterIds: editingItem.kitchenPrinterIds,
+      imageUrl: editingItem.imageUrl || undefined,
       active: editingItem.active
     }, user)
     setEditingItem(null)
@@ -794,6 +821,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
       allowCustomWeight: !!item.allowCustomWeight,
       customWeightUnitPrice: item.customWeightUnitPrice != null ? String(item.customWeightUnitPrice) : '',
       kitchenPrinterIds: item.kitchenPrinterIds ?? [],
+      imageUrl: item.imageUrl ?? '',
       active: item.active
     })
   }
@@ -841,6 +869,38 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
   const activeSizes = sizes.filter((s) => s.active)
   const activeAddons = addons.filter((a) => a.active)
   const activePrinters = printers.filter((printer) => printer.active)
+
+  function renderImageField(imageUrl: string, isForm: boolean): React.ReactElement {
+    const update = (value: string): void => {
+      if (isForm) setItemForm((form) => ({ ...form, imageUrl: value }))
+      else setEditingItem((item) => item ? { ...item, imageUrl: value } : item)
+    }
+    return (
+      <div className="product-image-editor">
+        <div className="product-image-editor__preview">
+          {imageUrl
+            ? <img src={imageUrl} alt="معاينة صورة الصنف" />
+            : <span>لا توجد صورة</span>}
+        </div>
+        <label className="field">
+          <span>صورة الصنف</span>
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (!file) return
+              void optimizeProductImage(file)
+                .then(update)
+                .catch((error) => setMessage(error instanceof Error ? error.message : 'تعذر معالجة الصورة'))
+              event.target.value = ''
+            }}
+          />
+        </label>
+        {imageUrl && <button type="button" className="btn btn--danger btn--sm" onClick={() => update('')}>حذف الصورة</button>}
+      </div>
+    )
+  }
 
   function renderPrinterSection(selectedIds: string[], isForm: boolean): React.ReactElement {
     return (
@@ -1075,6 +1135,8 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
             )}
           </div>
 
+          {renderImageField(itemForm.imageUrl, true)}
+
           {/* Sizes — products + services (not weighted, not raw_material) */}
           {itemForm.itemType !== 'raw_material' && renderSizeSection(itemForm.sizeOptions, itemForm.isWeighted, true)}
 
@@ -1174,6 +1236,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
                     ? <input className="inline-edit-input" value={editingItem.nameAr} onChange={(e) => setEditingItem({...editingItem,nameAr:e.target.value})} autoFocus />
                     : (
                         <div>
+                          {item.imageUrl && <img className="product-list-thumb" src={item.imageUrl} alt="" />}
                           <div>{item.nameAr}</div>
                           {linkedPrinterNames.length > 0 && (
                             <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginTop: 3 }}>
@@ -1357,6 +1420,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
               )}
             </div>
 
+            {renderImageField(editingItem.imageUrl, false)}
             {editingItem.itemType !== 'raw_material' && renderSizeSection(editingItem.sizeOptions, editingItem.isWeighted, false)}
             {editingItem.itemType !== 'raw_material' && renderAttachmentsSection(editingItem.attachments, false)}
             {renderPrinterSection(editingItem.kitchenPrinterIds, false)}

@@ -511,6 +511,22 @@ export function PosPage(): React.ReactElement {
   // UI state
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const searchInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    function handlePosNotification(event: Event): void {
+      const detail = (event as CustomEvent<{ message?: string; restoreFocus?: boolean }>).detail
+      if (detail?.message) setMessage(detail.message)
+      if (detail?.restoreFocus) {
+        window.setTimeout(() => {
+          window.focus()
+          searchInputRef.current?.focus()
+        }, 0)
+      }
+    }
+    window.addEventListener('pos:notification', handlePosNotification)
+    return () => window.removeEventListener('pos:notification', handlePosNotification)
+  }, [])
 
   // Edit mode
   const [editingOrder, setEditingOrder] = useState<Order | null>(null)
@@ -957,6 +973,9 @@ export function PosPage(): React.ReactElement {
         paymentMethod: checkoutMethod,
         cashPaid,
         cardPaid,
+        cashReceived: checkoutMethod === 'cash'
+          ? (cashReceived.trim() ? cashReceivedNum : checkoutTotal)
+          : undefined,
         discountType: discountValue ? discountType : undefined,
         discountValue: discountValue ? Number(discountValue) : undefined,
         deliveryFee: orderType === 'delivery' ? Number(deliveryFee) || 0 : undefined,
@@ -1220,6 +1239,7 @@ export function PosPage(): React.ReactElement {
       {/* ── Menu panel ── */}
       <section className="pos-menu">
         <input
+          ref={searchInputRef}
           className="pos-search"
           placeholder="بحث في القائمة..."
           value={search}
@@ -1300,6 +1320,7 @@ export function PosPage(): React.ReactElement {
                     else openAddonsOrAddToCart({ item, quantity: 1, unitPrice: item.price, anchor: rect })
                   }}
                 >
+                  {item.imageUrl && <img className="pos-item-btn__image" src={item.imageUrl} alt="" />}
                   {item.nameAr}
                   <span className="pos-item-btn__price">{priceLabel}</span>
                   {isLow && <span className="pos-item-badge pos-item-badge--low">قرب النفاد</span>}

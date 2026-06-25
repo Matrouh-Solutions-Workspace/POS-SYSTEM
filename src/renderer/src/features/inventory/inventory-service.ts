@@ -10,6 +10,7 @@ import type {
   Ingredient,
   InventoryTransaction,
   InventoryTransactionType,
+  InventoryBatch,
   IngredientStock,
   MenuItem,
   Supplier
@@ -104,6 +105,9 @@ export async function recordInventoryTransaction(params: {
   createdBy: string
   shiftId?: string
   supplierId?: string
+  batchId?: string
+  unitCost?: number
+  totalCost?: number
   actor?: AuditActor
 }): Promise<InventoryTransaction> {
   const tx: InventoryTransaction = {
@@ -116,6 +120,9 @@ export async function recordInventoryTransaction(params: {
     referenceId: params.referenceId,
     shiftId: params.shiftId,
     supplierId: params.supplierId,
+    batchId: params.batchId,
+    unitCost: params.unitCost,
+    totalCost: params.totalCost,
     noteAr: params.noteAr,
     createdBy: params.createdBy,
     createdAt: Date.now()
@@ -214,14 +221,62 @@ export async function recordPurchase(params: {
   createdBy: string
   shiftId?: string
   supplierId?: string
+  totalCost?: number
   actor?: AuditActor
 }): Promise<InventoryTransaction> {
-  return recordInventoryTransaction({
-    ...params,
+  const quantity = Math.abs(params.quantity)
+  if (!quantity) throw new Error('الكمية المشتراة يجب أن تكون أكبر من صفر')
+  const totalCost = Math.max(0, Number(params.totalCost) || 0)
+  const now = Date.now()
+  const tx: InventoryTransaction = {
+    id: generateId(),
+    ingredientId: params.ingredientId,
     type: 'purchase',
-    quantity: Math.abs(params.quantity),
-    referenceType: 'purchase'
+    quantity,
+    unit: params.unit,
+    referenceType: 'purchase',
+    shiftId: params.shiftId,
+    supplierId: params.supplierId,
+    unitCost: totalCost / quantity,
+    totalCost,
+    noteAr: params.noteAr,
+    createdBy: params.createdBy,
+    createdAt: now
+  }
+  const batch: InventoryBatch = {
+    id: generateId(),
+    ingredientId: params.ingredientId,
+    supplierId: params.supplierId,
+    purchaseTransactionId: tx.id,
+    quantity,
+    remainingQuantity: quantity,
+    unit: params.unit,
+    unitCost: tx.unitCost ?? 0,
+    receivedAt: now,
+    createdBy: params.createdBy
+  }
+  tx.batchId = batch.id
+  await dbBatch([
+    { collection: COLLECTIONS.inventoryTransactions, id: tx.id, data: tx, op: 'set' },
+    { collection: COLLECTIONS.inventoryBatches, id: batch.id, data: batch, op: 'set' }
+  ])
+  const ingredients = await getCachedDocs<Ingredient>(COLLECTIONS.ingredients)
+  const ingredientName = ingredients.find((ingredient) => ingredient.id === tx.ingredientId)?.nameAr ?? tx.ingredientId
+  audit(params.actor, {
+    action: 'inventory_purchase',
+    actorId: params.actor?.id ?? params.createdBy,
+    actorName: params.actor ? actorAuditName(params.actor) : params.createdBy,
+    targetId: tx.id,
+    targetType: 'inventory',
+    detailAr: `تسجيل شراء — ${ingredientName} — كمية ${quantity} ${params.unit} — تكلفة ${totalCost.toFixed(2)}`
   })
+  return tx
+}
+
+export async function listInventoryBatches(ingredientId?: string): Promise<InventoryBatch[]> {
+  let batches = await getCachedDocs<InventoryBatch>(COLLECTIONS.inventoryBatches)
+  if (ingredientId) batches = batches.filter((batch) => batch.ingredientId === ingredientId)
+  return batches.sort((a, b) => a.receivedAt - b.receivedAt)
 }
 
 export async function recordWaste(params: {

@@ -304,6 +304,7 @@ export function OrderHistoryPage(): React.ReactElement {
   const [cashPaymentTarget, setCashPaymentTarget] = useState<Order | null>(null)
   const [cashRoundedTotal, setCashRoundedTotal] = useState('')
   const [cashRoundingReason, setCashRoundingReason] = useState('')
+  const [cashReceived, setCashReceived] = useState('')
   const [cashRoundingAccess, setCashRoundingAccess] = useState<CashRoundingAccess>({
     enabled: false,
     allowed: false,
@@ -384,11 +385,17 @@ export function OrderHistoryPage(): React.ReactElement {
     setCashPaymentTarget(order)
     setCashRoundedTotal('')
     setCashRoundingReason('')
+    setCashReceived('')
   }
 
   async function confirmCashPayment(): Promise<void> {
     if (!cashPaymentTarget) return
     const target = cashRoundedTotal.trim() ? Number(cashRoundedTotal) : cashPaymentTarget.total
+    const received = cashReceived.trim() ? Number(cashReceived) : target
+    if (!Number.isFinite(received) || received < target) {
+      showMsg('المبلغ المستلم أقل من إجمالي الطلب', 'error')
+      return
+    }
     const difference = Math.round((cashPaymentTarget.total - target) * 100) / 100
     if (difference > 0) {
       if (!cashRoundingAccess.allowed) {
@@ -409,6 +416,7 @@ export function OrderHistoryPage(): React.ReactElement {
         orderId: cashPaymentTarget.id,
         cashierId: user.id,
         paymentMethod: 'cash',
+        cashReceived: received,
         roundedTotal: difference > 0 ? target : undefined,
         roundingReason: difference > 0 ? cashRoundingReason.trim() : undefined
       })
@@ -858,6 +866,15 @@ export function OrderHistoryPage(): React.ReactElement {
               <button type="button" className="order-details__close" onClick={() => setCashPaymentTarget(null)}>×</button>
             </div>
             <p style={{ fontWeight: 800 }}>إجمالي الطلب: {cashPaymentTarget.total.toFixed(2)} {currency}</p>
+            <label className="field">
+              <span>المبلغ المستلم من العميل</span>
+              <input type="number" min="0" step="0.01" value={cashReceived} onChange={(event) => setCashReceived(event.target.value)} placeholder={cashPaymentTarget.total.toFixed(2)} autoFocus />
+            </label>
+            {cashReceived && Number(cashReceived) >= (cashRoundedTotal.trim() ? Number(cashRoundedTotal) : cashPaymentTarget.total) && (
+              <p className="form-message form-message--ok">
+                الباقي للعميل: {(Number(cashReceived) - (cashRoundedTotal.trim() ? Number(cashRoundedTotal) : cashPaymentTarget.total)).toFixed(2)} {currency}
+              </p>
+            )}
             {cashRoundingAccess.enabled && (
               cashRoundingAccess.allowed ? (
                 <>

@@ -6,7 +6,7 @@ import {
   type DateRange
 } from '@renderer/features/reports/reports-service'
 
-type Tab = 'daily' | 'items' | 'cashiers'
+type Tab = 'daily' | 'items' | 'cashiers' | 'payments' | 'profitability'
 
 const RANGE_OPTIONS: { value: DateRange; label: string }[] = [
   { value: 'today',  label: 'اليوم' },
@@ -19,7 +19,9 @@ const RANGE_OPTIONS: { value: DateRange; label: string }[] = [
 const REPORT_TABS: { value: Tab; label: string }[] = [
   { value: 'daily', label: 'المبيعات اليومية' },
   { value: 'items', label: 'أكثر الأصناف مبيعاً' },
-  { value: 'cashiers', label: 'أداء الكاشيرات' }
+  { value: 'cashiers', label: 'أداء الكاشيرات' },
+  { value: 'payments', label: 'طرق الدفع والنقدية' },
+  { value: 'profitability', label: 'تكلفة وربحية الأصناف' }
 ]
 
 function escapeCsv(value: string | number): string {
@@ -50,6 +52,30 @@ function activeRows(data: ReportData, tab: Tab): Array<Array<string | number>> {
     return [
       ['#', 'الصنف', 'الكمية المباعة', 'الإيراد'],
       ...data.topItems.map((item, i) => [i + 1, item.nameAr, item.quantity, item.revenue.toFixed(2)])
+    ]
+  }
+  if (tab === 'payments') {
+    return [
+      ['طريقة الدفع', 'العمليات', 'صافي المبيعات', 'المبلغ المستلم', 'الباقي المرتجع'],
+      ...data.paymentMethods.map((row) => [
+        row.method === 'cash' ? 'نقدي' : row.method === 'card' ? 'بطاقة' : 'أخرى',
+        row.transactionCount,
+        row.salesAmount.toFixed(2),
+        row.paidAmount.toFixed(2),
+        row.changeAmount.toFixed(2)
+      ])
+    ]
+  }
+  if (tab === 'profitability') {
+    return [
+      ['الصنف', 'سعر البيع', 'تكلفة FIFO', 'الربح', 'هامش الربح'],
+      ...data.profitability.map((row) => [
+        row.nameAr,
+        row.sellingPrice.toFixed(2),
+        row.cost.toFixed(2),
+        row.profit.toFixed(2),
+        `${row.marginPercent.toFixed(1)}%`
+      ])
     ]
   }
   return [
@@ -123,14 +149,23 @@ export function ReportsPage(): React.ReactElement {
   const [tab, setTab]         = useState<Tab>('daily')
   const [range, setRange]     = useState<DateRange>('month')
   const [exportMsg, setExportMsg] = useState<string | null>(null)
+  const [employeeId, setEmployeeId] = useState('')
+  const [shiftId, setShiftId] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('')
+  const [deviceId, setDeviceId] = useState('')
 
   useEffect(() => {
     setLoading(true)
-    void getFullReport(range).then((d) => {
+    void getFullReport(range, {
+      employeeId: employeeId || undefined,
+      shiftId: shiftId || undefined,
+      paymentMethod: paymentMethod || undefined,
+      deviceId: deviceId || undefined
+    }).then((d) => {
       setData(d)
       setLoading(false)
     })
-  }, [range])
+  }, [range, employeeId, shiftId, paymentMethod, deviceId])
 
   const cur = 'ج.م'
   const rangeLabel = RANGE_OPTIONS.find((o) => o.value === range)?.label ?? ''
@@ -198,6 +233,39 @@ export function ReportsPage(): React.ReactElement {
             <MdPrint /> طباعة
           </button>
         </div>
+      </div>
+      <div className="settings-form-grid" style={{ marginBottom: 12 }}>
+        <label className="field">
+          <span>الموظف</span>
+          <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
+            <option value="">الكل</option>
+            {data?.cashiers.map((cashier) => <option key={cashier.cashierId} value={cashier.cashierId}>{cashier.cashierName}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span>الشيفت</span>
+          <select value={shiftId} onChange={(e) => setShiftId(e.target.value)}>
+            <option value="">الكل</option>
+            {data?.filterOptions.shifts.map((shift) => <option key={shift.id} value={shift.id}>{shift.label}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span>طريقة الدفع</span>
+          <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+            <option value="">الكل</option>
+            <option value="cash">نقدي</option>
+            <option value="card">بطاقة</option>
+          </select>
+        </label>
+        {data && data.filterOptions.devices.length > 0 && (
+          <label className="field">
+            <span>الفرع / الجهاز</span>
+            <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
+              <option value="">الكل</option>
+              {data.filterOptions.devices.map((device) => <option key={device} value={device}>{device}</option>)}
+            </select>
+          </label>
+        )}
       </div>
       {exportMsg && <p className={`form-message ${exportMsg.includes('فشل') ? 'form-message--error' : 'form-message--ok'}`}>{exportMsg}</p>}
 
@@ -335,6 +403,49 @@ export function ReportsPage(): React.ReactElement {
                   </tbody>
                 </table>
               )}
+            </div>
+          )}
+
+          {tab === 'payments' && (
+            <div className="card" style={{ marginTop: 0 }}>
+              <h2 className="card__title">طرق الدفع وحركة النقدية - {rangeLabel}</h2>
+              <table className="data-table">
+                <thead><tr><th>طريقة الدفع</th><th>عدد العمليات</th><th>صافي المبيعات</th><th>المبلغ المستلم</th><th>الباقي المرتجع</th></tr></thead>
+                <tbody>
+                  {data.paymentMethods.length === 0
+                    ? <tr><td colSpan={5} className="report-empty">لا توجد مدفوعات في هذه الفترة</td></tr>
+                    : data.paymentMethods.map((row) => (
+                      <tr key={row.method}>
+                        <td>{row.method === 'cash' ? 'نقدي' : row.method === 'card' ? 'بطاقة' : 'أخرى'}</td>
+                        <td>{row.transactionCount}</td>
+                        <td>{row.salesAmount.toFixed(2)} {cur}</td>
+                        <td>{row.paidAmount.toFixed(2)} {cur}</td>
+                        <td>{row.changeAmount.toFixed(2)} {cur}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {tab === 'profitability' && (
+            <div className="card" style={{ marginTop: 0 }}>
+              <h2 className="card__title">تكلفة وربحية الأصناف حسب أقدم دفعات المخزون</h2>
+              <table className="data-table">
+                <thead><tr><th>الصنف</th><th>سعر البيع</th><th>تكلفة FIFO</th><th>الربح</th><th>الهامش</th><th>تفصيل التكلفة</th></tr></thead>
+                <tbody>
+                  {data.profitability.map((row) => (
+                    <tr key={row.menuItemId}>
+                      <td>{row.nameAr}</td>
+                      <td>{row.sellingPrice.toFixed(2)} {cur}</td>
+                      <td>{row.cost.toFixed(2)} {cur}</td>
+                      <td>{row.profit.toFixed(2)} {cur}</td>
+                      <td>{row.marginPercent.toFixed(1)}%</td>
+                      <td>{row.ingredients.length ? row.ingredients.map((line) => `${line.nameAr}: ${line.cost.toFixed(2)}`).join('، ') : 'بدون مكونات مخزنية'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </>

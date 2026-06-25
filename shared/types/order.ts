@@ -31,6 +31,8 @@ export interface Order {
   originalTotal?: number
   roundingDifference?: number
   roundingReason?: string
+  cashPaidAmount?: number
+  cashChangeAmount?: number
   noteAr?: string
   // Delivery customer info
   customerName?: string
@@ -68,6 +70,11 @@ export interface Payment {
   id: string
   orderId: string
   amount: number
+  paidAmount?: number
+  changeAmount?: number
+  employeeId?: string
+  shiftId?: string
+  deviceId?: string
   method: 'cash' | 'card'
   createdAt: number
 }

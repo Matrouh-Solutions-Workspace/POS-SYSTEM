@@ -231,6 +231,17 @@ function renderTotals(order: Order, cur: string): string {
 }
 
 function renderPayment(order: Order): string {
+  if (order.paymentStatus === 'paid' && order.cashPaidAmount != null) {
+    return `<div class="totals">
+      <div><span>الدفع</span><span>نقدي</span></div>
+      <div><span>المبلغ المستلم</span><span>${order.cashPaidAmount.toFixed(2)}</span></div>
+      <div><span>الباقي للعميل</span><span>${(order.cashChangeAmount ?? 0).toFixed(2)}</span></div>
+    </div>`
+  }
+  return renderPaymentLegacy(order)
+}
+
+function renderPaymentLegacy(order: Order): string {
   if (order.paymentStatus === 'split') return `<div class="totals"><div><span>الدفع</span><span>نقدي + بطاقة</span></div></div>`
   if (order.paymentStatus === 'paid') return `<div class="totals"><div><span>الدفع</span><span>مدفوع</span></div></div>`
   return ''
@@ -268,7 +279,12 @@ export async function printReceipt(
   if (window.electronAPI?.printReceipt) {
     const result = await window.electronAPI.printReceipt(html)
     if (!result.ok) {
-      window.alert(result.error ?? 'فشلت الطباعة. راجع إعدادات الطابعة في إعدادات المدير.')
+      window.dispatchEvent(new CustomEvent('pos:notification', {
+        detail: {
+          message: result.error ?? 'فشلت الطباعة. راجع إعدادات الطابعة في إعدادات المدير.',
+          restoreFocus: true
+        }
+      }))
     }
     return result.ok
   }

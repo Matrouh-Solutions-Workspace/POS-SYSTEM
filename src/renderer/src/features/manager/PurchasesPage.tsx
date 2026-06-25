@@ -44,6 +44,7 @@ function StockTab({ stocks, ingredients, suppliers, onRefresh, setMessage }: {
   const [ingredientId, setIngredientId] = useState('')
   const [supplierId, setSupplierId] = useState('')
   const [qty, setQty] = useState('')
+  const [totalCost, setTotalCost] = useState('')
   const [debtAmount, setDebtAmount] = useState('')
   const [note, setNote] = useState('')
   const [modal, setModal] = useState<{ stock: IngredientStock; action: InventoryActionType } | null>(null)
@@ -57,7 +58,7 @@ function StockTab({ stocks, ingredients, suppliers, onRefresh, setMessage }: {
     const ing = activeIngredients.find((i) => i.id === ingredientId)
     if (!ing) return
     const debt = Math.max(0, Number(debtAmount) || 0)
-    await recordPurchase({ ingredientId: ing.id, quantity: Number(qty), unit: ing.unit, noteAr: note || undefined, createdBy: user.id, supplierId: supplierId || undefined, actor: user })
+    await recordPurchase({ ingredientId: ing.id, quantity: Number(qty), unit: ing.unit, totalCost: Number(totalCost) || 0, noteAr: note || undefined, createdBy: user.id, supplierId: supplierId || undefined, actor: user })
     if (supplierId && debt > 0) {
       await recordSupplierTransaction({
         supplierId,
@@ -68,7 +69,7 @@ function StockTab({ stocks, ingredients, suppliers, onRefresh, setMessage }: {
         actor: user
       })
     }
-    setQty(''); setDebtAmount(''); setNote('')
+    setQty(''); setTotalCost(''); setDebtAmount(''); setNote('')
     setMessage('تم تسجيل الشراء')
     await onRefresh()
   }
@@ -118,6 +119,10 @@ function StockTab({ stocks, ingredients, suppliers, onRefresh, setMessage }: {
           <label className="field">
             <span>الكمية المشتراة</span>
             <input className="stock-qty-input" type="number" min="0.01" step="any" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="مثال: 5" required />
+          </label>
+          <label className="field">
+            <span>إجمالي تكلفة الشراء</span>
+            <input type="number" min="0" step="0.01" value={totalCost} onChange={(e) => setTotalCost(e.target.value)} placeholder="مثال: 750" required />
           </label>
           <label className="field">
             <span>مديونية على المورد</span>

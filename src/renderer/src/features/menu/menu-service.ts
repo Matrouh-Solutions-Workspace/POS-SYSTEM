@@ -131,6 +131,7 @@ export async function updateMenuItem(
       | 'allowCustomWeight'
       | 'customWeightUnitPrice'
       | 'kitchenPrinterIds'
+      | 'imageUrl'
       | 'active'
     >
   >,
@@ -139,6 +140,20 @@ export async function updateMenuItem(
   const cached = await getCachedDoc<MenuItem>(COLLECTIONS.menuItems, id)
   if (!cached) return
   await cacheDocs(COLLECTIONS.menuItems, [{ ...cached, ...patch, updatedAt: Date.now() }])
+  if ('imageUrl' in patch) {
+    if (patch.imageUrl) {
+      await cacheDocs(COLLECTIONS.productImages, [{
+        id,
+        productId: id,
+        imagePath: patch.imageUrl,
+        uploadedBy: actor?.id ?? 'system',
+        createdAt: cached.createdAt,
+        updatedAt: Date.now()
+      }])
+    } else {
+      await dbDelete(COLLECTIONS.productImages, id)
+    }
+  }
   audit(actor, {
     action: 'menu_item_updated',
     actorId: actor?.id ?? 'system',
@@ -175,6 +190,7 @@ export async function createMenuItemWithRecipe(params: {
   allowCustomWeight?: boolean
   customWeightUnitPrice?: number
   kitchenPrinterIds?: string[]
+  imageUrl?: string
   lines: RecipeLine[]   // empty array = no inventory deduction
   sortOrder?: number
   actor?: AuditActor
@@ -210,6 +226,7 @@ export async function createMenuItemWithRecipe(params: {
     allowCustomWeight: params.isWeighted ? params.allowCustomWeight : undefined,
     customWeightUnitPrice: params.isWeighted ? params.customWeightUnitPrice : undefined,
     kitchenPrinterIds: params.kitchenPrinterIds ?? [],
+    imageUrl: params.imageUrl,
     active: true,
     recipeId,
     sortOrder: params.sortOrder ?? 9999,
@@ -219,7 +236,15 @@ export async function createMenuItemWithRecipe(params: {
 
   await Promise.all([
     cacheDocs(COLLECTIONS.menuItems, [item]),
-    cacheDocs(COLLECTIONS.recipes, [recipe])
+    cacheDocs(COLLECTIONS.recipes, [recipe]),
+    ...(params.imageUrl ? [cacheDocs(COLLECTIONS.productImages, [{
+      id: itemId,
+      productId: itemId,
+      imagePath: params.imageUrl,
+      uploadedBy: params.actor?.id ?? 'system',
+      createdAt: now,
+      updatedAt: now
+    }])] : [])
   ])
   audit(params.actor, {
     action: 'menu_item_created',
@@ -236,7 +261,8 @@ export async function deleteMenuItem(id: string, recipeId: string, actor?: Audit
   const cached = await getCachedDoc<MenuItem>(COLLECTIONS.menuItems, id)
   await Promise.all([
     dbDelete(COLLECTIONS.menuItems, id),
-    dbDelete(COLLECTIONS.recipes, recipeId)
+    dbDelete(COLLECTIONS.recipes, recipeId),
+    dbDelete(COLLECTIONS.productImages, id)
   ])
   audit(actor, {
     action: 'menu_item_deleted',

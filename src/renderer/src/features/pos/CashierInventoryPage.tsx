@@ -34,6 +34,7 @@ export function CashierInventoryPage(): React.ReactElement {
       ingredientId: ingredient.id,
       quantity: qty,
       unit: ingredient.unit,
+      totalCost,
       noteAr: purchase.noteAr || undefined,
       createdBy: user.id,
       supplierId: purchase.supplierId || undefined,
