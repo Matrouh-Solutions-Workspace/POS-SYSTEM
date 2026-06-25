@@ -16,6 +16,10 @@ export interface AppSettings {
   defaultDeliveryFee?: number
   /** Enforce employee work schedules for cashier login and POS activity. */
   shiftManagementEnabled?: boolean
+  /** Collect employee activity and expose performance/accuracy reports. */
+  employeePerformanceTrackingEnabled?: boolean
+  /** Earliest timestamp included in performance collection after enabling. */
+  employeePerformanceTrackingStartedAt?: number
   /**
    * Maximum discount % a cashier can apply without manager override.
    * undefined or 100 means no limit.

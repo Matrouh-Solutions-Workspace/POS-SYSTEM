@@ -5,9 +5,9 @@
  * Entries are written to SQLite and queued for optional master-device API sync.
  * Entries are NEVER modified or deleted — append-only.
  */
-import type { AuditAction, AuditEntry } from '@shared/types'
-import { COLLECTIONS } from '@shared/constants/collections'
-import { cacheDocs, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
+import type { AppSettings, AppUser, AuditAction, AuditEntry, EmployeeActivityLog } from '@shared/types'
+import { COLLECTIONS, SETTINGS_DOC_ID } from '@shared/constants/collections'
+import { cacheDocs, getCachedDoc, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 import { generateId } from '@renderer/lib/utils/id'
 
 export interface AuditActor {
@@ -60,9 +60,42 @@ export async function logAudit(params: {
       createdAt: Date.now()
     }
     await cacheDocs(COLLECTIONS.auditLog, [entry])
+    await recordEmployeeActivity(params, entry.createdAt)
   } catch {
     // Audit failure must never break the calling operation
   }
+}
+
+async function recordEmployeeActivity(
+  params: {
+    action: AuditAction
+    actorId: string
+    actorName: string
+    targetId?: string
+    detailAr: string
+  },
+  createdAt: number
+): Promise<void> {
+  if (!params.actorId || params.actorId === 'system') return
+  const settings = await getCachedDoc<AppSettings>(COLLECTIONS.settings, SETTINGS_DOC_ID)
+  if (settings?.employeePerformanceTrackingEnabled !== true) return
+
+  const user = await getCachedDoc<AppUser>(COLLECTIONS.users, params.actorId)
+  const network = await window.electronAPI.getNetworkStatus().catch(() => null) as {
+    mode?: string
+    side?: { deviceName?: string }
+  } | null
+  const log: EmployeeActivityLog = {
+    id: generateId(),
+    userId: params.actorId,
+    username: user?.username?.trim() || params.actorName || params.actorId,
+    actionType: params.action,
+    referenceId: params.targetId,
+    deviceId: network?.side?.deviceName?.trim() || (network?.mode === 'side' ? 'Side POS' : 'Master POS'),
+    detailAr: params.detailAr,
+    createdAt
+  }
+  await cacheDocs(COLLECTIONS.employeeActivityLogs, [log])
 }
 
 // ---------------------------------------------------------------------------

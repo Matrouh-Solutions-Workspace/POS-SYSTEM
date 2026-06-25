@@ -1,9 +1,21 @@
 /**
  * Shift service — SQLite primary database.
  */
-import type { AppUser, CashDrawerTransaction, InventoryTransaction, Order, OrderItem, Shift, ShiftAccessResult } from '@shared/types'
-import { COLLECTIONS } from '@shared/constants/collections'
+import type {
+  AppSettings,
+  AppUser,
+  CashDrawerTransaction,
+  InventoryTransaction,
+  Order,
+  OrderItem,
+  Payment,
+  Shift,
+  ShiftAccessResult,
+  ShiftClosureRecord
+} from '@shared/types'
+import { COLLECTIONS, SETTINGS_DOC_ID } from '@shared/constants/collections'
 import { cacheDocs, getCachedDoc, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
+import { dbBatch } from '@renderer/lib/db/sqlite-db'
 import { generateId } from '@renderer/lib/utils/id'
 import { listOrders } from '../orders/order-service'
 import { listInventoryTransactions, listIngredients } from '../inventory/inventory-service'
@@ -36,6 +48,21 @@ export interface ShiftSummary {
   suppliedInventory: Array<InventoryTransaction & { ingredientNameAr: string }>
   usedInventory: Array<InventoryTransaction & { ingredientNameAr: string }>
   cashTransactions: CashDrawerTransaction[]
+}
+
+export interface ShiftClosurePreview {
+  shift: Shift
+  pendingOrders: Order[]
+  incompletePaymentOrders: Order[]
+  openingCash: number
+  cashSales: number
+  cardSales: number
+  cashRefunds: number
+  cardRefunds: number
+  cashAdjustments: number
+  expectedCash: number
+  ordersCount: number
+  totalSales: number
 }
 
 async function patchCachedShifts(shiftIds: string[], patch: Partial<Shift>): Promise<void> {
@@ -153,45 +180,168 @@ export async function ensureOpenShift(params: {
   return shift
 }
 
-export async function closeShift(shiftId: string, closedBy: string, closingCash?: number): Promise<void> {
+export async function getShiftClosurePreview(shift: Shift): Promise<ShiftClosurePreview> {
+  const [allOrders, payments, cashTransactions] = await Promise.all([
+    getCachedDocs<Order>(COLLECTIONS.orders),
+    getCachedDocs<Payment>(COLLECTIONS.payments),
+    listCashDrawerTransactions()
+  ])
+  const orders = allOrders.filter((order) => orderBelongsToShift(order, shift))
+  const orderIds = new Set(orders.map((order) => order.id))
+  const pendingOrders = orders.filter((order) =>
+    order.status !== 'cancelled' &&
+    (order.status === 'draft' || order.paymentStatus === 'unpaid')
+  )
+  const incompletePaymentOrders = orders.filter((order) => {
+    if (order.status !== 'completed' || order.total <= 0) return false
+    const paid = payments
+      .filter((payment) => payment.orderId === order.id)
+      .reduce((sum, payment) => sum + payment.amount, 0)
+    return paid + 0.01 < order.total
+  })
+  const shiftPayments = payments.filter((payment) => orderIds.has(payment.orderId))
+  const cashSales = shiftPayments
+    .filter((payment) => payment.method === 'cash' && payment.amount > 0)
+    .reduce((sum, payment) => sum + payment.amount, 0)
+  const cardSales = shiftPayments
+    .filter((payment) => payment.method === 'card' && payment.amount > 0)
+    .reduce((sum, payment) => sum + payment.amount, 0)
+  const recordedCashRefunds = Math.abs(shiftPayments
+    .filter((payment) => payment.method === 'cash' && payment.amount < 0)
+    .reduce((sum, payment) => sum + payment.amount, 0))
+  const cardRefunds = Math.abs(shiftPayments
+    .filter((payment) => payment.method === 'card' && payment.amount < 0)
+    .reduce((sum, payment) => sum + payment.amount, 0))
+  const negativePaymentOrderIds = new Set(
+    shiftPayments.filter((payment) => payment.amount < 0).map((payment) => payment.orderId)
+  )
+  const legacyCashRefunds = orders
+    .filter((order) =>
+      order.status === 'cancelled' &&
+      !negativePaymentOrderIds.has(order.id) &&
+      (order.paymentStatus === 'paid' || order.paymentStatus === 'split')
+    )
+    .reduce((sum, order) => {
+      const negativeDrawer = Math.abs(cashTransactions
+        .filter((transaction) => transaction.orderId === order.id && transaction.amount < 0)
+        .reduce((total, transaction) => total + transaction.amount, 0))
+      if (!negativeDrawer) return sum
+      const positiveCashPayments = shiftPayments
+        .filter((payment) =>
+          payment.orderId === order.id && payment.method === 'cash' && payment.amount > 0
+        )
+        .reduce((total, payment) => total + payment.amount, 0)
+      const refundOrder = !!order.refundOfOrderId || order.total < 0 || order.orderCode?.startsWith('RFD-') === true
+      return sum + (refundOrder ? negativeDrawer : (positiveCashPayments || negativeDrawer))
+    }, 0)
+  const cashRefunds = recordedCashRefunds + legacyCashRefunds
+  const cashAdjustments = cashTransactions
+    .filter((transaction) =>
+      transactionBelongsToShift(transaction, shift, orderIds) && !transaction.orderId
+    )
+    .reduce((sum, transaction) => sum + transaction.amount, 0)
+  const openingCash = shift.openingCash ?? 0
+  const completed = orders.filter((order) => order.status === 'completed' && order.total > 0)
+  const refundAmount = Math.abs(
+    orders.filter((order) =>
+      !!order.refundOfOrderId || order.total < 0 || order.orderCode?.startsWith('RFD-') === true
+    ).reduce((sum, order) => sum + order.total, 0)
+  )
+  return {
+    shift,
+    pendingOrders,
+    incompletePaymentOrders,
+    openingCash,
+    cashSales,
+    cardSales,
+    cashRefunds,
+    cardRefunds,
+    cashAdjustments,
+    expectedCash: openingCash + cashSales - cashRefunds + cashAdjustments,
+    ordersCount: completed.length,
+    totalSales: completed.reduce((sum, order) => sum + order.total, 0) - refundAmount
+  }
+}
+
+export async function closeShift(
+  shiftId: string,
+  closedBy: string,
+  closingCash?: number,
+  options?: { differenceReason?: string; approvedBy?: string }
+): Promise<void> {
   const now = Date.now()
   const current = await getCachedDoc<Shift>(COLLECTIONS.shifts, shiftId)
-  const closingSummary = current
-    ? await getShiftSummary({ ...current, closedAt: now, closingCash })
-    : null
+  if (!current || current.status === 'closed') return
+  const settings = await getCachedDoc<AppSettings>(COLLECTIONS.settings, SETTINGS_DOC_ID)
+  const performanceEnabled = settings?.employeePerformanceTrackingEnabled === true
+  const closure = await getShiftClosurePreview(current)
+  if (performanceEnabled) {
+    if (closure.pendingOrders.length) {
+      throw new Error(`لا يمكن إغلاق الشيفت: يوجد ${closure.pendingOrders.length} طلب معلق أو غير مدفوع.`)
+    }
+    if (closure.incompletePaymentOrders.length) {
+      throw new Error(`لا يمكن إغلاق الشيفت: يوجد ${closure.incompletePaymentOrders.length} طلب بمدفوعات غير مكتملة.`)
+    }
+    if (closingCash === undefined || !Number.isFinite(closingCash) || closingCash < 0) {
+      throw new Error('يجب إدخال مبلغ الكاش الفعلي قبل إغلاق الشيفت.')
+    }
+  }
   const overtimeMinutes = current?.scheduledEndAt
     ? Math.max(0, Math.ceil((now - current.scheduledEndAt) / 60_000))
     : undefined
-  await patchCachedShifts([shiftId], {
+  const cashDifference = closingCash !== undefined ? closingCash - closure.expectedCash : undefined
+  if (performanceEnabled && cashDifference && Math.abs(cashDifference) >= 0.01 && !options?.differenceReason?.trim()) {
+    throw new Error('اكتب سبب فرق الكاش قبل تأكيد إغلاق الشيفت.')
+  }
+  const closedShift: Shift = {
+    ...current,
     status: 'closed',
     closedAt: now,
     closedBy,
     closingCash,
     overtimeStartedAt: overtimeMinutes ? current?.scheduledEndAt : current?.overtimeStartedAt,
     overtimeMinutes,
-    totalSales: closingSummary?.revenue,
-    transactionCount: closingSummary?.completedOrders.length,
-    expectedCash: closingSummary?.expectedCash,
-    cashDifference: closingSummary?.cashDifference,
+    totalSales: closure.totalSales,
+    transactionCount: closure.ordersCount,
+    expectedCash: closure.expectedCash,
+    cashDifference,
     updatedAt: now
-  })
-  if (current) {
-    const closedSession: Shift = {
-      ...current,
-      status: 'closed',
-      closedAt: now,
-      closedBy,
-      closingCash,
-      overtimeStartedAt: overtimeMinutes ? current.scheduledEndAt : current.overtimeStartedAt,
-      overtimeMinutes,
-      totalSales: closingSummary?.revenue,
-      transactionCount: closingSummary?.completedOrders.length,
-      expectedCash: closingSummary?.expectedCash,
-      cashDifference: closingSummary?.cashDifference,
-      updatedAt: now
-    }
+  }
+  const closureRecord: ShiftClosureRecord | null = performanceEnabled && closingCash !== undefined ? {
+    id: generateId(),
+    shiftSessionId: current.id,
+    userId: current.cashierId,
+    openingCash: closure.openingCash,
+    cashSales: closure.cashSales,
+    cardSales: closure.cardSales,
+    refunds: closure.cashRefunds + closure.cardRefunds,
+    cashAdjustments: closure.cashAdjustments,
+    expectedCash: closure.expectedCash,
+    actualCash: closingCash,
+    difference: cashDifference ?? 0,
+    differenceType: Math.abs(cashDifference ?? 0) < 0.01
+      ? 'balanced'
+      : (cashDifference ?? 0) < 0 ? 'shortage' : 'surplus',
+    differenceReason: options?.differenceReason?.trim() || undefined,
+    approvedBy: options?.approvedBy,
+    approvedAt: options?.approvedBy ? now : undefined,
+    ordersCount: closure.ordersCount,
+    closedAt: now,
+    createdAt: now,
+    updatedAt: now
+  } : null
+  await dbBatch([
+    { collection: COLLECTIONS.shifts, id: closedShift.id, data: closedShift, op: 'set' },
+    ...(closureRecord ? [{
+      collection: COLLECTIONS.shiftClosureRecords,
+      id: closureRecord.id,
+      data: closureRecord,
+      op: 'set' as const
+    }] : [])
+  ])
+  {
     const record = await import('./work-shift-service').then(({ saveOvertimeForClosedSession }) =>
-      saveOvertimeForClosedSession(closedSession)
+      saveOvertimeForClosedSession(closedShift)
     )
     if (record) {
       void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
@@ -293,8 +443,6 @@ export async function getShiftSummary(shift: Shift): Promise<ShiftSummary> {
   const expenses = shiftCashTransactions
     .filter((tx) => tx.type !== 'sale' && tx.amount < 0)
     .reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
-  const drawerTotal = shiftCashTransactions.reduce((sum, tx) => sum + tx.amount, 0)
-
   // Payment method breakdown from order payments
   const allPayments = await getCachedDocs<{ orderId: string; amount: number; method: string }>(
     COLLECTIONS.payments
@@ -311,9 +459,13 @@ export async function getShiftSummary(shift: Shift): Promise<ShiftSummary> {
   // Cash reconciliation
   const openingCash = shift.openingCash ?? 0
   const cashExpenses = shiftCashTransactions
-    .filter((tx) => tx.amount < 0)
+    .filter((tx) => !tx.orderId && tx.amount < 0)
     .reduce((sum, tx) => sum + tx.amount, 0) // negative sum
-  const expectedCash = openingCash + cashRevenue + cashExpenses
+  const cashAdditions = shiftCashTransactions
+    .filter((tx) => !tx.orderId && tx.amount > 0)
+    .reduce((sum, tx) => sum + tx.amount, 0)
+  const drawerTotal = cashRevenue + cashExpenses + cashAdditions
+  const expectedCash = openingCash + drawerTotal
   const actualCash = shift.closingCash
   const cashDifference = actualCash !== undefined ? actualCash - expectedCash : undefined
 

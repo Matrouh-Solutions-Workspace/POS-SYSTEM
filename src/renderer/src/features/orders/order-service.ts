@@ -54,6 +54,7 @@ export async function getSettings(): Promise<AppSettings> {
     serviceRate: 0,
     defaultDeliveryFee: 0,
     shiftManagementEnabled: false,
+    employeePerformanceTrackingEnabled: false,
     networkMode: 'standalone',
     masterServerPort: 47831,
     sideDisconnectPolicy: 'block_actions',
@@ -94,6 +95,8 @@ export async function updateSettings(
       | 'serviceRate'
       | 'defaultDeliveryFee'
       | 'shiftManagementEnabled'
+      | 'employeePerformanceTrackingEnabled'
+      | 'employeePerformanceTrackingStartedAt'
       | 'maxCashierDiscountPct'
       | 'keyboardShortcuts'
       | 'networkMode'
@@ -289,7 +292,7 @@ export async function completeOrder(params: {
   // Cash drawer: one entry per payment method
   const drawerTransactions: CashDrawerTransaction[] = []
   if (isPaid) {
-    for (const p of payments) {
+    for (const p of payments.filter((payment) => payment.method === 'cash')) {
       drawerTransactions.push({
         id: generateId(),
         type: 'sale',
@@ -311,6 +314,17 @@ export async function completeOrder(params: {
     ...drawerTransactions.map((d) => ({ collection: COLLECTIONS.cashDrawerTransactions, id: d.id, data: d, op: 'set' as const }))
   ]
   await dbBatch(batchOps)
+
+  void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+    logAudit({
+      action: 'order_created',
+      actorId: params.cashierId,
+      actorName: params.cashierName,
+      targetId: orderId,
+      targetType: 'order',
+      detailAr: `إنشاء طلب #${order.orderCode ?? order.orderNumber} — الإجمالي: ${total.toFixed(2)}`
+    })
+  )
 
   // Audit: log discount if one was applied
   if (discountAmount > 0) {
@@ -444,7 +458,9 @@ export async function markOrderPaid(params: {
     payments.push({ id: generateId(), orderId: order.id, amount: order.total, method: params.paymentMethod, createdAt: now })
   }
 
-  const drawerTransactions: CashDrawerTransaction[] = payments.map((p) => ({
+  const drawerTransactions: CashDrawerTransaction[] = payments
+    .filter((payment) => payment.method === 'cash')
+    .map((p) => ({
     id: generateId(),
     type: 'sale',
     amount: p.amount,
@@ -460,6 +476,16 @@ export async function markOrderPaid(params: {
     ...payments.map((p) => ({ collection: COLLECTIONS.payments, id: p.id, data: p, op: 'set' as const })),
     ...drawerTransactions.map((d) => ({ collection: COLLECTIONS.cashDrawerTransactions, id: d.id, data: d, op: 'set' as const }))
   ])
+  void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+    logAudit({
+      action: 'order_paid',
+      actorId: params.cashierId,
+      actorName: order.cashierName,
+      targetId: order.id,
+      targetType: 'order',
+      detailAr: `تحصيل طلب #${order.orderCode ?? order.orderNumber} — ${order.total.toFixed(2)}`
+    })
+  )
   return paidOrder
 }
 
@@ -550,6 +576,17 @@ export async function editOrderItems(params: {
   ]
   await dbBatch(batchOps)
 
+  void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+    logAudit({
+      action: 'order_updated',
+      actorId: params.cashierId,
+      actorName: order.cashierName,
+      targetId: order.id,
+      targetType: 'order',
+      detailAr: `تعديل طلب #${order.orderCode ?? order.orderNumber} — الإجمالي الجديد: ${total.toFixed(2)}`
+    })
+  )
+
   return updatedOrder
 }
 
@@ -565,6 +602,7 @@ export async function cancelOrder(params: {
 }): Promise<void> {
   const order = await getCachedDoc<Order>(COLLECTIONS.orders, params.orderId)
   if (!order) return
+  if (order.status === 'cancelled') return
 
   const now = Date.now()
   const cancelledOrder: Order = {
@@ -579,11 +617,26 @@ export async function cancelOrder(params: {
 
   const shouldReverseCash = order.status === 'completed' &&
     order.paymentStatus !== 'unpaid' && order.paymentStatus !== undefined
+  const orderPayments = shouldReverseCash
+    ? (await getCachedDocs<Payment>(COLLECTIONS.payments)).filter((payment) =>
+        payment.orderId === order.id && payment.amount > 0
+      )
+    : []
+  const paymentReversals: Payment[] = orderPayments.map((payment) => ({
+    id: generateId(),
+    orderId: order.id,
+    amount: -payment.amount,
+    method: payment.method,
+    createdAt: now
+    }))
+  const cashToReverse = orderPayments
+    .filter((payment) => payment.method === 'cash')
+    .reduce((sum, payment) => sum + payment.amount, 0)
   const drawerTransaction: CashDrawerTransaction | null = shouldReverseCash
     ? {
         id: generateId(),
         type: 'sale',
-        amount: -order.total,
+        amount: -(orderPayments.length ? cashToReverse : order.total),
         shiftId: order.shiftId,
         orderId: order.id,
         noteAr: params.reasonAr || 'إلغاء طلب',
@@ -597,8 +650,13 @@ export async function cancelOrder(params: {
     { collection: COLLECTIONS.orders, id: cancelledOrder.id, data: cancelledOrder, op: 'set' }
   ]
   if (drawerTransaction) {
-    cancelOps.push({ collection: COLLECTIONS.cashDrawerTransactions, id: drawerTransaction.id, data: drawerTransaction, op: 'set' })
+    if (drawerTransaction.amount !== 0) {
+      cancelOps.push({ collection: COLLECTIONS.cashDrawerTransactions, id: drawerTransaction.id, data: drawerTransaction, op: 'set' })
+    }
   }
+  paymentReversals.forEach((payment) =>
+    cancelOps.push({ collection: COLLECTIONS.payments, id: payment.id, data: payment, op: 'set' })
+  )
   if (params.inventoryMode === 'return') {
     const reversals = await buildInventoryReversals(order.id, params.cancelledBy, now)
     reversals.forEach((r) => cancelOps.push({ collection: COLLECTIONS.inventoryTransactions, id: r.id, data: r, op: 'set' }))
@@ -738,6 +796,16 @@ export async function refundOrder(params: {
 
   const now = Date.now()
   const refundId = generateId()
+  const originalPayments = (await getCachedDocs<Payment>(COLLECTIONS.payments))
+    .filter((payment) => payment.orderId === original.id && payment.amount > 0)
+  const paidTotal = originalPayments.reduce((sum, payment) => sum + payment.amount, 0)
+  const cashPaid = originalPayments
+    .filter((payment) => payment.method === 'cash')
+    .reduce((sum, payment) => sum + payment.amount, 0)
+  const cashRefundAmount = paidTotal > 0
+    ? Math.round(refundAmount * (cashPaid / paidTotal) * 100) / 100
+    : refundAmount
+  const cardRefundAmount = Math.max(0, Math.round((refundAmount - cashRefundAmount) * 100) / 100)
 
   // Mark original order as refunded
   const updatedOriginal: Order = {
@@ -769,7 +837,8 @@ export async function refundOrder(params: {
     completedAt: now,
     cancelledAt: now,
     cancelledBy: params.cashierId,
-    cancelReasonAr: params.reasonAr
+    cancelReasonAr: params.reasonAr,
+    refundOfOrderId: original.id
   }
 
   // Refund order items (negative quantities for receipt display)
@@ -784,16 +853,32 @@ export async function refundOrder(params: {
   }))
 
   // Cash out — money leaves the drawer
-  const drawerTx: CashDrawerTransaction = {
+  const drawerTx: CashDrawerTransaction | null = cashRefundAmount > 0 ? {
     id: generateId(),
     type: 'cash_out',
-    amount: -refundAmount,
+    amount: -cashRefundAmount,
     shiftId: original.shiftId,
     orderId: refundId,
     noteAr: `استرداد طلب #${original.orderCode ?? original.orderNumber}: ${params.reasonAr}`,
     createdBy: params.cashierId,
     createdAt: now
-  }
+  } : null
+  const refundPayments: Payment[] = [
+    ...(cashRefundAmount > 0 ? [{
+      id: generateId(),
+      orderId: refundId,
+      amount: -cashRefundAmount,
+      method: 'cash' as const,
+      createdAt: now
+    }] : []),
+    ...(cardRefundAmount > 0 ? [{
+      id: generateId(),
+      orderId: refundId,
+      amount: -cardRefundAmount,
+      method: 'card' as const,
+      createdAt: now
+    }] : [])
+  ]
 
   // Inventory: restock refunded items via sale_reversal
   const inventoryReversals: InventoryTransaction[] = []
@@ -831,7 +916,8 @@ export async function refundOrder(params: {
     { collection: COLLECTIONS.orders, id: updatedOriginal.id, data: updatedOriginal, op: 'set' },
     { collection: COLLECTIONS.orders, id: refundOrder.id, data: refundOrder, op: 'set' },
     ...refundItems.map((ri) => ({ collection: COLLECTIONS.orderItems, id: ri.id, data: ri, op: 'set' as const })),
-    { collection: COLLECTIONS.cashDrawerTransactions, id: drawerTx.id, data: drawerTx, op: 'set' },
+    ...refundPayments.map((payment) => ({ collection: COLLECTIONS.payments, id: payment.id, data: payment, op: 'set' as const })),
+    ...(drawerTx ? [{ collection: COLLECTIONS.cashDrawerTransactions, id: drawerTx.id, data: drawerTx, op: 'set' as const }] : []),
     ...inventoryReversals.map((r) => ({ collection: COLLECTIONS.inventoryTransactions, id: r.id, data: r, op: 'set' as const }))
   ])
 

@@ -34,7 +34,9 @@ import { orderReference } from '@shared/services/order-reference'
 import {
   closeShift,
   ensureOpenShift,
-  getOpenShiftForCashier
+  getOpenShiftForCashier,
+  getShiftClosurePreview,
+  type ShiftClosurePreview
 } from '@renderer/features/shifts/shift-service'
 import { FloorMapPicker } from './FloorMapPicker'
 
@@ -322,41 +324,61 @@ function OpeningCashModal({
 // ── Close shift modal (replaces window.confirm + window.prompt) ───────────
 
 function CloseShiftModal({
-  unpaidCount,
+  preview,
+  performanceEnabled,
   onConfirm,
   onCancel
 }: {
-  unpaidCount: number
-  onConfirm: (closingCash: number | undefined) => void
+  preview: ShiftClosurePreview
+  performanceEnabled: boolean
+  onConfirm: (closingCash: number | undefined, differenceReason?: string) => void
   onCancel: () => void
 }): React.ReactElement {
   const [cashValue, setCashValue] = useState('')
+  const [differenceReason, setDifferenceReason] = useState('')
+  const parsedCash = cashValue.trim() === '' ? undefined : Number(cashValue)
+  const difference = parsedCash === undefined || !Number.isFinite(parsedCash)
+    ? undefined
+    : parsedCash - preview.expectedCash
+  const blocked = preview.pendingOrders.length > 0 || preview.incompletePaymentOrders.length > 0
+  const reasonRequired = performanceEnabled && difference !== undefined && Math.abs(difference) >= 0.01
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
         <div className="order-details__header">
-          <h2 className="order-details__title">تقفيل الشيفت</h2>
-          <button type="button" className="order-details__close" onClick={onCancel} aria-label="إغلاق">✕</button>
+          <h2 className="order-details__title">تسوية وإغلاق الشيفت</h2>
+          <button type="button" className="order-details__close" onClick={onCancel} aria-label="إغلاق">×</button>
         </div>
 
-        {unpaidCount > 0 && (
+        {blocked && (
           <div style={{
-            background: '#fef3c7',
-            border: '2px solid #f59e0b',
+            background: '#fef2f2',
+            border: '2px solid #ef4444',
             borderRadius: 6,
             padding: '8px 12px',
             marginBottom: 14,
             fontSize: '0.85rem',
             fontWeight: 700,
-            color: '#92400e'
+            color: '#991b1b'
           }}>
-            ⚠️ يوجد {unpaidCount} طلب غير مدفوع في الصالة
+            لا يمكن إغلاق الشيفت:
+            {preview.pendingOrders.length > 0 && ` ${preview.pendingOrders.length} طلب معلق أو غير مدفوع.`}
+            {preview.incompletePaymentOrders.length > 0 && ` ${preview.incompletePaymentOrders.length} طلب بمدفوعات ناقصة.`}
           </div>
         )}
 
+        <div className="stats-grid" style={{ marginBottom: 14 }}>
+          <div className="stat-card"><div className="stat-card__label">رصيد الافتتاح</div><div className="stat-card__value">{preview.openingCash.toFixed(2)}</div></div>
+          <div className="stat-card"><div className="stat-card__label">مبيعات نقدية</div><div className="stat-card__value">{preview.cashSales.toFixed(2)}</div></div>
+          <div className="stat-card"><div className="stat-card__label">مبيعات بطاقة</div><div className="stat-card__value">{preview.cardSales.toFixed(2)}</div></div>
+          <div className="stat-card"><div className="stat-card__label">مرتجعات نقدية</div><div className="stat-card__value">{preview.cashRefunds.toFixed(2)}</div></div>
+          <div className="stat-card"><div className="stat-card__label">تسويات الكاش</div><div className="stat-card__value">{preview.cashAdjustments.toFixed(2)}</div></div>
+          <div className="stat-card"><div className="stat-card__label">الكاش المتوقع</div><div className="stat-card__value">{preview.expectedCash.toFixed(2)}</div></div>
+        </div>
+
         <label className="field">
-          <span>الكاش الفعلي في الدرج عند الإغلاق (اختياري)</span>
+          <span>الكاش الفعلي في الدرج عند الإغلاق{performanceEnabled ? ' (مطلوب)' : ' (اختياري)'}</span>
           <input
             type="number"
             min="0"
@@ -367,20 +389,32 @@ function CloseShiftModal({
             autoFocus
           />
         </label>
-        <p style={{ fontSize: '0.8rem', color: 'var(--color-muted)', margin: '4px 0 16px' }}>
-          اترك الحقل فارغاً إذا لم تريد إدخال مبلغ الإغلاق
-        </p>
+        {difference !== undefined && (
+          <div className="stat-card" style={{ margin: '10px 0', borderColor: Math.abs(difference) < 0.01 ? '#22c55e' : '#f97316' }}>
+            <div className="stat-card__label">الفرق: الفعلي - المتوقع</div>
+            <div className="stat-card__value">{difference >= 0 ? '+' : ''}{difference.toFixed(2)}</div>
+          </div>
+        )}
+        {reasonRequired && (
+          <label className="field">
+            <span>سبب فرق الكاش (مطلوب)</span>
+            <textarea value={differenceReason} onChange={(event) => setDifferenceReason(event.target.value)} placeholder="مثال: عجز نقدي أثناء التسليم" />
+          </label>
+        )}
 
         <div className="modal-actions">
           <button
             type="button"
             className="btn btn--primary"
-            onClick={() => {
-              const parsed = Number(cashValue)
-              onConfirm(cashValue.trim() !== '' && !isNaN(parsed) ? parsed : undefined)
-            }}
+            disabled={
+              blocked ||
+              (performanceEnabled && parsedCash === undefined) ||
+              (parsedCash !== undefined && (!Number.isFinite(parsedCash) || parsedCash < 0)) ||
+              (reasonRequired && !differenceReason.trim())
+            }
+            onClick={() => onConfirm(parsedCash, differenceReason.trim() || undefined)}
           >
-            تأكيد التقفيل
+            تأكيد التسوية والإغلاق
           </button>
           <button type="button" className="btn btn--secondary" onClick={onCancel}>إلغاء</button>
         </div>
@@ -548,7 +582,8 @@ export function PosPage(): React.ReactElement {
 
   // ── REQ-13: Close shift modal ─────────────────────────────────────────
   const [closeShiftModal, setCloseShiftModal] = useState(false)
-  const [closeShiftUnpaidCount, setCloseShiftUnpaidCount] = useState(0)
+  const [closeShiftPreview, setCloseShiftPreview] = useState<ShiftClosurePreview | null>(null)
+  const [performanceTrackingEnabled, setPerformanceTrackingEnabled] = useState(false)
 
   // Occupied table confirmation modal
   const [occupiedTableModal, setOccupiedTableModal] = useState(false)
@@ -1060,17 +1095,23 @@ export function PosPage(): React.ReactElement {
   async function handleCloseShift(): Promise<void> {
     const shift = await getOpenShiftForCashier(user.id)
     if (!shift) { setMessage('لا يوجد شيفت مفتوح'); return }
-    const unpaidCount = (await listUnpaidDineInOrders()).length
-    setCloseShiftUnpaidCount(unpaidCount)
+    const [preview, settings] = await Promise.all([getShiftClosurePreview(shift), getSettings()])
+    setCloseShiftPreview(preview)
+    setPerformanceTrackingEnabled(settings.employeePerformanceTrackingEnabled === true)
     setCloseShiftModal(true)
   }
 
-  async function confirmCloseShift(closingCash: number | undefined): Promise<void> {
-    setCloseShiftModal(false)
+  async function confirmCloseShift(closingCash: number | undefined, differenceReason?: string): Promise<void> {
     const shift = await getOpenShiftForCashier(user.id)
     if (!shift) return
-    await closeShift(shift.id, user.id, closingCash)
-    setMessage('تم تقفيل الشيفت')
+    try {
+      await closeShift(shift.id, user.id, closingCash, { differenceReason })
+      setCloseShiftModal(false)
+      setCloseShiftPreview(null)
+      setMessage('تمت تسوية وإغلاق الشيفت')
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'تعذر إغلاق الشيفت')
+    }
   }
 
   // ── Render ────────────────────────────────────────────────────────────
@@ -1090,11 +1131,12 @@ export function PosPage(): React.ReactElement {
       )}
 
       {/* ── REQ-13: Close shift modal ── */}
-      {closeShiftModal && (
+      {closeShiftModal && closeShiftPreview && (
         <CloseShiftModal
-          unpaidCount={closeShiftUnpaidCount}
-          onConfirm={(cash) => void confirmCloseShift(cash)}
-          onCancel={() => setCloseShiftModal(false)}
+          preview={closeShiftPreview}
+          performanceEnabled={performanceTrackingEnabled}
+          onConfirm={(cash, reason) => void confirmCloseShift(cash, reason)}
+          onCancel={() => { setCloseShiftModal(false); setCloseShiftPreview(null) }}
         />
       )}
 

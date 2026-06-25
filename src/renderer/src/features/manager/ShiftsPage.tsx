@@ -12,6 +12,7 @@ import { getSettings } from '@renderer/features/orders/order-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { MdArchive, MdLock, MdPrint, MdRefresh, MdUnarchive } from 'react-icons/md'
 import { WorkShiftManagement } from './WorkShiftManagement'
+import { EmployeePerformanceManagement } from './EmployeePerformanceManagement'
 
 type ShiftViewMode = 'active' | 'archived'
 
@@ -68,12 +69,15 @@ export function ShiftsPage(): React.ReactElement {
   const [allShifts, setAllShifts] = useState<Shift[]>([])
   const [viewMode, setViewMode] = useState<ShiftViewMode>('active')
   const [selected, setSelected] = useState<ShiftSummary | null>(null)
+  const [performanceEnabled, setPerformanceEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
-    setAllShifts(await listShifts(true))
+    const [shifts, settings] = await Promise.all([listShifts(true), getSettings()])
+    setAllShifts(shifts)
+    setPerformanceEnabled(settings.employeePerformanceTrackingEnabled === true)
     setLoading(false)
   }, [])
 
@@ -99,6 +103,10 @@ export function ShiftsPage(): React.ReactElement {
   }
 
   async function handleClose(shift: Shift): Promise<void> {
+    if (performanceEnabled) {
+      setMessage('عند تفعيل تتبع الأداء يجب إغلاق الشيفت من واجهة الكاشير بعد إدخال الكاش الفعلي والتسوية.')
+      return
+    }
     await closeShift(shift.id, user.id)
     setMessage('تم تقفيل الشيفت')
     await load()
@@ -130,6 +138,7 @@ export function ShiftsPage(): React.ReactElement {
   return (
     <div className="shifts-page">
       <WorkShiftManagement />
+      <EmployeePerformanceManagement />
       {message && <p className="form-message form-message--ok">{message}</p>}
       <div className="card">
         <div className="reports-filter__options" style={{ marginBottom: 12 }}>
@@ -183,7 +192,7 @@ export function ShiftsPage(): React.ReactElement {
                     <button type="button" className="btn btn--secondary btn--sm" onClick={() => void openSummary(shift)}>
                       <MdRefresh /> عرض
                     </button>
-                    {shift.status === 'open' && viewMode === 'active' && (
+                    {shift.status === 'open' && viewMode === 'active' && !performanceEnabled && (
                       <button type="button" className="btn btn--secondary btn--sm" onClick={() => void handleClose(shift)}>
                         <MdLock /> تقفيل
                       </button>

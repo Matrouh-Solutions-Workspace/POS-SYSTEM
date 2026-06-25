@@ -42,6 +42,8 @@ export interface Order {
   cancelledBy?: string
   cancelReasonAr?: string
   cancelInventoryMode?: 'return' | 'waste'
+  /** Original order for full or partial refund records. */
+  refundOfOrderId?: string
 }
 
 export interface OrderItem {
