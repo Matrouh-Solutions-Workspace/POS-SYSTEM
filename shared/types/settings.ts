@@ -14,6 +14,8 @@ export interface AppSettings {
   serviceRate?: number
   /** Default delivery fee added to delivery orders */
   defaultDeliveryFee?: number
+  /** Enforce employee work schedules for cashier login and POS activity. */
+  shiftManagementEnabled?: boolean
   /**
    * Maximum discount % a cashier can apply without manager override.
    * undefined or 100 means no limit.

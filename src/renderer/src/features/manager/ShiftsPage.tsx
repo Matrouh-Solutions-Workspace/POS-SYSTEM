@@ -11,6 +11,7 @@ import {
 import { getSettings } from '@renderer/features/orders/order-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { MdArchive, MdLock, MdPrint, MdRefresh, MdUnarchive } from 'react-icons/md'
+import { WorkShiftManagement } from './WorkShiftManagement'
 
 type ShiftViewMode = 'active' | 'archived'
 
@@ -128,6 +129,7 @@ export function ShiftsPage(): React.ReactElement {
 
   return (
     <div className="shifts-page">
+      <WorkShiftManagement />
       {message && <p className="form-message form-message--ok">{message}</p>}
       <div className="card">
         <div className="reports-filter__options" style={{ marginBottom: 12 }}>

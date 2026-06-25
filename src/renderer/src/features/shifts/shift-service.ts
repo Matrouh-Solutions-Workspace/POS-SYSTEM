@@ -1,9 +1,9 @@
 /**
  * Shift service — SQLite primary database.
  */
-import type { CashDrawerTransaction, InventoryTransaction, Order, OrderItem, Shift } from '@shared/types'
+import type { AppUser, CashDrawerTransaction, InventoryTransaction, Order, OrderItem, Shift, ShiftAccessResult } from '@shared/types'
 import { COLLECTIONS } from '@shared/constants/collections'
-import { cacheDocs, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
+import { cacheDocs, getCachedDoc, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 import { generateId } from '@renderer/lib/utils/id'
 import { listOrders } from '../orders/order-service'
 import { listInventoryTransactions, listIngredients } from '../inventory/inventory-service'
@@ -104,6 +104,16 @@ export async function ensureOpenShift(params: {
   cashierCode?: string
   openingCash?: number
 }): Promise<Shift> {
+  const cashier = await getCachedDoc<AppUser>(COLLECTIONS.users, params.cashierId)
+  const access: ShiftAccessResult = cashier?.role === 'cashier'
+    ? await import('./work-shift-service').then(({ validateUserShiftAccess }) =>
+        validateUserShiftAccess(params.cashierId)
+      )
+    : { allowed: true }
+  if (!access.allowed) {
+    throw new Error(access.reason ?? 'لا يمكن استخدام نقطة البيع خارج وقت وردية العمل')
+  }
+
   const existing = await getOpenShiftForCashier(params.cashierId)
   if (existing) return existing
 
@@ -116,6 +126,12 @@ export async function ensureOpenShift(params: {
     status: 'open',
     archived: false,
     openingCash: params.openingCash,
+    workShiftId: access.workShift?.id,
+    workShiftName: access.workShift?.name,
+    assignmentId: access.assignment?.id,
+    scheduledStartAt: access.scheduledStartAt,
+    scheduledEndAt: access.scheduledEndAt,
+    overtimeStartedAt: access.overtimeStartedAt,
     openedAt: now,
     createdAt: now,
     updatedAt: now
@@ -139,13 +155,57 @@ export async function ensureOpenShift(params: {
 
 export async function closeShift(shiftId: string, closedBy: string, closingCash?: number): Promise<void> {
   const now = Date.now()
+  const current = await getCachedDoc<Shift>(COLLECTIONS.shifts, shiftId)
+  const closingSummary = current
+    ? await getShiftSummary({ ...current, closedAt: now, closingCash })
+    : null
+  const overtimeMinutes = current?.scheduledEndAt
+    ? Math.max(0, Math.ceil((now - current.scheduledEndAt) / 60_000))
+    : undefined
   await patchCachedShifts([shiftId], {
     status: 'closed',
     closedAt: now,
     closedBy,
     closingCash,
+    overtimeStartedAt: overtimeMinutes ? current?.scheduledEndAt : current?.overtimeStartedAt,
+    overtimeMinutes,
+    totalSales: closingSummary?.revenue,
+    transactionCount: closingSummary?.completedOrders.length,
+    expectedCash: closingSummary?.expectedCash,
+    cashDifference: closingSummary?.cashDifference,
     updatedAt: now
   })
+  if (current) {
+    const closedSession: Shift = {
+      ...current,
+      status: 'closed',
+      closedAt: now,
+      closedBy,
+      closingCash,
+      overtimeStartedAt: overtimeMinutes ? current.scheduledEndAt : current.overtimeStartedAt,
+      overtimeMinutes,
+      totalSales: closingSummary?.revenue,
+      transactionCount: closingSummary?.completedOrders.length,
+      expectedCash: closingSummary?.expectedCash,
+      cashDifference: closingSummary?.cashDifference,
+      updatedAt: now
+    }
+    const record = await import('./work-shift-service').then(({ saveOvertimeForClosedSession }) =>
+      saveOvertimeForClosedSession(closedSession)
+    )
+    if (record) {
+      void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+        logAudit({
+          action: 'overtime_recorded',
+          actorId: closedBy,
+          actorName: closedBy,
+          targetId: record.id,
+          targetType: 'shift',
+          detailAr: `تسجيل ${record.durationMinutes} دقيقة عمل إضافي`
+        })
+      )
+    }
+  }
 
   // Audit
   void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>

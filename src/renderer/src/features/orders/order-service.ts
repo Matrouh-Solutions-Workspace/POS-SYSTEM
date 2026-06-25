@@ -53,6 +53,7 @@ export async function getSettings(): Promise<AppSettings> {
     taxRate: 0,
     serviceRate: 0,
     defaultDeliveryFee: 0,
+    shiftManagementEnabled: false,
     networkMode: 'standalone',
     masterServerPort: 47831,
     sideDisconnectPolicy: 'block_actions',
@@ -92,6 +93,7 @@ export async function updateSettings(
       | 'taxRate'
       | 'serviceRate'
       | 'defaultDeliveryFee'
+      | 'shiftManagementEnabled'
       | 'maxCashierDiscountPct'
       | 'keyboardShortcuts'
       | 'networkMode'

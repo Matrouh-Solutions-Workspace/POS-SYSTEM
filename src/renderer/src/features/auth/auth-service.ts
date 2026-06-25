@@ -75,6 +75,15 @@ function normalizeUsername(username: string): string {
   return username.toLowerCase().trim()
 }
 
+async function enforceCashierWorkShift(user: AppUser): Promise<void> {
+  if (user.role !== 'cashier') return
+  const { validateUserShiftAccess } = await import('@renderer/features/shifts/work-shift-service')
+  const access = await validateUserShiftAccess(user.id)
+  if (!access.allowed) {
+    throw new Error(access.reason ?? 'لا يمكن تسجيل الدخول خارج وقت وردية العمل')
+  }
+}
+
 async function isLanSideDevice(): Promise<boolean> {
   const network = await window.electronAPI.getNetworkStatus().catch(() => null) as { mode?: string } | null
   return network?.mode === 'side'
@@ -114,6 +123,12 @@ export async function restoreSessionFromLocal(): Promise<AppUser | null> {
   if (!session) return null
   const user = await getCachedDoc<AppUser>(COLLECTIONS.users, session.userId)
   if (!user?.active) return null
+  try {
+    await enforceCashierWorkShift(user)
+  } catch {
+    clearSession()
+    return null
+  }
   return user
 }
 
@@ -124,6 +139,7 @@ export async function loginAndLoadUser(username: string, password: string): Prom
   const mainAuth = await window.electronAPI.authLoginLocal(normalized, passwordHash).catch(() => null)
   if (mainAuth?.ok && mainAuth.user) {
     const user = mainAuth.user as AppUser
+    await enforceCashierWorkShift(user)
     writeSession(user.id)
     void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
       logAudit({ action: 'login', actorId: user.id, actorName: actorAuditName(user), detailAr: `ØªØ³Ø¬ÙŠÙ„ Ø¯Ø®ÙˆÙ„: ${user.displayName}` })
@@ -145,6 +161,7 @@ export async function loginAndLoadUser(username: string, password: string): Prom
   if (!user.active) {
     throw new Error('الحساب غير نشط')
   }
+  await enforceCashierWorkShift(user)
   writeSession(user.id)
   // Audit: login
   void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
