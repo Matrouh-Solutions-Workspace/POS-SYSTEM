@@ -15,7 +15,6 @@ import { actorAuditName, describePatch, type AuditActor } from '@renderer/featur
 // ---------------------------------------------------------------------------
 
 const SESSION_KEY = 'abdokofta.session.v2'
-const OFFLINE_AUTH_KEY = 'abdokofta.offlineAuth.v1'
 
 interface StoredSession {
   userId: string
@@ -40,37 +39,6 @@ function clearSession(): void {
   localStorage.removeItem(SESSION_KEY)
 }
 
-// ---------------------------------------------------------------------------
-// Offline auth cache (hashed passwords in localStorage)
-// ---------------------------------------------------------------------------
-
-interface CachedAuthUser {
-  username: string
-  passwordHash: string
-  userId: string
-  updatedAt: number
-}
-
-function readAuthCache(): CachedAuthUser[] {
-  try {
-    return JSON.parse(localStorage.getItem(OFFLINE_AUTH_KEY) ?? '[]') as CachedAuthUser[]
-  } catch {
-    return []
-  }
-}
-
-function writeAuthCache(entries: CachedAuthUser[]): void {
-  localStorage.setItem(OFFLINE_AUTH_KEY, JSON.stringify(entries))
-}
-
-async function sha256(value: string): Promise<string> {
-  const bytes = new TextEncoder().encode(value)
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
-}
-
 function normalizeUsername(username: string): string {
   return username.toLowerCase().trim()
 }
@@ -90,31 +58,17 @@ async function isLanSideDevice(): Promise<boolean> {
 }
 
 async function storeLocalCredential(user: AppUser, password: string): Promise<void> {
-  const side = await isLanSideDevice()
   const username = normalizeUsername(user.username)
-  const passwordHash = await sha256(`${username}:${password}`)
-  if (!side) {
-    const existing = readAuthCache().filter((e) => e.username !== username)
-    existing.push({ username, passwordHash, userId: user.id, updatedAt: Date.now() })
-    writeAuthCache(existing)
-  }
-  await window.electronAPI.authStoreCredential(username, passwordHash, user)
-}
-
-async function verifyLocalCredential(username: string, password: string): Promise<string | null> {
-  if (await isLanSideDevice()) return null
-  const norm = normalizeUsername(username)
-  const hash = await sha256(`${norm}:${password}`)
-  const match = readAuthCache().find((e) => e.username === norm && e.passwordHash === hash)
-  return match?.userId ?? null
+  await window.electronAPI.authStoreCredential(username, password, user)
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-export function hasOfflineAuthUsers(): boolean {
-  return readAuthCache().length > 0
+export async function hasOfflineAuthUsers(): Promise<boolean> {
+  const result = await window.electronAPI.authHasUsers().catch(() => null)
+  return result?.ok === true && result.hasUsers
 }
 
 /** Restore session from localStorage → look up user in SQLite */
@@ -135,8 +89,7 @@ export async function restoreSessionFromLocal(): Promise<AppUser | null> {
 /** Login with username + password from the local credential store. */
 export async function loginAndLoadUser(username: string, password: string): Promise<AppUser> {
   const normalized = normalizeUsername(username)
-  const passwordHash = await sha256(`${normalized}:${password}`)
-  const mainAuth = await window.electronAPI.authLoginLocal(normalized, passwordHash).catch(() => null)
+  const mainAuth = await window.electronAPI.authLoginLocal(normalized, password).catch(() => null)
   if (mainAuth?.ok && mainAuth.user) {
     const user = mainAuth.user as AppUser
     await enforceCashierWorkShift(user)
@@ -150,7 +103,7 @@ export async function loginAndLoadUser(username: string, password: string): Prom
     throw new Error(mainAuth?.error ?? 'لا يمكن تسجيل الدخول على الجهاز الجانبي بدون اتصال صحيح بالماستر')
   }
 
-  const userId = await verifyLocalCredential(username, password)
+  const userId = null
   if (!userId) {
     throw new Error('اسم المستخدم أو كلمة المرور غير صحيحة')
   }
@@ -189,7 +142,7 @@ export async function createFirstOfflineManager(params: {
   if (await isLanSideDevice()) {
     throw new Error('لا يمكن إنشاء مدير محلي على جهاز جانبي. سجّل الدخول بحساب موجود على الماستر.')
   }
-  if (hasOfflineAuthUsers()) {
+  if (await hasOfflineAuthUsers()) {
     throw new Error('يوجد حساب محلي بالفعل')
   }
   const username = normalizeUsername(params.username)
@@ -399,7 +352,6 @@ export async function deleteAccount(userId: string, currentUserId: string): Prom
     )
   }
 
-  writeAuthCache(readAuthCache().filter((e) => e.userId !== userId))
 }
 
 // ---------------------------------------------------------------------------

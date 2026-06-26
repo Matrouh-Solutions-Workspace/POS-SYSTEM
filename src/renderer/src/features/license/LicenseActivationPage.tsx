@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 
 interface LicenseActivationPageProps {
   status: {
@@ -22,54 +22,6 @@ export function LicenseActivationPage({
   const [masterUrl, setMasterUrl] = useState('http://192.168.1.10:47831')
   const [deviceName, setDeviceName] = useState(() => `POS-${Math.floor(Math.random() * 900 + 100)}`)
   const [pairingCode, setPairingCode] = useState('')
-
-  const keyBufferRef = useRef('')
-  const bufferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent): void {
-      if (step !== 'license') return
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'Enter') {
-        e.preventDefault()
-        const key = keyBufferRef.current
-        keyBufferRef.current = ''
-        if (bufferTimerRef.current) clearTimeout(bufferTimerRef.current)
-        if (!key) return
-        void (async () => {
-          setBusy(true)
-          try {
-            const result = await window.electronAPI.activateMasterKey(key)
-            if (result.ok) {
-              setMessage('تم تفعيل الرخصة. اختر نوع هذا الجهاز.')
-              setStep('role')
-            } else {
-              setMessage(result.error ?? 'المفتاح غير صحيح')
-            }
-          } finally {
-            setBusy(false)
-          }
-        })()
-        return
-      }
-
-      if (e.ctrlKey || e.altKey || e.metaKey) return
-      if (e.key.length === 1) {
-        keyBufferRef.current += e.key
-        if (bufferTimerRef.current) clearTimeout(bufferTimerRef.current)
-        bufferTimerRef.current = setTimeout(() => {
-          keyBufferRef.current = ''
-        }, 10_000)
-      } else if (e.key === 'Backspace') {
-        keyBufferRef.current = keyBufferRef.current.slice(0, -1)
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-      if (bufferTimerRef.current) clearTimeout(bufferTimerRef.current)
-    }
-  }, [step])
 
   async function createRequest(): Promise<void> {
     setBusy(true)

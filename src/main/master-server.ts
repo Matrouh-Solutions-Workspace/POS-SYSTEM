@@ -19,7 +19,8 @@ import {
   readIngredientStocks,
   verifyAuthCredential,
   storeAuthCredential,
-  deleteAuthCredentialForUser
+  deleteAuthCredentialForUser,
+  hasAuthCredentials
 } from './local-store'
 import { getLicenseStatus } from './license'
 import { readLatestUpdateYml, resolveUpdateArtifact } from './master-update-artifacts'
@@ -212,15 +213,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return
     }
 
+    if (req.method === 'POST' && url.pathname === '/auth/has-users') {
+      ok(res, { ok: true, hasUsers: hasAuthCredentials() })
+      return
+    }
+
     if (req.method === 'POST' && url.pathname === '/auth/login') {
-      const body = await readBody(req) as { username?: string; passwordHash?: string }
-      ok(res, verifyAuthCredential(body.username ?? '', body.passwordHash ?? ''))
+      const body = await readBody(req) as { username?: string; password?: string; passwordHash?: string }
+      ok(res, verifyAuthCredential(body.username ?? '', body.password ?? body.passwordHash ?? ''))
       return
     }
 
     if (req.method === 'POST' && url.pathname === '/auth/store-credential') {
-      const body = await readBody(req) as { username?: string; passwordHash?: string; user?: unknown }
-      ok(res, storeAuthCredential(body.username ?? '', body.passwordHash ?? '', body.user))
+      const body = await readBody(req) as { username?: string; password?: string; passwordHash?: string; user?: unknown }
+      ok(res, storeAuthCredential(body.username ?? '', body.password ?? body.passwordHash ?? '', body.user))
       return
     }
 

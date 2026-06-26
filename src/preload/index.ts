@@ -35,8 +35,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('license:create-activation-request'),
   importLicense: (): Promise<{ ok: boolean; status?: unknown; error?: string }> =>
     ipcRenderer.invoke('license:import-license'),
-  activateMasterKey: (key: string): Promise<{ ok: boolean; error?: string }> =>
-    ipcRenderer.invoke('license:activate-master-key', key),
   getNetworkStatus: (): Promise<unknown> =>
     ipcRenderer.invoke('network:get-status'),
   pairSideDevice: (params: { masterUrl: string; deviceName: string; code: string }): Promise<{ ok: boolean; error?: string }> =>
@@ -51,10 +49,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('network:master-reset-pairing-code'),
   revokeMasterDevice: (deviceId: string): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('network:master-revoke-device', deviceId),
-  authLoginLocal: (username: string, passwordHash: string): Promise<{ ok: boolean; user?: unknown; error?: string }> =>
-    ipcRenderer.invoke('auth:login-local', username, passwordHash),
-  authStoreCredential: (username: string, passwordHash: string, user: unknown): Promise<{ ok: boolean; error?: string }> =>
-    ipcRenderer.invoke('auth:store-credential', username, passwordHash, user),
+  authHasUsers: (): Promise<{ ok: boolean; hasUsers: boolean; error?: string }> =>
+    ipcRenderer.invoke('auth:has-users'),
+  authLoginLocal: (username: string, password: string): Promise<{ ok: boolean; user?: unknown; error?: string }> =>
+    ipcRenderer.invoke('auth:login-local', username, password),
+  authStoreCredential: (username: string, password: string, user: unknown): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('auth:store-credential', username, password, user),
   getLocalStoreStatus: (): Promise<{ ok: boolean; path: string; pendingOutbox: number; error?: string }> =>
     ipcRenderer.invoke('local-store:get-status'),
   cacheDocuments: (

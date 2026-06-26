@@ -295,6 +295,7 @@ export function OrderHistoryPage(): React.ReactElement {
   const [refundSaving, setRefundSaving] = useState(false)
 
   const currency = 'ج.م'
+  const canVoidOrRefund = user.role === 'manager'
 
   async function load(): Promise<void> {
     const [loaded, shift] = await Promise.all([listOrders(300), getOpenShiftForCashier(user.id)])
@@ -565,6 +566,7 @@ export function OrderHistoryPage(): React.ReactElement {
                 const unpaid = isOrderUnpaid(order)
                 const canEdit = order.status === 'draft' && order.paymentStatus === 'unpaid'
                 const canRefund =
+                  canVoidOrRefund &&
                   order.status === 'completed' &&
                   (order.paymentStatus === 'paid' || order.paymentStatus === 'split') &&
                   !order.orderCode?.startsWith('RFD-')
@@ -668,7 +670,7 @@ export function OrderHistoryPage(): React.ReactElement {
                         )}
 
                         {/* Cancel button — REQ-13: opens modal, no window.confirm */}
-                        {order.status !== 'cancelled' && !isRefundRecord && (
+                        {canVoidOrRefund && order.status !== 'cancelled' && !isRefundRecord && (
                           <button
                             type="button"
                             className="btn btn--danger btn--sm"

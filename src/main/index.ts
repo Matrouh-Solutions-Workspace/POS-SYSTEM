@@ -358,10 +358,7 @@ import { initAutoUpdater } from './auto-updater'
 import {
   createActivationRequestFile,
   getLicenseStatus,
-  importLicenseFile,
-  isDevBypassActive,
-  toggleDevLicense,
-  activateMasterKey
+  importLicenseFile
 } from './license'
 import {
   cacheDocuments,
@@ -380,6 +377,7 @@ import {
   resetDatabase,
   runConfiguredBackup,
   deleteAuthCredentialForUser,
+  hasAuthCredentials,
   storeAuthCredential,
   verifyAuthCredential
 } from './local-store'
@@ -404,9 +402,6 @@ app.whenReady().then(() => {
   ipcMain.handle('license:get-status', async () => getLicenseStatus())
   ipcMain.handle('license:create-activation-request', () => createActivationRequestFile())
   ipcMain.handle('license:import-license', () => importLicenseFile())
-  ipcMain.handle('license:activate-master-key', (_event, key: string) => {
-    return activateMasterKey(key)
-  })
   ipcMain.handle('network:get-status', async () => {
     const side = readSideConnection()
     if (side) {
@@ -460,13 +455,17 @@ app.whenReady().then(() => {
   ipcMain.handle('network:master-revoke-device', (_, deviceId: string) => ({
     ok: revokeMasterDevice(deviceId)
   }))
-  ipcMain.handle('auth:login-local', async (_, username: string, passwordHash: string) => {
-    if (isSideMode()) return callMaster('/auth/login', { username, passwordHash })
-    return verifyAuthCredential(username, passwordHash)
+  ipcMain.handle('auth:has-users', async () => {
+    if (isSideMode()) return callMaster('/auth/has-users')
+    return { ok: true as const, hasUsers: hasAuthCredentials() }
   })
-  ipcMain.handle('auth:store-credential', (_, username: string, passwordHash: string, user: unknown) => {
-    if (isSideMode()) return callMaster('/auth/store-credential', { username, passwordHash, user })
-    return storeAuthCredential(username, passwordHash, user)
+  ipcMain.handle('auth:login-local', async (_, username: string, password: string) => {
+    if (isSideMode()) return callMaster('/auth/login', { username, password })
+    return verifyAuthCredential(username, password)
+  })
+  ipcMain.handle('auth:store-credential', (_, username: string, password: string, user: unknown) => {
+    if (isSideMode()) return callMaster('/auth/store-credential', { username, password, user })
+    return storeAuthCredential(username, password, user)
   })
   ipcMain.handle('local-store:get-status', async () => {
     if (isSideMode()) {
@@ -699,9 +698,8 @@ app.whenReady().then(() => {
     }
 
     // -----------------------------------------------------------------------
-    // Ctrl+Shift+1 arms the dev menu for 2 s, then:
-    //   → Ctrl+Shift+P  toggle license bypass (activate / deactivate)
-    //   → Ctrl+Shift+R  wipe SQLite database   (fresh first-run state)
+    // Ctrl+Shift+1 arms the dev reset menu for 2 s, then:
+    //   Ctrl+Shift+R wipes SQLite database (fresh first-run state)
     // -----------------------------------------------------------------------
     let devArmed = false
     let devTimer: ReturnType<typeof setTimeout> | null = null
@@ -710,7 +708,7 @@ app.whenReady().then(() => {
       devArmed = true
       if (devTimer) clearTimeout(devTimer)
       devTimer = setTimeout(() => { devArmed = false; devTimer = null }, 2000)
-      console.log('[dev] armed — Ctrl+Shift+P = toggle license | Ctrl+Shift+R = reset DB')
+      console.log('[dev] armed - Ctrl+Shift+R = reset DB')
     }
 
     function disarmDev(): void {
@@ -719,19 +717,6 @@ app.whenReady().then(() => {
     }
 
     globalShortcut.register('CommandOrControl+Shift+1', armDev)
-
-    // Toggle license bypass
-    globalShortcut.register('CommandOrControl+Shift+P', () => {
-      if (!devArmed) return
-      disarmDev()
-      const wasActive = isDevBypassActive()
-      console.log('[dev-license]', toggleDevLicense())
-      const win = BrowserWindow.getFocusedWindow() ?? mainWindow
-      win?.webContents.executeJavaScript(devToast(
-        wasActive ? '#c0392b' : '#27ae60',
-        wasActive ? '🔴 License OFF — restart app' : '🟢 License ON — restart app'
-      )).catch(() => {})
-    })
 
     // Wipe SQLite database
     globalShortcut.register('CommandOrControl+Shift+R', () => {

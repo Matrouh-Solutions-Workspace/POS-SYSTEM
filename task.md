@@ -69,14 +69,14 @@
 
 ## Phase 5 — Security & Testing
 
-- `[ ]` **5.1** Replace password hashing
-- `[ ]` **5.2** Schema migration framework
-- `[ ]` **5.3** Atomic audit entries
-- `[ ]` **5.4** Fix report accuracy
-- `[ ]` **5.5** Add automated tests
-- `[ ]` **5.6** Manager authorization for refunds/voids
-- `[ ]` **5.7** Remove licensing bypass
-- `[ ]` **5.8** Rotate credentials
+- `[x]` **5.1** Replace password hashing
+- `[x]` **5.2** Schema migration framework
+- `[x]` **5.3** Atomic audit entries
+- `[x]` **5.4** Fix report accuracy
+- `[x]` **5.5** Add automated tests during dist:win and dist:win:publish
+- `[x]` **5.6** Manager authorization for refunds/voids
+- `[x]` **5.7** Remove licensing bypass
+- `[x]` **5.8** Rotate credentials
 
 ## Phase 6 — Post-Launch
 

@@ -36,7 +36,7 @@ import type { AppSettings } from '@shared/types'
 import { cacheDocs, getCachedDoc, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 import { dbBatch, type DbBatchOp } from '@renderer/lib/db/sqlite-db'
 import { generateId } from '@renderer/lib/utils/id'
-import { actorAuditName, describePatch, type AuditActor } from '@renderer/features/audit/audit-service'
+import { actorAuditName, buildAuditOperations, describePatch, type AuditActor } from '@renderer/features/audit/audit-service'
 import { getRecipe } from '../menu/menu-service'
 import { ensureOpenShift, getOpenShiftForCashier } from '../shifts/shift-service'
 import { nextLocalShiftOrderReference } from '@renderer/lib/offline/order-number'
@@ -48,6 +48,14 @@ async function getCurrentDeviceId(): Promise<string> {
     side?: { deviceName?: string }
   } | null
   return network?.side?.deviceName?.trim() || (network?.mode === 'side' ? 'Side POS' : 'Master POS')
+}
+
+async function requireManagerAuthorization(userId: string): Promise<AppUser> {
+  const user = await getCachedDoc<AppUser>(COLLECTIONS.users, userId)
+  if (!user?.active || user.role !== 'manager') {
+    throw new Error('هذه العملية تتطلب اعتماد مدير')
+  }
+  return user
 }
 
 // ---------------------------------------------------------------------------
@@ -794,6 +802,7 @@ export async function cancelOrder(params: {
   reasonAr?: string
   inventoryMode: 'return' | 'waste'
 }): Promise<void> {
+  const actor = await requireManagerAuthorization(params.cancelledBy)
   const order = await getCachedDoc<Order>(COLLECTIONS.orders, params.orderId)
   if (!order) return
   if (order.status === 'cancelled') return
@@ -880,31 +889,26 @@ export async function cancelOrder(params: {
     reversalPlan.transactions.forEach((r) => cancelOps.push({ collection: COLLECTIONS.inventoryTransactions, id: r.id, data: r, op: 'set' }))
     reversalPlan.batches.forEach((batch) => cancelOps.push({ collection: COLLECTIONS.inventoryBatches, id: batch.id, data: batch, op: 'set' }))
   }
-  await dbBatch(cancelOps)
-
-  // Audit
-  void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
-    logAudit({
-      action: 'order_cancelled',
+  cancelOps.push(...await buildAuditOperations({
+    action: 'order_cancelled',
+    actorId: params.cancelledBy,
+    actorName: actorAuditName(actor),
+    targetId: order.id,
+    targetType: 'order',
+    detailAr: `إلغاء طلب #${order.orderCode ?? order.orderNumber} - إجمالي: ${order.total.toFixed(2)}${params.reasonAr ? ` - السبب: ${params.reasonAr}` : ''}`
+  }))
+  if (roundingReversal) {
+    cancelOps.push(...await buildAuditOperations({
+      action: 'cash_rounding_applied',
       actorId: params.cancelledBy,
-      actorName: params.cancelledBy,
+      actorName: actorAuditName(actor),
       targetId: order.id,
       targetType: 'order',
-      detailAr: `إلغاء طلب #${order.orderCode ?? order.orderNumber} — إجمالي: ${order.total.toFixed(2)}${params.reasonAr ? ` — السبب: ${params.reasonAr}` : ''}`
-    })
-  )
-  if (roundingReversal) {
-    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
-      logAudit({
-        action: 'cash_rounding_applied',
-        actorId: params.cancelledBy,
-        actorName: params.cancelledBy,
-        targetId: order.id,
-        targetType: 'order',
-        detailAr: `عكس تقريب نقدي بقيمة ${Math.abs(roundingReversal.differenceAmount).toFixed(2)} بسبب إلغاء طلب #${order.orderCode ?? order.orderNumber}`
-      })
-    )
+      detailAr: `عكس تقريب نقدي بقيمة ${Math.abs(roundingReversal.differenceAmount).toFixed(2)} بسبب إلغاء طلب #${order.orderCode ?? order.orderNumber}`
+    }))
   }
+  await dbBatch(cancelOps)
+
 }
 
 async function buildFifoInventoryReversals(
@@ -1002,6 +1006,7 @@ export async function refundOrder(params: {
   lines: RefundLine[]
   reasonAr: string
 }): Promise<RefundResult> {
+  const actor = await requireManagerAuthorization(params.cashierId)
   if (!params.lines.length) throw new Error('اختر صنفًا واحدًا على الأقل للاسترداد')
   if (!params.reasonAr.trim()) throw new Error('سبب الاسترداد مطلوب')
 
@@ -1190,7 +1195,7 @@ export async function refundOrder(params: {
   }
 
   // Atomic write
-  await dbBatch([
+  const refundOps: DbBatchOp[] = [
     { collection: COLLECTIONS.orders, id: updatedOriginal.id, data: updatedOriginal, op: 'set' },
     { collection: COLLECTIONS.orders, id: refundOrder.id, data: refundOrder, op: 'set' },
     ...refundItems.map((ri) => ({ collection: COLLECTIONS.orderItems, id: ri.id, data: ri, op: 'set' as const })),
@@ -1204,31 +1209,26 @@ export async function refundOrder(params: {
     ...(drawerTx ? [{ collection: COLLECTIONS.cashDrawerTransactions, id: drawerTx.id, data: drawerTx, op: 'set' as const }] : []),
     ...inventoryReversals.map((r) => ({ collection: COLLECTIONS.inventoryTransactions, id: r.id, data: r, op: 'set' as const })),
     ...Array.from(changedRefundBatches.values()).map((batch) => ({ collection: COLLECTIONS.inventoryBatches, id: batch.id, data: batch, op: 'set' as const }))
-  ])
-
-  // Audit
-  void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
-    logAudit({
-      action: 'order_refunded',
+  ]
+  refundOps.push(...await buildAuditOperations({
+    action: 'order_refunded',
+    actorId: params.cashierId,
+    actorName: actorAuditName(actor),
+    targetId: params.originalOrderId,
+    targetType: 'order',
+    detailAr: `استرداد ${refundAmount.toFixed(2)} من طلب #${original.orderCode ?? original.orderNumber} - ${params.reasonAr}`
+  }))
+  if (roundingReversal) {
+    refundOps.push(...await buildAuditOperations({
+      action: 'cash_rounding_applied',
       actorId: params.cashierId,
-      actorName: params.cashierName,
+      actorName: actorAuditName(actor),
       targetId: params.originalOrderId,
       targetType: 'order',
-      detailAr: `استرداد ${refundAmount.toFixed(2)} من طلب #${original.orderCode ?? original.orderNumber} — ${params.reasonAr}`
-    })
-  )
-  if (roundingReversal) {
-    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
-      logAudit({
-        action: 'cash_rounding_applied',
-        actorId: params.cashierId,
-        actorName: params.cashierName,
-        targetId: params.originalOrderId,
-        targetType: 'order',
-        detailAr: `عكس تقريب نقدي بقيمة ${Math.abs(roundingReversal.differenceAmount).toFixed(2)} بسبب استرداد طلب #${original.orderCode ?? original.orderNumber}`
-      })
-    )
+      detailAr: `عكس تقريب نقدي بقيمة ${Math.abs(roundingReversal.differenceAmount).toFixed(2)} بسبب استرداد طلب #${original.orderCode ?? original.orderNumber}`
+    }))
   }
+  await dbBatch(refundOps)
 
   return { refundOrder, refundAmount }
 }

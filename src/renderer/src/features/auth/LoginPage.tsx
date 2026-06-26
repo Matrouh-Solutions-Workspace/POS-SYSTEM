@@ -18,18 +18,22 @@ export function LoginPage(): React.ReactElement {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [localSetupMode, setLocalSetupMode] = useState(
-    () => !hasOfflineAuthUsers() && !navigator.onLine
-  )
+  const [hasLocalUsers, setHasLocalUsers] = useState(true)
+  const [localSetupMode, setLocalSetupMode] = useState(false)
   const [isSideDevice, setIsSideDevice] = useState(false)
 
   useEffect(() => {
     let disposed = false
-    void window.electronAPI.getNetworkStatus().then((status) => {
+    void Promise.all([
+      window.electronAPI.getNetworkStatus().catch(() => null),
+      hasOfflineAuthUsers()
+    ]).then(([status, hasUsers]) => {
       const side = (status as { mode?: string } | null)?.mode === 'side'
       if (disposed) return
+      setHasLocalUsers(hasUsers)
       setIsSideDevice(side)
       if (side) setLocalSetupMode(false)
+      else if (!hasUsers && !navigator.onLine) setLocalSetupMode(true)
     }).catch(() => {})
     return () => { disposed = true }
   }, [])
@@ -93,7 +97,7 @@ export function LoginPage(): React.ReactElement {
                 ? 'إنشاء المدير المحلي'
                 : 'تسجيل الدخول'}
           </button>
-          {!isSideDevice && !localSetupMode && !hasOfflineAuthUsers() && (
+          {!isSideDevice && !localSetupMode && !hasLocalUsers && (
             <button
               type="button"
               className="btn btn--ghost btn--lg"
@@ -105,7 +109,7 @@ export function LoginPage(): React.ReactElement {
               إنشاء أول مدير محلي
             </button>
           )}
-          {!isSideDevice && localSetupMode && hasOfflineAuthUsers() && (
+          {!isSideDevice && localSetupMode && hasLocalUsers && (
             <button
               type="button"
               className="btn btn--ghost btn--lg"
