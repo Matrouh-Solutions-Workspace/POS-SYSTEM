@@ -1,4 +1,6 @@
 import { ipcMain, BrowserWindow, app } from 'electron'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import pkg from 'electron-updater'
 import { publishDownloadedUpdateForMaster } from './master-update-artifacts'
 import { readSideConnection } from './network-config'
@@ -17,6 +19,43 @@ function send(channel: string, payload?: unknown): void {
   const win = getMainWindow()
   if (win && !win.isDestroyed()) {
     win.webContents.send(channel, payload)
+  }
+}
+
+function readPrivateUpdateToken(): string | undefined {
+  const envToken = process.env['GH_TOKEN'] ?? process.env['GITHUB_TOKEN'] ?? process.env['SHIFT_POS_UPDATE_TOKEN']
+  if (envToken?.trim()) return envToken.trim()
+
+  const candidates = [
+    join(app.getPath('userData'), 'updater-auth.json'),
+    join(app.getPath('userData'), 'update-token.txt')
+  ]
+
+  for (const filePath of candidates) {
+    if (!existsSync(filePath)) continue
+    try {
+      const raw = readFileSync(filePath, 'utf8').trim()
+      if (!raw) continue
+      if (filePath.endsWith('.json')) {
+        const parsed = JSON.parse(raw) as { token?: unknown; ghToken?: unknown; githubToken?: unknown }
+        const token = parsed.token ?? parsed.ghToken ?? parsed.githubToken
+        return typeof token === 'string' && token.trim() ? token.trim() : undefined
+      }
+      return raw
+    } catch (error) {
+      console.warn('[updater] failed to read private update token:', error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  return undefined
+}
+
+function configurePrivateGitHubAuth(isDev: boolean): void {
+  const token = readPrivateUpdateToken()
+  if (token) {
+    autoUpdater.addAuthHeader(`token ${token}`)
+  } else if (!isDev) {
+    console.warn('[updater] No GitHub token found; private repo updates will fail on master devices')
   }
 }
 
@@ -47,14 +86,7 @@ export function initAutoUpdater(): void {
     autoUpdater.forceDevUpdateConfig = true
   }
 
-  if (!configureSideUpdateFeed()) {
-    const token = process.env['GH_TOKEN'] ?? process.env['GITHUB_TOKEN']
-    if (token) {
-      autoUpdater.addAuthHeader(`token ${token}`)
-    } else if (!isDev) {
-      console.warn('[updater] No GH_TOKEN found; private repo updates will fail')
-    }
-  }
+  if (!configureSideUpdateFeed()) configurePrivateGitHubAuth(isDev)
 
   autoUpdater.logger = {
     info:  (msg: unknown) => console.log('[updater]', msg),

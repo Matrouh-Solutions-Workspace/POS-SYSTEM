@@ -42,6 +42,14 @@ import { ensureOpenShift, getOpenShiftForCashier } from '../shifts/shift-service
 import { nextLocalShiftOrderReference } from '@renderer/lib/offline/order-number'
 import { planFifoConsumption, planFifoReversal } from '../inventory/fifo-service'
 
+async function getCurrentDeviceId(): Promise<string> {
+  const network = await window.electronAPI.getNetworkStatus().catch(() => null) as {
+    mode?: string
+    side?: { deviceName?: string }
+  } | null
+  return network?.side?.deviceName?.trim() || (network?.mode === 'side' ? 'Side POS' : 'Master POS')
+}
+
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
@@ -312,17 +320,13 @@ export async function completeOrder(params: {
     noteAr: line.noteAr
   }))
   if (roundingDifference > 0) {
-    const network = await window.electronAPI.getNetworkStatus().catch(() => null) as {
-      mode?: string
-      side?: { deviceName?: string }
-    } | null
     roundingRecord = {
       id: generateId(),
       orderId,
       shiftId: shift.id,
       userId: params.cashierId,
       username: params.cashierName,
-      deviceId: network?.side?.deviceName?.trim() || (network?.mode === 'side' ? 'Side POS' : 'Master POS'),
+      deviceId: await getCurrentDeviceId(),
       originalAmount: originalTotal,
       finalAmount: total,
       differenceAmount: roundingDifference,
@@ -332,12 +336,7 @@ export async function completeOrder(params: {
   }
 
   // Build payments (supports split)
-  const paymentNetwork = await window.electronAPI.getNetworkStatus().catch(() => null) as {
-    mode?: string
-    side?: { deviceName?: string }
-  } | null
-  const paymentDeviceId = paymentNetwork?.side?.deviceName?.trim() ||
-    (paymentNetwork?.mode === 'side' ? 'Side POS' : 'Master POS')
+  const paymentDeviceId = await getCurrentDeviceId()
   const payments: Payment[] = []
   if (isPaid && params.paymentMethod) {
     if (params.paymentMethod === 'split') {
@@ -554,10 +553,6 @@ export async function markOrderPaid(params: {
     const difference = validateCashRounding(originalTotal, params.roundedTotal, access)
     if (!params.roundingReason?.trim()) throw new Error('سبب التقريب مطلوب')
     finalTotal = Math.round(params.roundedTotal * 100) / 100
-    const network = await window.electronAPI.getNetworkStatus().catch(() => null) as {
-      mode?: string
-      side?: { deviceName?: string }
-    } | null
     const shiftId = order.shiftId ?? (await getOpenShiftForCashier(params.cashierId))?.id
     if (!shiftId) throw new Error('لا يوجد شيفت مفتوح لتسجيل التقريب')
     roundingRecord = {
@@ -566,7 +561,7 @@ export async function markOrderPaid(params: {
       shiftId,
       userId: params.cashierId,
       username: cashier.username,
-      deviceId: network?.side?.deviceName?.trim() || (network?.mode === 'side' ? 'Side POS' : 'Master POS'),
+      deviceId: await getCurrentDeviceId(),
       originalAmount: originalTotal,
       finalAmount: finalTotal,
       differenceAmount: difference,
@@ -593,12 +588,7 @@ export async function markOrderPaid(params: {
     updatedAt: now
   }
 
-  const paidNetwork = await window.electronAPI.getNetworkStatus().catch(() => null) as {
-    mode?: string
-    side?: { deviceName?: string }
-  } | null
-  const paidDeviceId = paidNetwork?.side?.deviceName?.trim() ||
-    (paidNetwork?.mode === 'side' ? 'Side POS' : 'Master POS')
+  const paidDeviceId = await getCurrentDeviceId()
   const payments: Payment[] = []
   if (params.paymentMethod === 'cash' && (params.cashReceived ?? finalTotal) < finalTotal) {
     throw new Error('المبلغ المستلم أقل من إجمالي الطلب')
@@ -845,6 +835,22 @@ export async function cancelOrder(params: {
         createdAt: now
       }
     : null
+  const roundingReversal: CashRoundingTransaction | null =
+    shouldReverseCash && order.shiftId && (order.roundingDifference ?? 0) > 0
+      ? {
+          id: generateId(),
+          orderId: order.id,
+          shiftId: order.shiftId,
+          userId: params.cancelledBy,
+          username: params.cancelledBy,
+          deviceId: await getCurrentDeviceId(),
+          originalAmount: order.total,
+          finalAmount: order.originalTotal ?? order.total + (order.roundingDifference ?? 0),
+          differenceAmount: -Math.round((order.roundingDifference ?? 0) * 100) / 100,
+          reason: `عكس تقريب نقدي بسبب إلغاء الطلب${params.reasonAr ? ` — ${params.reasonAr}` : ''}`,
+          createdAt: now
+        }
+      : null
 
   // ── Atomic write ────────────────────────────────────────────────────────
   const cancelOps: DbBatchOp[] = [
@@ -858,6 +864,14 @@ export async function cancelOrder(params: {
   paymentReversals.forEach((payment) =>
     cancelOps.push({ collection: COLLECTIONS.payments, id: payment.id, data: payment, op: 'set' })
   )
+  if (roundingReversal) {
+    cancelOps.push({
+      collection: COLLECTIONS.cashRoundingTransactions,
+      id: roundingReversal.id,
+      data: roundingReversal,
+      op: 'set'
+    })
+  }
   if (params.inventoryMode === 'return') {
     const reversalPlan = await buildFifoInventoryReversals(order.id, params.cancelledBy, now)
     reversalPlan.transactions.forEach((r) => cancelOps.push({ collection: COLLECTIONS.inventoryTransactions, id: r.id, data: r, op: 'set' }))
@@ -876,6 +890,18 @@ export async function cancelOrder(params: {
       detailAr: `إلغاء طلب #${order.orderCode ?? order.orderNumber} — إجمالي: ${order.total.toFixed(2)}${params.reasonAr ? ` — السبب: ${params.reasonAr}` : ''}`
     })
   )
+  if (roundingReversal) {
+    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+      logAudit({
+        action: 'cash_rounding_applied',
+        actorId: params.cancelledBy,
+        actorName: params.cancelledBy,
+        targetId: order.id,
+        targetType: 'order',
+        detailAr: `عكس تقريب نقدي بقيمة ${Math.abs(roundingReversal.differenceAmount).toFixed(2)} بسبب إلغاء طلب #${order.orderCode ?? order.orderNumber}`
+      })
+    )
+  }
 }
 
 async function buildFifoInventoryReversals(
@@ -1078,6 +1104,22 @@ export async function refundOrder(params: {
       createdAt: now
     }] : [])
   ]
+  const roundingReversal: CashRoundingTransaction | null =
+    original.shiftId && refundRoundingShare > 0
+      ? {
+          id: generateId(),
+          orderId: refundId,
+          shiftId: original.shiftId,
+          userId: params.cashierId,
+          username: params.cashierName,
+          deviceId: await getCurrentDeviceId(),
+          originalAmount: refundBeforeRounding,
+          finalAmount: refundAmount,
+          differenceAmount: -refundRoundingShare,
+          reason: `عكس تقريب نقدي بسبب استرداد طلب — ${params.reasonAr}`,
+          createdAt: now
+        }
+      : null
 
   // Inventory: restock refunded items via sale_reversal
   const inventoryReversals: InventoryTransaction[] = []
@@ -1128,6 +1170,12 @@ export async function refundOrder(params: {
     { collection: COLLECTIONS.orders, id: refundOrder.id, data: refundOrder, op: 'set' },
     ...refundItems.map((ri) => ({ collection: COLLECTIONS.orderItems, id: ri.id, data: ri, op: 'set' as const })),
     ...refundPayments.map((payment) => ({ collection: COLLECTIONS.payments, id: payment.id, data: payment, op: 'set' as const })),
+    ...(roundingReversal ? [{
+      collection: COLLECTIONS.cashRoundingTransactions,
+      id: roundingReversal.id,
+      data: roundingReversal,
+      op: 'set' as const
+    }] : []),
     ...(drawerTx ? [{ collection: COLLECTIONS.cashDrawerTransactions, id: drawerTx.id, data: drawerTx, op: 'set' as const }] : []),
     ...inventoryReversals.map((r) => ({ collection: COLLECTIONS.inventoryTransactions, id: r.id, data: r, op: 'set' as const })),
     ...Array.from(changedRefundBatches.values()).map((batch) => ({ collection: COLLECTIONS.inventoryBatches, id: batch.id, data: batch, op: 'set' as const }))
@@ -1144,6 +1192,18 @@ export async function refundOrder(params: {
       detailAr: `استرداد ${refundAmount.toFixed(2)} من طلب #${original.orderCode ?? original.orderNumber} — ${params.reasonAr}`
     })
   )
+  if (roundingReversal) {
+    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+      logAudit({
+        action: 'cash_rounding_applied',
+        actorId: params.cashierId,
+        actorName: params.cashierName,
+        targetId: params.originalOrderId,
+        targetType: 'order',
+        detailAr: `عكس تقريب نقدي بقيمة ${Math.abs(roundingReversal.differenceAmount).toFixed(2)} بسبب استرداد طلب #${original.orderCode ?? original.orderNumber}`
+      })
+    )
+  }
 
   return { refundOrder, refundAmount }
 }

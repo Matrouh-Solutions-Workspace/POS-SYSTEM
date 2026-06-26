@@ -1,23 +1,21 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AppUser, EmployeeWorkShift, UserShiftAssignment, WeekDay } from '@shared/types'
-import { MdAdd, MdDelete, MdEdit, MdRefresh, MdSave } from 'react-icons/md'
+import { MdAdd, MdDelete, MdEdit, MdSave } from 'react-icons/md'
 import { listAllAccounts } from '@renderer/features/auth/auth-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { getSettings, updateSettings } from '@renderer/features/orders/order-service'
 import {
   deleteShiftAssignment,
   deleteWorkShift,
-  getShiftAttendanceReport,
   listShiftAssignments,
   listWorkShifts,
   saveShiftAssignment,
   saveWorkShift,
-  type ShiftAttendanceRow,
   type ShiftAssignmentInput,
   type WorkShiftInput
 } from '@renderer/features/shifts/work-shift-service'
 
-type PanelTab = 'schedules' | 'assignments' | 'reports'
+type PanelTab = 'assignments' | 'schedules'
 
 const DAYS: Array<{ value: WeekDay; label: string }> = [
   { value: 6, label: 'السبت' },
@@ -47,20 +45,13 @@ function todayKey(): string {
   return `${year}-${month}-${day}`
 }
 
-function formatMinutes(value: number): string {
-  const hours = Math.floor(value / 60)
-  const minutes = value % 60
-  return hours ? `${hours}س ${minutes}د` : `${minutes}د`
-}
-
 export function WorkShiftManagement(): React.ReactElement {
   const actor = useAuthStore((state) => state.user)!
   const [enabled, setEnabled] = useState(false)
-  const [activeTab, setActiveTab] = useState<PanelTab>('schedules')
+  const [activeTab, setActiveTab] = useState<PanelTab>('assignments')
   const [workShifts, setWorkShifts] = useState<EmployeeWorkShift[]>([])
   const [assignments, setAssignments] = useState<UserShiftAssignment[]>([])
   const [cashiers, setCashiers] = useState<AppUser[]>([])
-  const [report, setReport] = useState<ShiftAttendanceRow[]>([])
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [shiftForm, setShiftForm] = useState<WorkShiftInput>(EMPTY_SHIFT)
@@ -72,10 +63,8 @@ export function WorkShiftManagement(): React.ReactElement {
     active: true
   })
   const [editingAssignmentId, setEditingAssignmentId] = useState<string>()
-  const [reportUserId, setReportUserId] = useState('')
-  const [reportWorkShiftId, setReportWorkShiftId] = useState('')
-  const [reportFrom, setReportFrom] = useState('')
-  const [reportTo, setReportTo] = useState('')
+  const shiftFormRef = useRef<HTMLFormElement | null>(null)
+  const assignmentFormRef = useRef<HTMLFormElement | null>(null)
 
   const load = useCallback(async () => {
     const [settings, shifts, savedAssignments, users] = await Promise.all([
@@ -90,19 +79,7 @@ export function WorkShiftManagement(): React.ReactElement {
     setCashiers(users.filter((user) => user.role === 'cashier' && user.active))
   }, [])
 
-  const loadReport = useCallback(async () => {
-    setReport(await getShiftAttendanceReport({
-      userId: reportUserId || undefined,
-      workShiftId: reportWorkShiftId || undefined,
-      from: reportFrom || undefined,
-      to: reportTo || undefined
-    }))
-  }, [reportFrom, reportTo, reportUserId, reportWorkShiftId])
-
   useEffect(() => { void load() }, [load])
-  useEffect(() => {
-    if (activeTab === 'reports') void loadReport()
-  }, [activeTab, loadReport])
 
   const shiftMap = useMemo(
     () => new Map(workShifts.map((shift) => [shift.id, shift])),
@@ -116,6 +93,14 @@ export function WorkShiftManagement(): React.ReactElement {
   function clearFeedback(): void {
     setMessage('')
     setError('')
+  }
+
+  function scrollToForm(ref: React.RefObject<HTMLFormElement | null>): void {
+    window.setTimeout(() => {
+      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      const firstField = ref.current?.querySelector<HTMLInputElement | HTMLSelectElement>('input, select')
+      firstField?.focus()
+    }, 0)
   }
 
   async function toggleFeature(): Promise<void> {
@@ -145,6 +130,8 @@ export function WorkShiftManagement(): React.ReactElement {
   }
 
   function editShift(shift: EmployeeWorkShift): void {
+    clearFeedback()
+    setActiveTab('schedules')
     setEditingShiftId(shift.id)
     setShiftForm({
       name: shift.name,
@@ -155,6 +142,8 @@ export function WorkShiftManagement(): React.ReactElement {
       maxOvertimeMinutes: shift.maxOvertimeMinutes,
       active: shift.active
     })
+    setMessage(`تعديل الوردية: ${shift.name}`)
+    scrollToForm(shiftFormRef)
   }
 
   async function removeShift(shift: EmployeeWorkShift): Promise<void> {
@@ -183,6 +172,8 @@ export function WorkShiftManagement(): React.ReactElement {
   }
 
   function editAssignment(assignment: UserShiftAssignment): void {
+    clearFeedback()
+    setActiveTab('assignments')
     setEditingAssignmentId(assignment.id)
     setAssignmentForm({
       userId: assignment.userId,
@@ -191,6 +182,9 @@ export function WorkShiftManagement(): React.ReactElement {
       endDate: assignment.endDate,
       active: assignment.active
     })
+    const username = userMap.get(assignment.userId)?.username ?? assignment.userId
+    setMessage(`تعديل تعيين الوردية للمستخدم: ${username}`)
+    scrollToForm(assignmentFormRef)
   }
 
   async function removeAssignment(assignment: UserShiftAssignment): Promise<void> {
@@ -201,7 +195,7 @@ export function WorkShiftManagement(): React.ReactElement {
   }
 
   function handleTabKeys(event: React.KeyboardEvent<HTMLDivElement>): void {
-    const tabs: PanelTab[] = ['schedules', 'assignments', 'reports']
+    const tabs: PanelTab[] = ['assignments', 'schedules']
     const current = tabs.indexOf(activeTab)
     let next = current
     if (event.key === 'ArrowRight') next = (current + 1) % tabs.length
@@ -214,13 +208,14 @@ export function WorkShiftManagement(): React.ReactElement {
   }
 
   return (
-    <section className="card" aria-labelledby="work-shifts-title">
-      <div className="page-toolbar" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+    <section className="card work-shift-card" aria-labelledby="work-shifts-title">
+      <div className="shifts-card__header">
         <div>
-          <h2 id="work-shifts-title" className="card__title" style={{ margin: 0 }}>ورديات الموظفين والتحكم في الدخول</h2>
-          <p className="modal-hint">عند التفعيل، لن يستطيع الكاشير الدخول أو البيع إلا داخل الوردية المعيّنة له.</p>
+          <span className="shifts-card__eyebrow">قواعد الدخول والبيع</span>
+          <h2 id="work-shifts-title" className="card__title">إعدادات ورديات الموظفين</h2>
+          <p className="modal-hint">اختار الكاشير وعدّل تعيينه بسرعة. لو محتاج تغيّر وقت الوردية افتح تبويب الورديات.</p>
         </div>
-        <label className="field field--checkbox" style={{ margin: 0 }}>
+        <label className={`shift-feature-toggle ${enabled ? 'shift-feature-toggle--on' : ''}`}>
           <input type="checkbox" checked={enabled} onChange={() => void toggleFeature()} />
           <span>{enabled ? 'النظام مفعّل' : 'النظام متوقف'}</span>
         </label>
@@ -229,11 +224,10 @@ export function WorkShiftManagement(): React.ReactElement {
       {message && <p className="form-message form-message--ok">{message}</p>}
       {error && <p className="form-message form-message--error">{error}</p>}
 
-      <div className="inner-tabs" role="tablist" onKeyDown={handleTabKeys}>
+      <div className="inner-tabs shift-tabs" role="tablist" onKeyDown={handleTabKeys}>
         {([
-          ['schedules', 'تعريف الورديات'],
-          ['assignments', 'تعيين الموظفين'],
-          ['reports', 'الحضور والأداء']
+          ['assignments', `تعيين الكاشير (${assignments.length})`],
+          ['schedules', `الورديات (${workShifts.length})`]
         ] as Array<[PanelTab, string]>).map(([key, label]) => (
           <button
             key={key}
@@ -251,7 +245,12 @@ export function WorkShiftManagement(): React.ReactElement {
 
       {activeTab === 'schedules' && (
         <>
-          <form className="settings-form-grid" onSubmit={(event) => void submitShift(event)}>
+          {editingShiftId && (
+            <div className="edit-mode-banner">
+              أنت تعدّل وردية موجودة الآن. اضغط حفظ التعديل لتطبيق التغييرات أو إلغاء للرجوع.
+            </div>
+          )}
+          <form ref={shiftFormRef} className={`settings-form-grid shift-form-panel${editingShiftId ? ' shift-form-panel--editing' : ''}`} onSubmit={(event) => void submitShift(event)}>
             <label className="field">
               <span>اسم الوردية</span>
               <input value={shiftForm.name} onChange={(event) => setShiftForm({ ...shiftForm, name: event.target.value })} placeholder="مثال: الوردية الصباحية" />
@@ -270,9 +269,9 @@ export function WorkShiftManagement(): React.ReactElement {
             </label>
             <div className="field settings-form-grid__full">
               <span>أيام العمل</span>
-              <div className="reports-filter__options">
+              <div className="day-picker">
                 {DAYS.map((day) => (
-                  <label key={day.value} className="field field--checkbox">
+                  <label key={day.value} className="day-picker__item">
                     <input
                       type="checkbox"
                       checked={shiftForm.workingDays.includes(day.value)}
@@ -301,16 +300,17 @@ export function WorkShiftManagement(): React.ReactElement {
               {editingShiftId && <button className="btn btn--secondary" type="button" onClick={() => { setEditingShiftId(undefined); setShiftForm(EMPTY_SHIFT) }}>إلغاء</button>}
             </div>
           </form>
-          <table className="data-table">
-            <thead><tr><th>الوردية</th><th>الوقت</th><th>الأيام</th><th>الإضافي</th><th>الحالة</th><th /></tr></thead>
+          <div className="table-scroll">
+          <table className="data-table shifts-table">
+            <thead><tr><th>الوردية</th><th>الوقت</th><th>الأيام</th><th>الإضافي</th><th>الحالة</th><th>إجراءات</th></tr></thead>
             <tbody>
-              {workShifts.length === 0 ? <tr><td colSpan={6}>لم تتم إضافة ورديات عمل بعد.</td></tr> : workShifts.map((shift) => (
+              {workShifts.length === 0 ? <tr><td colSpan={6}><div className="empty-state"><strong>لم تتم إضافة ورديات عمل بعد.</strong><span>ابدأ بتعريف وردية صباحية أو مسائية ثم عيّنها للكاشير.</span></div></td></tr> : workShifts.map((shift) => (
                 <tr key={shift.id}>
-                  <td>{shift.name}</td>
+                  <td><strong>{shift.name}</strong></td>
                   <td dir="ltr">{shift.startTime} - {shift.endTime}</td>
                   <td>{DAYS.filter((day) => shift.workingDays.includes(day.value)).map((day) => day.label).join('، ')}</td>
                   <td>{shift.overtimeEnabled ? `${shift.maxOvertimeMinutes} دقيقة` : 'غير مسموح'}</td>
-                  <td>{shift.active ? 'نشطة' : 'متوقفة'}</td>
+                  <td><span className={`status-pill ${shift.active ? 'status-pill--success' : 'status-pill--muted'}`}>{shift.active ? 'نشطة' : 'متوقفة'}</span></td>
                   <td><div className="table-actions">
                     <button className="btn btn--secondary btn--sm" type="button" onClick={() => editShift(shift)}><MdEdit /> تعديل</button>
                     <button className="btn btn--danger btn--sm" type="button" onClick={() => void removeShift(shift)}><MdDelete /> حذف</button>
@@ -319,12 +319,18 @@ export function WorkShiftManagement(): React.ReactElement {
               ))}
             </tbody>
           </table>
+          </div>
         </>
       )}
 
       {activeTab === 'assignments' && (
         <>
-          <form className="settings-form-grid" onSubmit={(event) => void submitAssignment(event)}>
+          {editingAssignmentId && (
+            <div className="edit-mode-banner">
+              أنت تعدّل تعيين موجود الآن. غيّر البيانات ثم اضغط حفظ التعديل.
+            </div>
+          )}
+          <form ref={assignmentFormRef} className={`settings-form-grid shift-form-panel${editingAssignmentId ? ' shift-form-panel--editing' : ''}`} onSubmit={(event) => void submitAssignment(event)}>
             <label className="field">
               <span>الكاشير</span>
               <select value={assignmentForm.userId} onChange={(event) => setAssignmentForm({ ...assignmentForm, userId: event.target.value })}>
@@ -347,15 +353,16 @@ export function WorkShiftManagement(): React.ReactElement {
               {editingAssignmentId && <button className="btn btn--secondary" type="button" onClick={() => { setEditingAssignmentId(undefined); setAssignmentForm({ userId: '', workShiftId: '', startDate: todayKey(), active: true }) }}>إلغاء</button>}
             </div>
           </form>
-          <table className="data-table">
-            <thead><tr><th>المستخدم</th><th>الوردية</th><th>الفترة</th><th>الحالة</th><th /></tr></thead>
+          <div className="table-scroll">
+          <table className="data-table shifts-table">
+            <thead><tr><th>المستخدم</th><th>الوردية</th><th>الفترة</th><th>الحالة</th><th>إجراءات</th></tr></thead>
             <tbody>
-              {assignments.length === 0 ? <tr><td colSpan={5}>لا توجد تعيينات.</td></tr> : assignments.map((assignment) => (
+              {assignments.length === 0 ? <tr><td colSpan={5}><div className="empty-state"><strong>لا توجد تعيينات.</strong><span>عيّن وردية لكل كاشير حتى يتم تطبيق قواعد الدخول.</span></div></td></tr> : assignments.map((assignment) => (
                 <tr key={assignment.id}>
                   <td>{userMap.get(assignment.userId)?.username ?? assignment.userId}</td>
                   <td>{shiftMap.get(assignment.workShiftId)?.name ?? 'وردية محذوفة'}</td>
-                  <td>{assignment.startDate} - {assignment.endDate ?? 'مستمر'}</td>
-                  <td>{assignment.active ? 'نشط' : 'متوقف'}</td>
+                  <td dir="ltr">{assignment.startDate} → {assignment.endDate ?? 'مستمر'}</td>
+                  <td><span className={`status-pill ${assignment.active ? 'status-pill--success' : 'status-pill--muted'}`}>{assignment.active ? 'نشط' : 'متوقف'}</span></td>
                   <td><div className="table-actions">
                     <button className="btn btn--secondary btn--sm" type="button" onClick={() => editAssignment(assignment)}><MdEdit /> تعديل</button>
                     <button className="btn btn--danger btn--sm" type="button" onClick={() => void removeAssignment(assignment)}><MdDelete /> حذف</button>
@@ -364,37 +371,7 @@ export function WorkShiftManagement(): React.ReactElement {
               ))}
             </tbody>
           </table>
-        </>
-      )}
-
-      {activeTab === 'reports' && (
-        <>
-          <div className="settings-form-grid" style={{ marginBottom: 16 }}>
-            <label className="field"><span>الكاشير</span><select value={reportUserId} onChange={(event) => setReportUserId(event.target.value)}><option value="">الكل</option>{cashiers.map((user) => <option key={user.id} value={user.id}>{user.username}</option>)}</select></label>
-            <label className="field"><span>الوردية</span><select value={reportWorkShiftId} onChange={(event) => setReportWorkShiftId(event.target.value)}><option value="">كل الورديات</option>{workShifts.map((shift) => <option key={shift.id} value={shift.id}>{shift.name}</option>)}</select></label>
-            <label className="field"><span>من</span><input type="date" value={reportFrom} onChange={(event) => setReportFrom(event.target.value)} /></label>
-            <label className="field"><span>إلى</span><input type="date" value={reportTo} onChange={(event) => setReportTo(event.target.value)} /></label>
-            <div className="form-actions"><button className="btn btn--secondary" type="button" onClick={() => void loadReport()}><MdRefresh /> تحديث التقرير</button></div>
           </div>
-          <table className="data-table">
-            <thead><tr><th>المستخدم</th><th>الوردية</th><th>الدخول</th><th>الخروج</th><th>العمل</th><th>التأخير</th><th>الإضافي</th><th>الطلبات</th><th>المبيعات</th><th>فرق الكاش</th></tr></thead>
-            <tbody>
-              {report.length === 0 ? <tr><td colSpan={10}>لا توجد جلسات في الفترة المحددة.</td></tr> : report.map((row) => (
-                <tr key={row.session.id}>
-                  <td>{row.user?.username ?? row.session.cashierName}</td>
-                  <td>{row.workShift?.name ?? row.session.workShiftName ?? 'غير مجدولة'}</td>
-                  <td>{new Date(row.session.openedAt).toLocaleString('ar-EG')}</td>
-                  <td>{row.session.closedAt ? new Date(row.session.closedAt).toLocaleString('ar-EG') : 'مفتوح'}</td>
-                  <td>{formatMinutes(row.workedMinutes)}</td>
-                  <td>{formatMinutes(row.lateMinutes)}</td>
-                  <td>{formatMinutes(row.overtimeMinutes)}</td>
-                  <td>{row.orderCount}</td>
-                  <td>{row.revenue.toFixed(2)}</td>
-                  <td>{row.cashDifference === undefined ? '-' : row.cashDifference.toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </>
       )}
     </section>

@@ -1,5 +1,5 @@
 import { listOrders, getOrderItems } from '../orders/order-service'
-import type { InventoryBatch, MenuItem, Payment, Recipe } from '@shared/types'
+import type { InventoryTransaction, MenuItem, Payment, Recipe } from '@shared/types'
 import { COLLECTIONS } from '@shared/constants/collections'
 import { getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 
@@ -108,6 +108,14 @@ export async function getFullReport(
       (!filters?.employeeId || o.cashierId === filters.employeeId) &&
       (!filters?.shiftId || o.shiftId === filters.shiftId)
   })
+  const completedIdsForRefunds = new Set(completed.map((order) => order.id))
+  const refundOrders = orders.filter((order) => {
+    if (!order.refundOfOrderId || !completedIdsForRefunds.has(order.refundOfOrderId)) return false
+    const t = order.completedAt ?? order.createdAt
+    return t >= from && t <= to &&
+      (!filters?.employeeId || order.cashierId === filters.employeeId) &&
+      (!filters?.shiftId || order.shiftId === filters.shiftId)
+  })
 
   const today = dateKey(Date.now())
   const weekAgo = Date.now() - 7 * 86400000
@@ -162,7 +170,7 @@ export async function getFullReport(
     .sort((a, b) => b.quantity - a.quantity)
     .slice(0, 10)
 
-  const orderIds = new Set(completed.map((order) => order.id))
+  const orderIds = new Set([...completed, ...refundOrders].map((order) => order.id))
   const payments = (await getCachedDocs<Payment>(COLLECTIONS.payments))
     .filter((payment) =>
       orderIds.has(payment.orderId) &&
@@ -187,48 +195,72 @@ export async function getFullReport(
   }
   const paymentMethods = Array.from(paymentMap.values())
 
-  const [menuItems, recipes, batches, ingredients] = await Promise.all([
+  const [menuItems, recipes, inventoryTransactions, ingredients] = await Promise.all([
     getCachedDocs<MenuItem>(COLLECTIONS.menuItems),
     getCachedDocs<Recipe>(COLLECTIONS.recipes),
-    getCachedDocs<InventoryBatch>(COLLECTIONS.inventoryBatches),
+    getCachedDocs<InventoryTransaction>(COLLECTIONS.inventoryTransactions),
     getCachedDocs<{ id: string; nameAr: string }>(COLLECTIONS.ingredients)
   ])
   const ingredientName = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient.nameAr]))
-  function fifoCost(ingredientId: string, requestedQuantity: number): number {
-    let remaining = Math.abs(requestedQuantity)
-    let cost = 0
-    const available = batches
-      .filter((batch) => batch.ingredientId === ingredientId && batch.remainingQuantity > 0)
-      .sort((a, b) => a.receivedAt - b.receivedAt)
-    for (const batch of available) {
-      if (remaining <= 0.000001) break
-      const used = Math.min(remaining, batch.remainingQuantity)
-      cost += used * batch.unitCost
-      remaining -= used
-    }
-    return cost
-  }
   const recipeById = new Map(recipes.map((recipe) => [recipe.id, recipe]))
-  const profitability = menuItems.filter((item) => item.active).map((item) => {
+  const salesByMenuItem = new Map<string, { quantity: number; revenue: number; cost: number }>()
+  for (const order of [...completed, ...refundOrders]) {
+    const items = await getOrderItems(order.id)
+    for (const item of items) {
+      const current = salesByMenuItem.get(item.menuItemId) ?? { quantity: 0, revenue: 0, cost: 0 }
+      current.quantity += order.refundOfOrderId ? -item.quantity : item.quantity
+      current.revenue += item.lineTotal
+      salesByMenuItem.set(item.menuItemId, current)
+    }
+  }
+  const completedOrderIds = new Set([...completed, ...refundOrders].map((order) => order.id))
+  for (const tx of inventoryTransactions.filter((transaction) =>
+    (transaction.type === 'sale' || transaction.type === 'sale_reversal') &&
+    transaction.menuItemId &&
+    transaction.referenceId &&
+    completedOrderIds.has(transaction.referenceId)
+  )) {
+    const current = salesByMenuItem.get(tx.menuItemId!) ?? { quantity: 0, revenue: 0, cost: 0 }
+    const signedCost = tx.type === 'sale_reversal'
+      ? -(tx.totalCost ?? Math.abs(tx.quantity) * (tx.unitCost ?? 0))
+      : (tx.totalCost ?? Math.abs(tx.quantity) * (tx.unitCost ?? 0))
+    current.cost += signedCost
+    salesByMenuItem.set(tx.menuItemId!, current)
+  }
+  const profitability = menuItems.filter((item) => item.active || salesByMenuItem.has(item.id)).map((item) => {
     const recipe = recipeById.get(item.recipeId)
     const lines = item.linkedIngredientId
       ? [{ ingredientId: item.linkedIngredientId, quantity: 1 }]
       : (recipe?.lines ?? [])
+    const actual = salesByMenuItem.get(item.id)
+    const cost = actual?.cost ?? 0
     const breakdown = lines.map((line) => ({
       ingredientId: line.ingredientId,
       nameAr: ingredientName.get(line.ingredientId) ?? line.ingredientId,
       quantity: line.quantity,
-      cost: fifoCost(line.ingredientId, line.quantity)
+      cost: inventoryTransactions
+        .filter((tx) =>
+          tx.menuItemId === item.id &&
+          tx.ingredientId === line.ingredientId &&
+          tx.referenceId &&
+          completedOrderIds.has(tx.referenceId) &&
+          (tx.type === 'sale' || tx.type === 'sale_reversal')
+        )
+        .reduce((sum, tx) => sum + (
+          tx.type === 'sale_reversal'
+            ? -(tx.totalCost ?? Math.abs(tx.quantity) * (tx.unitCost ?? 0))
+            : (tx.totalCost ?? Math.abs(tx.quantity) * (tx.unitCost ?? 0))
+        ), 0)
     }))
-    const cost = breakdown.reduce((sum, line) => sum + line.cost, 0)
-    const profit = item.price - cost
+    const revenue = actual?.revenue ?? item.price
+    const profit = revenue - cost
     return {
       menuItemId: item.id,
       nameAr: item.nameAr,
-      sellingPrice: item.price,
+      sellingPrice: revenue,
       cost,
       profit,
-      marginPercent: item.price > 0 ? profit / item.price * 100 : 0,
+      marginPercent: revenue > 0 ? profit / revenue * 100 : 0,
       ingredients: breakdown
     }
   }).sort((a, b) => b.profit - a.profit)

@@ -10,12 +10,13 @@ import {
 } from '@renderer/features/shifts/shift-service'
 import { getSettings } from '@renderer/features/orders/order-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
-import { MdArchive, MdLock, MdPrint, MdRefresh, MdUnarchive } from 'react-icons/md'
+import { MdArchive, MdLock, MdPrint, MdUnarchive, MdVisibility, MdVisibilityOff } from 'react-icons/md'
 import { WorkShiftManagement } from './WorkShiftManagement'
 import { EmployeePerformanceManagement } from './EmployeePerformanceManagement'
 import { CashRoundingReport } from './CashRoundingReport'
 
 type ShiftViewMode = 'active' | 'archived'
+type ShiftsSection = 'setup' | 'sessions' | 'reports'
 
 function shiftOrderTypeSummary(summary: ShiftSummary): Record<'dine_in' | 'delivery' | 'takeaway', number> {
   return summary.completedOrders.reduce((acc, order) => {
@@ -70,6 +71,7 @@ export function ShiftsPage(): React.ReactElement {
   const user = useAuthStore((s) => s.user)!
   const [allShifts, setAllShifts] = useState<Shift[]>([])
   const [viewMode, setViewMode] = useState<ShiftViewMode>('active')
+  const [section, setSection] = useState<ShiftsSection>('setup')
   const [selected, setSelected] = useState<ShiftSummary | null>(null)
   const [performanceEnabled, setPerformanceEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -87,7 +89,9 @@ export function ShiftsPage(): React.ReactElement {
 
   const counts = useMemo(() => ({
     active: allShifts.filter((s) => !s.archived).length,
-    archived: allShifts.filter((s) => !!s.archived).length
+    archived: allShifts.filter((s) => !!s.archived).length,
+    open: allShifts.filter((s) => !s.archived && s.status === 'open').length,
+    closed: allShifts.filter((s) => !s.archived && s.status === 'closed').length
   }), [allShifts])
 
   const shifts = useMemo(() => (
@@ -102,6 +106,14 @@ export function ShiftsPage(): React.ReactElement {
 
   async function openSummary(shift: Shift): Promise<void> {
     setSelected(await getShiftSummary(shift))
+  }
+
+  async function toggleSummary(shift: Shift): Promise<void> {
+    if (selected?.shift.id === shift.id) {
+      setSelected(null)
+      return
+    }
+    await openSummary(shift)
   }
 
   async function handleClose(shift: Shift): Promise<void> {
@@ -139,33 +151,157 @@ export function ShiftsPage(): React.ReactElement {
 
   return (
     <div className="shifts-page">
-      <WorkShiftManagement />
-      <EmployeePerformanceManagement />
-      <CashRoundingReport />
+      <section className="shifts-shell" aria-labelledby="shifts-page-title">
+        <div className="shifts-hero__copy">
+          <span className="shifts-hero__eyebrow">إدارة التشغيل والكاشيرات</span>
+          <h1 id="shifts-page-title">الشيفتات والورديات</h1>
+          <p>ابدأ من الإعدادات لتعديل الورديات وتعيين الكاشير. الجلسات والتقارير موجودة في تبويبات منفصلة حتى لا تزحم الشاشة.</p>
+        </div>
+        <div className="shifts-hero__stats shifts-hero__stats--compact" aria-label="ملخص الشيفتات">
+          <div className="shifts-kpi">
+            <span>مفتوحة الآن</span>
+            <strong>{counts.open}</strong>
+          </div>
+          <div className="shifts-kpi">
+            <span>مقفلة</span>
+            <strong>{counts.closed}</strong>
+          </div>
+          <div className="shifts-kpi">
+            <span>مؤرشفة</span>
+            <strong>{counts.archived}</strong>
+          </div>
+        </div>
+      </section>
+
+      <nav className="shifts-section-tabs" aria-label="أقسام صفحة الشيفتات">
+        {([
+          ['setup', 'الإعدادات والتعيين', 'عدّل الورديات واربطها بالكاشير'],
+          ['sessions', 'جلسات البيع', 'الشيفتات المفتوحة والمقفلة'],
+          ['reports', 'التقارير', 'الحضور والأداء وفرق الكاش']
+        ] as Array<[ShiftsSection, string, string]>).map(([key, label, hint]) => (
+          <button
+            key={key}
+            type="button"
+            className={`shifts-section-tab${section === key ? ' shifts-section-tab--active' : ''}`}
+            onClick={() => {
+              setSection(key)
+              setSelected(null)
+            }}
+          >
+            <strong>{label}</strong>
+            <span>{hint}</span>
+          </button>
+        ))}
+      </nav>
+
       {message && <p className="form-message form-message--ok">{message}</p>}
-      <div className="card">
-        <div className="reports-filter__options" style={{ marginBottom: 12 }}>
-          <button
-            type="button"
-            className={`reports-filter__btn${viewMode === 'active' ? ' reports-filter__btn--active' : ''}`}
-            onClick={() => { setViewMode('active'); setSelected(null) }}
-          >
-            الشيفتات النشطة ({counts.active})
-          </button>
-          <button
-            type="button"
-            className={`reports-filter__btn${viewMode === 'archived' ? ' reports-filter__btn--active' : ''}`}
-            onClick={() => { setViewMode('archived'); setSelected(null) }}
-          >
-            الشيفتات المؤرشفة ({counts.archived})
-          </button>
+
+      {section === 'setup' && <WorkShiftManagement />}
+
+      {section === 'reports' && (
+        <div className="shifts-reports-stack">
+          <EmployeePerformanceManagement />
+          <CashRoundingReport />
+        </div>
+      )}
+
+      {section === 'sessions' && (
+      <div className="card shifts-card">
+        <div className="shifts-card__header">
+          <div>
+            <span className="shifts-card__eyebrow">جلسات البيع</span>
+            <h2 className="card__title">
+              {viewMode === 'archived' ? 'الشيفتات المؤرشفة' : 'الشيفتات غير المؤرشفة'} ({shifts.length})
+            </h2>
+          </div>
+          <div className="reports-filter__options shifts-view-toggle" aria-label="تصفية الشيفتات">
+            <button
+              type="button"
+              className={`reports-filter__btn${viewMode === 'active' ? ' reports-filter__btn--active' : ''}`}
+              onClick={() => { setViewMode('active'); setSelected(null) }}
+            >
+              النشطة ({counts.active})
+            </button>
+            <button
+              type="button"
+              className={`reports-filter__btn${viewMode === 'archived' ? ' reports-filter__btn--active' : ''}`}
+              onClick={() => { setViewMode('archived'); setSelected(null) }}
+            >
+              المؤرشفة ({counts.archived})
+            </button>
+          </div>
         </div>
 
-        <h2 className="card__title">
-          {viewMode === 'archived' ? 'الشيفتات المؤرشفة' : 'الشيفتات غير المؤرشفة'} ({shifts.length})
-        </h2>
+        {selected && (
+          <div className="shift-summary-spotlight">
+            <div className="shift-summary-spotlight__header">
+              <div>
+                <span className="shifts-card__eyebrow">ملخص ظاهر للشيفت المحدد</span>
+                <h3>ملخص شيفت {selected.shift.cashierName}</h3>
+                <p>
+                  من {new Date(selected.shift.openedAt).toLocaleString('ar-EG')}
+                  {' '}إلى {selected.shift.closedAt ? new Date(selected.shift.closedAt).toLocaleString('ar-EG') : 'مفتوح الآن'}
+                </p>
+              </div>
+              <button type="button" className="btn btn--secondary" onClick={() => void printSelectedShift()}>
+                <MdPrint /> طباعة ملخص الشيفت
+              </button>
+            </div>
 
-        <table className="data-table">
+            <div className="shift-summary-breakdown">
+              <div className="shift-breakdown-card shift-breakdown-card--primary">
+                <span>صافي المبيعات</span>
+                <strong>{selected.netSales.toFixed(2)}</strong>
+                <small>إجمالي البيع - المرتجعات</small>
+              </div>
+              <div className="shift-breakdown-card">
+                <span>إجمالي البيع</span>
+                <strong>{selected.grossSales.toFixed(2)}</strong>
+                <small>قبل خصم المرتجعات</small>
+              </div>
+              <div className="shift-breakdown-card">
+                <span>مرتجعات</span>
+                <strong>{selected.refundTotal.toFixed(2)}</strong>
+                <small>نقدي {selected.cashRefunds.toFixed(2)} / بطاقة {selected.cardRefunds.toFixed(2)}</small>
+              </div>
+              <div className="shift-breakdown-card">
+                <span>نقدي</span>
+                <strong>{selected.cashRevenue.toFixed(2)}</strong>
+                <small>مدفوعات نقدية فقط</small>
+              </div>
+              <div className="shift-breakdown-card">
+                <span>بطاقة</span>
+                <strong>{selected.cardRevenue.toFixed(2)}</strong>
+                <small>لا تدخل درج الكاش</small>
+              </div>
+              <div className="shift-breakdown-card">
+                <span>مصروفات الدرج</span>
+                <strong>{selected.cashExpenses.toFixed(2)}</strong>
+                <small>سحب/مصروفات غير مرتبطة بطلب</small>
+              </div>
+              <div className="shift-breakdown-card">
+                <span>إضافات الدرج</span>
+                <strong>{selected.cashAdditions.toFixed(2)}</strong>
+                <small>إيداع/إضافة نقدية</small>
+              </div>
+              <div className="shift-breakdown-card shift-breakdown-card--cash">
+                <span>الكاش المتوقع</span>
+                <strong>{selected.expectedCash.toFixed(2)}</strong>
+                <small>افتتاح + نقدي - مرتجعات نقدية - مصروفات + إضافات</small>
+              </div>
+            </div>
+
+            <div className="shift-summary-equation">
+              <span>تسويات التقريب: {selected.roundingAdjustments.toFixed(2)}</span>
+              <span>الطلبات: {selected.orders.length}</span>
+              <span>مكتملة: {selected.completedOrders.length}</span>
+              <span>ملغية/مرتجع: {selected.cancelledOrders.length}</span>
+            </div>
+          </div>
+        )}
+
+        <div className="table-scroll">
+        <table className="data-table shifts-table">
           <thead>
             <tr>
               <th>الكاشير</th>
@@ -179,21 +315,39 @@ export function ShiftsPage(): React.ReactElement {
           <tbody>
             {shifts.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-muted)' }}>
-                  لا توجد شيفتات في هذا القسم
+                <td colSpan={6}>
+                  <div className="empty-state">
+                    <strong>لا توجد شيفتات في هذا القسم</strong>
+                    <span>غيّر الفلتر أو افتح شيفت جديد من شاشة الكاشير.</span>
+                  </div>
                 </td>
               </tr>
             ) : shifts.map((shift) => (
-              <tr key={shift.id}>
-                <td>{shift.cashierName}</td>
+              <tr key={shift.id} className={selected?.shift.id === shift.id ? 'shift-row--selected' : undefined}>
+                <td>
+                  <button
+                    type="button"
+                    className="shifts-table__cashier shifts-table__cashier-button"
+                    onClick={() => void toggleSummary(shift)}
+                    aria-expanded={selected?.shift.id === shift.id}
+                  >
+                    <strong>{shift.cashierName}</strong>
+                    <span>{shift.workShiftName ?? 'جلسة غير مجدولة'}</span>
+                  </button>
+                </td>
                 <td dir="ltr">{shift.cashierCode ?? '--'}</td>
-                <td>{shift.status === 'open' ? 'مفتوح' : 'مقفل'}</td>
+                <td>
+                  <span className={`status-pill ${shift.status === 'open' ? 'status-pill--success' : 'status-pill--muted'}`}>
+                    {shift.status === 'open' ? 'مفتوح' : 'مقفل'}
+                  </span>
+                </td>
                 <td>{new Date(shift.openedAt).toLocaleString('ar-EG')}</td>
                 <td>{shift.closedAt ? new Date(shift.closedAt).toLocaleString('ar-EG') : '-'}</td>
                 <td>
                   <div className="table-actions">
-                    <button type="button" className="btn btn--secondary btn--sm" onClick={() => void openSummary(shift)}>
-                      <MdRefresh /> عرض
+                    <button type="button" className="btn btn--secondary btn--sm" onClick={() => void toggleSummary(shift)}>
+                      {selected?.shift.id === shift.id ? <MdVisibilityOff /> : <MdVisibility />}
+                      {selected?.shift.id === shift.id ? ' إخفاء' : ' عرض'}
                     </button>
                     {shift.status === 'open' && viewMode === 'active' && !performanceEnabled && (
                       <button type="button" className="btn btn--secondary btn--sm" onClick={() => void handleClose(shift)}>
@@ -217,23 +371,31 @@ export function ShiftsPage(): React.ReactElement {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
+      )}
 
-      {selected && (
-        <div className="card">
-          <div className="page-toolbar" style={{ justifyContent: 'space-between' }}>
-            <h2 className="card__title" style={{ margin: 0 }}>ملخص شيفت {selected.shift.cashierName}</h2>
+      {section === 'sessions' && selected && (
+        <div className="card shifts-summary-card">
+          <div className="shifts-card__header">
+            <div>
+              <span className="shifts-card__eyebrow">ملخص تفصيلي</span>
+              <h2 className="card__title">ملخص شيفت {selected.shift.cashierName}</h2>
+            </div>
             <button type="button" className="btn btn--secondary" onClick={() => void printSelectedShift()}>
               <MdPrint /> طباعة ملخص الشيفت
             </button>
           </div>
           <div className="stats-grid">
-            <div className="stat-card"><div className="stat-card__label">إجمالي الإيراد</div><div className="stat-card__value">{selected.revenue.toFixed(2)}</div></div>
+            <div className="stat-card"><div className="stat-card__label">صافي المبيعات</div><div className="stat-card__value">{selected.netSales.toFixed(2)}</div></div>
+            <div className="stat-card"><div className="stat-card__label">إجمالي البيع قبل المرتجعات</div><div className="stat-card__value">{selected.grossSales.toFixed(2)}</div></div>
+            <div className="stat-card"><div className="stat-card__label">المرتجعات</div><div className="stat-card__value">{selected.refundTotal.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">فلوس الدرج الكلي</div><div className="stat-card__value">{selected.drawerTotal.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">إيراد نقدي</div><div className="stat-card__value">{selected.cashRevenue.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">إيراد بطاقة</div><div className="stat-card__value">{selected.cardRevenue.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">تسويات التقريب</div><div className="stat-card__value">{selected.roundingAdjustments.toFixed(2)}</div></div>
-            <div className="stat-card"><div className="stat-card__label">المصروفات</div><div className="stat-card__value">{selected.expenses.toFixed(2)}</div></div>
+            <div className="stat-card"><div className="stat-card__label">مصروفات الدرج</div><div className="stat-card__value">{selected.cashExpenses.toFixed(2)}</div></div>
+            <div className="stat-card"><div className="stat-card__label">إضافات الدرج</div><div className="stat-card__value">{selected.cashAdditions.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">كل الطلبات</div><div className="stat-card__value">{selected.orders.length}</div></div>
             <div className="stat-card"><div className="stat-card__label">طلبات مكتملة</div><div className="stat-card__value">{selected.completedOrders.length}</div></div>
             <div className="stat-card"><div className="stat-card__label">طلبات ملغية</div><div className="stat-card__value">{selected.cancelledOrders.length}</div></div>

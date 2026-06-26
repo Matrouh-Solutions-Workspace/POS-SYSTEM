@@ -28,6 +28,9 @@ export interface ShiftSummary {
   completedOrders: Order[]
   cancelledOrders: Order[]
   revenue: number
+  grossSales: number
+  refundTotal: number
+  netSales: number
   drawerTotal: number
   /** Expected cash = openingCash + cash sales - cash expenses */
   expectedCash: number
@@ -37,6 +40,10 @@ export interface ShiftSummary {
   cashDifference?: number
   cashRevenue: number
   cardRevenue: number
+  cashRefunds: number
+  cardRefunds: number
+  cashAdditions: number
+  cashExpenses: number
   roundingAdjustments: number
   expenses: number
   itemSummary: Array<{
@@ -451,10 +458,6 @@ export async function getShiftSummary(shift: Shift): Promise<ShiftSummary> {
       tx.ingredientId
   })
 
-  const revenue = completedOrders.reduce((sum, o) => sum + o.total, 0)
-  const expenses = shiftCashTransactions
-    .filter((tx) => tx.type !== 'sale' && tx.amount < 0)
-    .reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
   // Payment method breakdown from order payments
   const allPayments = await getCachedDocs<{ orderId: string; amount: number; method: string }>(
     COLLECTIONS.payments
@@ -462,24 +465,40 @@ export async function getShiftSummary(shift: Shift): Promise<ShiftSummary> {
   const shiftOrderIds = new Set(orders.map((o) => o.id))
   const shiftPayments = allPayments.filter((p) => shiftOrderIds.has(p.orderId))
   const cashRevenue = shiftPayments
-    .filter((p) => p.method === 'cash')
+    .filter((p) => p.method === 'cash' && p.amount > 0)
     .reduce((sum, p) => sum + p.amount, 0)
   const cardRevenue = shiftPayments
-    .filter((p) => p.method === 'card')
+    .filter((p) => p.method === 'card' && p.amount > 0)
     .reduce((sum, p) => sum + p.amount, 0)
+  const cashRefunds = Math.abs(shiftPayments
+    .filter((p) => p.method === 'cash' && p.amount < 0)
+    .reduce((sum, p) => sum + p.amount, 0))
+  const cardRefunds = Math.abs(shiftPayments
+    .filter((p) => p.method === 'card' && p.amount < 0)
+    .reduce((sum, p) => sum + p.amount, 0))
   const roundingAdjustments = -roundingRecords
     .filter((record) => record.shiftId === shift.id)
     .reduce((sum, record) => sum + record.differenceAmount, 0)
+  const refundOrders = orders.filter((order) =>
+    !!order.refundOfOrderId || order.total < 0 || order.orderCode?.startsWith('RFD-') === true
+  )
+  const grossSales = completedOrders
+    .filter((order) => !order.refundOfOrderId && order.total > 0 && order.orderCode?.startsWith('RFD-') !== true)
+    .reduce((sum, order) => sum + Math.max(0, order.total), 0)
+  const refundTotal = cashRefunds + cardRefunds || Math.abs(refundOrders.reduce((sum, order) => sum + order.total, 0))
+  const netSales = grossSales - refundTotal
+  const revenue = netSales
 
   // Cash reconciliation
   const openingCash = shift.openingCash ?? 0
   const cashExpenses = shiftCashTransactions
     .filter((tx) => !tx.orderId && tx.amount < 0)
-    .reduce((sum, tx) => sum + tx.amount, 0) // negative sum
+    .reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
   const cashAdditions = shiftCashTransactions
     .filter((tx) => !tx.orderId && tx.amount > 0)
     .reduce((sum, tx) => sum + tx.amount, 0)
-  const drawerTotal = cashRevenue + cashExpenses + cashAdditions
+  const expenses = cashExpenses
+  const drawerTotal = cashRevenue - cashRefunds - cashExpenses + cashAdditions
   const expectedCash = openingCash + drawerTotal
   const actualCash = shift.closingCash
   const cashDifference = actualCash !== undefined ? actualCash - expectedCash : undefined
@@ -490,12 +509,19 @@ export async function getShiftSummary(shift: Shift): Promise<ShiftSummary> {
     completedOrders,
     cancelledOrders,
     revenue,
+    grossSales,
+    refundTotal,
+    netSales,
     drawerTotal,
     expectedCash,
     actualCash,
     cashDifference,
     cashRevenue,
     cardRevenue,
+    cashRefunds,
+    cardRefunds,
+    cashAdditions,
+    cashExpenses,
     roundingAdjustments,
     expenses,
     itemSummary,

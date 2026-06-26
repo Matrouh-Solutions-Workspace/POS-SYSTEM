@@ -67,16 +67,22 @@ export function CashRoundingReport(): React.ReactElement {
       </div>
       <div className="stats-grid">
         <div className="stat-card"><div className="stat-card__label">عدد عمليات التقريب</div><div className="stat-card__value">{records.length}</div></div>
-        <div className="stat-card"><div className="stat-card__label">إجمالي فروق التقريب</div><div className="stat-card__value">{records.reduce((sum, record) => sum + record.differenceAmount, 0).toFixed(2)}</div></div>
+        <div className="stat-card"><div className="stat-card__label">صافي فروق التقريب</div><div className="stat-card__value">{records.reduce((sum, record) => sum + record.differenceAmount, 0).toFixed(2)}</div></div>
       </div>
       <table className="data-table">
-        <thead><tr><th>الطلب</th><th>المستخدم</th><th>الجهاز</th><th>الأصلي</th><th>النهائي</th><th>الفرق</th><th>السبب</th><th>التاريخ</th></tr></thead>
+        <thead><tr><th>الطلب</th><th>النوع</th><th>المستخدم</th><th>الجهاز</th><th>الأصلي</th><th>النهائي</th><th>الفرق</th><th>السبب</th><th>التاريخ</th></tr></thead>
         <tbody>
-          {records.length === 0 ? <tr><td colSpan={8}>لا توجد عمليات تقريب في الفترة المحددة.</td></tr> : records.map((record) => {
+          {records.length === 0 ? <tr><td colSpan={9}>لا توجد عمليات تقريب في الفترة المحددة.</td></tr> : records.map((record) => {
             const order = orderMap.get(record.orderId)
+            const type = record.differenceAmount < 0
+              ? 'عكس'
+              : order?.status === 'cancelled'
+                ? 'مطبق على طلب ملغي'
+                : 'تطبيق'
             return (
               <tr key={record.id}>
                 <td>{order ? `#${orderReference(order)}` : record.orderId}</td>
+                <td>{type}</td>
                 <td>{record.username}</td>
                 <td>{record.deviceId}</td>
                 <td>{record.originalAmount.toFixed(2)}</td>

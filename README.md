@@ -1,5 +1,13 @@
 # POS MVP Launch Assessment
 
+## Private GitHub releases and updates
+
+The repo can stay private. Publishing and update checks require a GitHub token with access to `xlargetomato/AbdoKoftaDesktop`.
+
+- To publish a Windows release, put `GH_TOKEN=github_pat_...` in `.env.local` or set it as an OS environment variable, then run `npm run dist:win:publish`.
+- For installed master devices checking private GitHub releases, set `GH_TOKEN`, `GITHUB_TOKEN`, or `SHIFT_POS_UPDATE_TOKEN` as an OS environment variable, or place a local token file at `%APPDATA%\shift-pos\updater-auth.json` with `{ "token": "github_pat_..." }`.
+- Do not commit real tokens. Use a fine-scoped token that can read repository release assets. Side devices do not need a GitHub token; they update from the master over LAN.
+
 ## 1. System Assessment
 
 **Verdict: Not ready for real restaurant deployment yet.**
