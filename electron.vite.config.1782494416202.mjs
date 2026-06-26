@@ -1,0 +1,56 @@
+// electron.vite.config.ts
+import { resolve } from "path";
+import { defineConfig, externalizeDepsPlugin } from "electron-vite";
+import { loadEnv } from "vite";
+import react from "@vitejs/plugin-react";
+var electron_vite_config_default = defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  return {
+    main: {
+      plugins: [externalizeDepsPlugin()],
+      define: {
+        __API_SYNC_ENABLED__: JSON.stringify(env.API_SYNC_ENABLED ?? "false"),
+        __API_SYNC_URL__: JSON.stringify(env.API_SYNC_URL ?? ""),
+        __API_SYNC_TOKEN__: JSON.stringify(env.API_SYNC_TOKEN ?? ""),
+        __LICENSE_PUBLIC_KEY__: JSON.stringify(env.SHIFT_POS_LICENSE_PUBLIC_KEY ?? "")
+      }
+    },
+    preload: {
+      plugins: [externalizeDepsPlugin()],
+      build: {
+        rollupOptions: {
+          output: {
+            format: "cjs",
+            entryFileNames: "index.cjs"
+          }
+        }
+      }
+    },
+    renderer: {
+      base: "./",
+      plugins: [react()],
+      resolve: {
+        alias: {
+          "@renderer": resolve("src/renderer/src"),
+          "@shared": resolve("shared")
+        }
+      },
+      build: {
+        rollupOptions: {
+          output: {
+            manualChunks(id) {
+              if (id.includes("node_modules/react-dom") || id.includes("node_modules/react/") || id.includes("node_modules/scheduler")) {
+                return "react-vendor";
+              }
+              if (id.includes("node_modules/react-router")) return "router";
+              if (id.includes("node_modules/zustand")) return "zustand";
+            }
+          }
+        }
+      }
+    }
+  };
+});
+export {
+  electron_vite_config_default as default
+};
