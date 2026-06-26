@@ -12,7 +12,8 @@ export default defineConfig(({ mode }) => {
       define: {
         __API_SYNC_ENABLED__: JSON.stringify(env.API_SYNC_ENABLED ?? 'false'),
         __API_SYNC_URL__: JSON.stringify(env.API_SYNC_URL ?? ''),
-        __API_SYNC_TOKEN__: JSON.stringify(env.API_SYNC_TOKEN ?? '')
+        __API_SYNC_TOKEN__: JSON.stringify(env.API_SYNC_TOKEN ?? ''),
+        __LICENSE_PUBLIC_KEY__: JSON.stringify(env.SHIFT_POS_LICENSE_PUBLIC_KEY ?? '')
       }
     },
     preload: {

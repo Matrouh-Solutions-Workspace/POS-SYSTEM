@@ -5,9 +5,7 @@ import { hostname, cpus, platform } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 
-const LICENSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEA6a1H+875wp9OrSjSzdgsiufVmclxnQlaY5kAHn+Fmio=
------END PUBLIC KEY-----`
+declare const __LICENSE_PUBLIC_KEY__: string
 
 export interface ActivationRequest {
   schema: 'abdokofta.activation-request.v1'
@@ -83,6 +81,12 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value)
 }
 
+function licensePublicKey(): string {
+  const key = __LICENSE_PUBLIC_KEY__.replace(/\\n/g, '\n').trim()
+  if (!key) throw new Error('SHIFT_POS_LICENSE_PUBLIC_KEY is not configured')
+  return key
+}
+
 function parseLicenseFile(raw: string): LicenseFile {
   const parsed = JSON.parse(raw) as LicenseFile
   if (!parsed.payload || !parsed.signature) {
@@ -104,7 +108,7 @@ export function getLicenseStatus(): LicenseStatus {
     const ok = verify(
       null,
       Buffer.from(canonicalJson(license.payload)),
-      LICENSE_PUBLIC_KEY,
+      licensePublicKey(),
       Buffer.from(license.signature, 'base64')
     )
     if (!ok) return { valid: false, reason: 'توقيع الرخصة غير صحيح', hwid, licensePath: path }
