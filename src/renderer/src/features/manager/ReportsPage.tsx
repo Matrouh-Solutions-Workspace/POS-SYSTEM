@@ -234,7 +234,7 @@ export function ReportsPage(): React.ReactElement {
           </button>
         </div>
       </div>
-      <div className="settings-form-grid" style={{ marginBottom: 12 }}>
+      <div className="settings-form-grid mb-12">
         <label className="field">
           <span>الموظف</span>
           <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
@@ -302,7 +302,7 @@ export function ReportsPage(): React.ReactElement {
               <div className="stat-card">
                 <div className="stat-card__label">أفضل يوم في الفترة</div>
                 <div className="stat-card__value" style={{ fontSize: '1.1rem' }}>{data.summary.bestDay.dateKey}</div>
-                <div className="stat-card__label" style={{ marginTop: 4 }}>{data.summary.bestDay.totalSales.toFixed(2)} {cur}</div>
+                <div className="stat-card__label mt-4">{data.summary.bestDay.totalSales.toFixed(2)} {cur}</div>
               </div>
             )}
           </div>

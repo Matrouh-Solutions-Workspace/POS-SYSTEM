@@ -27,6 +27,7 @@ import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { InventoryActionModal, type InventoryActionType } from './InventoryActionModal'
 import { MdAdd, MdEdit, MdCheck, MdClose, MdInventory, MdKitchen, MdRemove, MdSwapVert, MdWarning } from 'react-icons/md'
 import { usePageState } from '@renderer/features/tabs/page-state-store'
+import { FormField, FormModal } from '@renderer/components/ui'
 import { listSuppliers, recordSupplierTransaction } from '@renderer/features/suppliers/supplier-service'
 
 const UNITS = ['جرام', 'كيلوجرام', 'قطعة', 'مل', 'لتر']
@@ -259,12 +260,11 @@ function IngredientsTab({ ingredients, onRefresh, setMessage }: {
               <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-muted)', padding: 20 }}>لا توجد مكوّنات بعد — أضف مكوّناً للبدء</td></tr>
             )}
             {ingredients.map((i) => {
-              const isEditing = editing?.id === i.id
               return (
                 <tr key={i.id}>
-                  <td>{isEditing ? <input className="inline-edit-input" value={editing.nameAr} onChange={(e) => setEditing({...editing,nameAr:e.target.value})} autoFocus /> : i.nameAr}</td>
-                  <td>{isEditing ? <select className="inline-edit-input" value={editing.unit} onChange={(e) => setEditing({...editing,unit:e.target.value})}>{UNITS.map((u)=><option key={u} value={u}>{u}</option>)}</select> : i.unit}</td>
-                  <td>{isEditing ? <input className="inline-edit-input" type="number" value={editing.threshold} onChange={(e) => setEditing({...editing,threshold:e.target.value})} placeholder="—" /> : (i.lowStockThreshold ?? '—')}</td>
+                  <td>{i.nameAr}</td>
+                  <td>{i.unit}</td>
+                  <td>{i.lowStockThreshold ?? '—'}</td>
                   <td>
                     <button type="button" className={`btn btn--sm ${i.active ? 'btn--secondary' : 'btn--danger'}`} onClick={() => void updateIngredient(i.id, { active: !i.active }, user).then(onRefresh)}>
                       {i.active ? 'مفعّل' : 'معطّل'}
@@ -272,12 +272,8 @@ function IngredientsTab({ ingredients, onRefresh, setMessage }: {
                   </td>
                   <td>
                     <div className="table-actions">
-                      {isEditing ? (
-                        <><button type="button" className="btn btn--primary btn--sm" onClick={() => void saveEdit()}><MdCheck /> حفظ</button><button type="button" className="btn btn--secondary btn--sm" onClick={() => setEditing(null)}><MdClose /></button></>
-                      ) : (
-                        <><button type="button" className="btn btn--secondary btn--sm" onClick={() => setEditing({ id: i.id, nameAr: i.nameAr, unit: i.unit, threshold: i.lowStockThreshold != null ? String(i.lowStockThreshold) : '' })}><MdEdit /> تعديل</button>
-                        <ConfirmDeleteButton confirmMessage={`حذف "${i.nameAr}" نهائياً؟`} onConfirm={async () => { await deleteIngredient(i.id, user); setMessage(`تم حذف "${i.nameAr}"`); await onRefresh() }} /></>
-                      )}
+                      <button type="button" className="btn btn--secondary btn--sm" onClick={() => setEditing({ id: i.id, nameAr: i.nameAr, unit: i.unit, threshold: i.lowStockThreshold != null ? String(i.lowStockThreshold) : '' })}><MdEdit /> تعديل</button>
+                      <ConfirmDeleteButton confirmMessage={`حذف "${i.nameAr}" نهائياً؟`} onConfirm={async () => { await deleteIngredient(i.id, user); setMessage(`تم حذف "${i.nameAr}"`); await onRefresh() }} />
                     </div>
                   </td>
                 </tr>
@@ -286,6 +282,29 @@ function IngredientsTab({ ingredients, onRefresh, setMessage }: {
           </tbody>
         </table>
       </div>
+
+      {editing && (
+        <FormModal
+          open={true}
+          title={`تعديل المكون: ${ingredients.find(i => i.id === editing.id)?.nameAr || ''}`}
+          entityName="مكون"
+          isEdit={true}
+          onClose={() => setEditing(null)}
+          onSubmit={saveEdit}
+        >
+          <FormField label="الاسم" required>
+            <input value={editing.nameAr} onChange={(e) => setEditing({...editing, nameAr: e.target.value})} autoFocus required />
+          </FormField>
+          <FormField label="وحدة القياس">
+            <select value={editing.unit} onChange={(e) => setEditing({...editing, unit: e.target.value})}>
+              {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </FormField>
+          <FormField label="حد التنبيه (اختياري)">
+            <input type="number" value={editing.threshold} onChange={(e) => setEditing({...editing, threshold: e.target.value})} placeholder="مثال: 500" />
+          </FormField>
+        </FormModal>
+      )}
     </div>
   )
 }

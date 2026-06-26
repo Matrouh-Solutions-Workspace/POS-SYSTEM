@@ -255,7 +255,7 @@ export async function completeOrder(params: {
 
   const now = Date.now()
   const orderId = generateId()
-  const isPaid = orderType === 'takeaway'
+  const isPaid = orderType === 'takeaway' || !!params.paymentMethod
   const cashReceived = params.paymentMethod === 'cash'
     ? Math.round((params.cashReceived ?? total) * 100) / 100
     : undefined
@@ -342,6 +342,7 @@ export async function completeOrder(params: {
     if (params.paymentMethod === 'split') {
       const cashAmt = Math.round((params.cashPaid ?? 0) * 100) / 100
       const cardAmt = Math.round((params.cardPaid ?? 0) * 100) / 100
+      if (Math.abs(cashAmt + cardAmt - total) >= 0.001) throw new Error('مجموع الدفع النقدي والبطاقة لا يساوي إجمالي الطلب')
       if (cashAmt > 0) payments.push({ id: generateId(), orderId, amount: cashAmt, paidAmount: cashAmt, changeAmount: 0, employeeId: params.cashierId, shiftId: shift.id, deviceId: paymentDeviceId, method: 'cash', createdAt: now })
       if (cardAmt > 0) payments.push({ id: generateId(), orderId, amount: cardAmt, paidAmount: cardAmt, changeAmount: 0, employeeId: params.cashierId, shiftId: shift.id, deviceId: paymentDeviceId, method: 'card', createdAt: now })
     } else {
@@ -539,6 +540,7 @@ export async function markOrderPaid(params: {
 }): Promise<Order | null> {
   const order = await getCachedDoc<Order>(COLLECTIONS.orders, params.orderId)
   if (!order || order.status === 'cancelled') return null
+  if (order.status === 'completed' || order.paymentStatus === 'paid' || order.paymentStatus === 'split') return order
 
   const now = Date.now()
   const originalTotal = order.total
@@ -596,6 +598,7 @@ export async function markOrderPaid(params: {
   if (params.paymentMethod === 'split') {
     const cashAmt = Math.round((params.cashPaid ?? 0) * 100) / 100
     const cardAmt = Math.round((params.cardPaid ?? 0) * 100) / 100
+    if (Math.abs(cashAmt + cardAmt - finalTotal) >= 0.001) throw new Error('مجموع الدفع النقدي والبطاقة لا يساوي إجمالي الطلب')
     if (cashAmt > 0) payments.push({ id: generateId(), orderId: order.id, amount: cashAmt, paidAmount: cashAmt, changeAmount: 0, employeeId: params.cashierId, shiftId: order.shiftId, deviceId: paidDeviceId, method: 'cash', createdAt: now })
     if (cardAmt > 0) payments.push({ id: generateId(), orderId: order.id, amount: cardAmt, paidAmount: cardAmt, changeAmount: 0, employeeId: params.cashierId, shiftId: order.shiftId, deviceId: paidDeviceId, method: 'card', createdAt: now })
   } else {
@@ -823,11 +826,11 @@ export async function cancelOrder(params: {
   const cashToReverse = orderPayments
     .filter((payment) => payment.method === 'cash')
     .reduce((sum, payment) => sum + payment.amount, 0)
-  const drawerTransaction: CashDrawerTransaction | null = shouldReverseCash
+  const drawerTransaction: CashDrawerTransaction | null = shouldReverseCash && cashToReverse > 0
     ? {
         id: generateId(),
         type: 'sale',
-        amount: -(orderPayments.length ? cashToReverse : order.total),
+        amount: -cashToReverse,
         shiftId: order.shiftId,
         orderId: order.id,
         noteAr: params.reasonAr || 'إلغاء طلب',
@@ -1006,6 +1009,28 @@ export async function refundOrder(params: {
   if (!original) throw new Error('الطلب الأصلي غير موجود')
   if (original.status === 'cancelled') throw new Error('لا يمكن استرداد طلب ملغي')
   if (original.paymentStatus === 'unpaid') throw new Error('لا يمكن استرداد طلب غير مدفوع')
+
+  const allOrders = await getCachedDocs<Order>(COLLECTIONS.orders)
+  const priorRefundOrders = allOrders.filter((o) => o.refundOfOrderId === original.id)
+  const priorRefundOrderIds = new Set(priorRefundOrders.map((o) => o.id))
+  const allItems = await getCachedDocs<OrderItem>(COLLECTIONS.orderItems)
+  const priorRefundItems = allItems.filter((i) => priorRefundOrderIds.has(i.orderId))
+  const refundedQtyByItem = new Map<string, number>()
+  for (const item of priorRefundItems) {
+    refundedQtyByItem.set(item.menuItemId, (refundedQtyByItem.get(item.menuItemId) ?? 0) + Math.abs(item.quantity))
+  }
+  const originalItems = allItems.filter((i) => i.orderId === original.id)
+  const originalQtyByItem = new Map<string, number>()
+  for (const item of originalItems) {
+    originalQtyByItem.set(item.menuItemId, (originalQtyByItem.get(item.menuItemId) ?? 0) + item.quantity)
+  }
+  for (const line of params.lines) {
+    const originalQty = originalQtyByItem.get(line.menuItemId) ?? 0
+    const alreadyRefunded = refundedQtyByItem.get(line.menuItemId) ?? 0
+    if (line.quantity > originalQty - alreadyRefunded) {
+      throw new Error(`الكمية المستردة للصنف (${line.nameAr}) تتجاوز الكمية المتاحة للاسترداد`)
+    }
+  }
 
   // Calculate refund amount proportionally (preserving discount/tax ratio)
   const originalSubtotal = original.subtotal > 0 ? original.subtotal : 1

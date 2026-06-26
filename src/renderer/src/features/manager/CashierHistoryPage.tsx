@@ -308,7 +308,7 @@ export function CashierHistoryPage(): React.ReactElement {
                             <td style={{ fontSize: '0.85rem' }}>
                               {new Date(o.completedAt ?? o.createdAt).toLocaleTimeString('ar-EG')}
                             </td>
-                            <td><strong style={{ color: 'var(--color-primary)' }}>{o.total.toFixed(2)} {cur}</strong></td>
+                            <td><strong className="text-primary">{o.total.toFixed(2)} {cur}</strong></td>
                             <td>
                               <div className="table-actions">
                                 <button type="button" className="btn btn--secondary btn--sm"
@@ -372,7 +372,7 @@ export function CashierHistoryPage(): React.ReactElement {
                 </div>
               )}
             </div>
-            <table className="data-table" style={{ marginTop: 12 }}>
+            <table className="data-table mt-12">
               <thead>
                 <tr><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr>
               </thead>
@@ -393,7 +393,7 @@ export function CashierHistoryPage(): React.ReactElement {
                 <strong>{details.order.total.toFixed(2)} {cur}</strong>
               </div>
             </div>
-            <div className="modal-actions" style={{ marginTop: 16 }}>
+            <div className="modal-actions mt-16">
               <button type="button" className="btn btn--primary btn--sm"
                 onClick={() => void reprintOrder(details.order)}>
                 طباعة الإيصال

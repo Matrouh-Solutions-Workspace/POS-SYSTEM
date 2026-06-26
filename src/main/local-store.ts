@@ -102,6 +102,37 @@ function openDatabase(): DatabaseSync {
       updated_at INTEGER NOT NULL
     );
   `)
+
+  // REQ-11 Migration: Populate ingredient_stock if it's completely empty but we have inventory transactions
+  try {
+    const stockCountRow = db.prepare('SELECT COUNT(*) as c FROM ingredient_stock').get() as { c: number }
+    if (stockCountRow.c === 0) {
+      const txRows = db.prepare(`SELECT payload_json FROM cached_documents WHERE collection_name = 'inventoryTransactions'`).all() as { payload_json: string }[]
+      if (txRows.length > 0) {
+        const stockMap = new Map<string, number>()
+        for (const row of txRows) {
+          try {
+            const tx = JSON.parse(row.payload_json) as { ingredientId: string; quantity: number }
+            if (tx.ingredientId && typeof tx.quantity === 'number') {
+              stockMap.set(tx.ingredientId, (stockMap.get(tx.ingredientId) ?? 0) + tx.quantity)
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+        if (stockMap.size > 0) {
+          const insertStmt = db.prepare('INSERT INTO ingredient_stock (ingredient_id, quantity, updated_at) VALUES (?, ?, ?)')
+          const now = Date.now()
+          for (const [ingredientId, quantity] of stockMap.entries()) {
+            insertStmt.run(ingredientId, quantity, now)
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Inventory migration failed:', e)
+  }
+
   return db
 }
 
@@ -663,12 +694,45 @@ export function restoreDatabase(sourcePath: string): { ok: boolean; error?: stri
   if (!existsSync(sourcePath)) {
     return { ok: false, error: 'ملف النسخ الاحتياطي غير موجود' }
   }
+  
+  const targetPath = dbPath()
+  const tempPath = targetPath + '.temp_restore'
+  const bakPath = targetPath + '.bak'
+
   try {
-    // Close the connection so we can replace the file
-    db = null
-    copyFileSync(sourcePath, dbPath())
+    // 1. Copy to temp and verify integrity
+    copyFileSync(sourcePath, tempPath)
+    const sqlite = require('node:sqlite') as { DatabaseSync: new (path: string) => { exec: (s: string) => void; prepare: (s: string) => { get: () => unknown } } }
+    let tempDb: any
+    try {
+      tempDb = new sqlite.DatabaseSync(tempPath)
+      const integrity = tempDb.prepare('PRAGMA integrity_check').get() as { integrity_check: string }
+      if (integrity?.integrity_check !== 'ok') {
+        throw new Error('فشل فحص سلامة الملف (Corrupted database)')
+      }
+    } finally {
+      if (tempDb) tempDb = null // node:sqlite closes when GC'd or explicit close not available in this simplified wrapper
+    }
+
+    // 2. Backup current production DB just in case
+    if (existsSync(targetPath)) {
+      db = null // close current connection
+      copyFileSync(targetPath, bakPath)
+    }
+
+    // 3. Move temp to target
+    copyFileSync(tempPath, targetPath)
+    unlinkSync(tempPath)
+
     return { ok: true }
   } catch (e) {
+    // Rollback if something failed
+    try {
+      if (existsSync(bakPath)) copyFileSync(bakPath, targetPath)
+      if (existsSync(tempPath)) unlinkSync(tempPath)
+    } catch (rollbackErr) {
+      // ignore rollback errors
+    }
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }

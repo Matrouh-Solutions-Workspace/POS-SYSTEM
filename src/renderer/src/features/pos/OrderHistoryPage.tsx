@@ -3,6 +3,7 @@
  */
 import { useEffect, useState } from 'react'
 import type { Order, OrderItem } from '@shared/types'
+import { ConfirmDialog } from '@renderer/components/ui'
 import {
   cancelOrder,
   getOrderItems,
@@ -65,57 +66,46 @@ function CancelModal({
   const [inventoryMode, setInventoryMode] = useState<'return' | 'waste'>('return')
 
   return (
-    <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
-        <div className="order-details__header">
-          <h2 className="order-details__title">إلغاء طلب #{orderReference(order)}</h2>
-          <button type="button" className="order-details__close" onClick={onCancel} aria-label="إغلاق">✕</button>
-        </div>
+    <ConfirmDialog
+      open
+      onCancel={onCancel}
+      onConfirm={() => onConfirm(inventoryMode, reason)}
+      title={`إلغاء طلب #${orderReference(order)}`}
+      message=""
+      confirmLabel="تأكيد الإلغاء"
+      cancelLabel="تراجع"
+      danger
+    >
+      <label className="field">
+        <span>سبب الإلغاء (اختياري)</span>
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="أدخل سبب الإلغاء..."
+          autoFocus
+        />
+      </label>
 
-        <label className="field">
-          <span>سبب الإلغاء (اختياري)</span>
-          <input
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="أدخل سبب الإلغاء..."
-            autoFocus
-          />
-        </label>
-
-        <div style={{ marginBottom: 16 }}>
-          <p style={{ fontWeight: 700, marginBottom: 8, fontSize: '0.9rem' }}>المخزون بعد الإلغاء:</p>
-          <div className="order-type-toggle">
-            <button
-              type="button"
-              className={`order-type-toggle__btn${inventoryMode === 'return' ? ' order-type-toggle__btn--active' : ''}`}
-              onClick={() => setInventoryMode('return')}
-            >
-              يرجع للمخزون
-            </button>
-            <button
-              type="button"
-              className={`order-type-toggle__btn${inventoryMode === 'waste' ? ' order-type-toggle__btn--active' : ''}`}
-              onClick={() => setInventoryMode('waste')}
-            >
-              هدر (لا يرجع)
-            </button>
-          </div>
-        </div>
-
-        <div className="modal-actions">
+      <div className="mb-16">
+        <p style={{ fontWeight: 700, marginBottom: 8, fontSize: '0.9rem' }}>المخزون بعد الإلغاء:</p>
+        <div className="order-type-toggle">
           <button
             type="button"
-            className="btn btn--danger"
-            onClick={() => onConfirm(inventoryMode, reason)}
+            className={`order-type-toggle__btn${inventoryMode === 'return' ? ' order-type-toggle__btn--active' : ''}`}
+            onClick={() => setInventoryMode('return')}
           >
-            تأكيد الإلغاء
+            يرجع للمخزون
           </button>
-          <button type="button" className="btn btn--secondary" onClick={onCancel}>
-            تراجع
+          <button
+            type="button"
+            className={`order-type-toggle__btn${inventoryMode === 'waste' ? ' order-type-toggle__btn--active' : ''}`}
+            onClick={() => setInventoryMode('waste')}
+          >
+            هدر (لا يرجع)
           </button>
         </div>
       </div>
-    </div>
+    </ConfirmDialog>
   )
 }
 
@@ -169,115 +159,100 @@ function RefundModal({
   }
 
   return (
-    <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
-        <div className="order-details__header">
-          <h2 className="order-details__title">استرداد طلب #{orderReference(order)}</h2>
-          <button type="button" className="order-details__close" onClick={onCancel} aria-label="إغلاق">✕</button>
-        </div>
-
-        <p style={{ fontSize: '0.85rem', color: 'var(--color-muted)', marginBottom: 12 }}>
-          اختر الأصناف المراد استردادها
-        </p>
-
-        <table className="data-table" style={{ marginBottom: 12 }}>
-          <thead>
-            <tr>
-              <th style={{ width: 36 }}></th>
-              <th>الصنف</th>
-              <th>الكمية</th>
-              <th>الإجمالي</th>
+    <ConfirmDialog
+      open
+      onCancel={onCancel}
+      onConfirm={handleConfirm}
+      title={`استرداد طلب #${orderReference(order)}`}
+      message="اختر الأصناف المراد استردادها"
+      confirmLabel={`تأكيد الاسترداد (${refundTotal.toFixed(2)})`}
+      cancelLabel="إلغاء"
+      danger
+      loading={saving || selected.size === 0 || !reason.trim()}
+    >
+      <table className="data-table mb-12">
+        <thead>
+          <tr>
+            <th style={{ width: 36 }}></th>
+            <th>الصنف</th>
+            <th>الكمية</th>
+            <th>الإجمالي</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={item.id} style={{ opacity: selected.has(item.id) ? 1 : 0.45 }}>
+              <td>
+                <input
+                  type="checkbox"
+                  checked={selected.has(item.id)}
+                  onChange={() => toggleItem(item.id)}
+                />
+              </td>
+              <td>
+                {item.nameAr}
+                {item.sizeLabelAr && (
+                  <span style={{ color: 'var(--color-muted)', fontSize: '0.78rem', marginInlineStart: 4 }}>
+                    ({item.sizeLabelAr})
+                  </span>
+                )}
+              </td>
+              <td>{item.quantity}</td>
+              <td>{item.lineTotal.toFixed(2)}</td>
             </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={item.id} style={{ opacity: selected.has(item.id) ? 1 : 0.45 }}>
-                <td>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(item.id)}
-                    onChange={() => toggleItem(item.id)}
-                  />
-                </td>
-                <td>
-                  {item.nameAr}
-                  {item.sizeLabelAr && (
-                    <span style={{ color: 'var(--color-muted)', fontSize: '0.78rem', marginInlineStart: 4 }}>
-                      ({item.sizeLabelAr})
-                    </span>
-                  )}
-                </td>
-                <td>{item.quantity}</td>
-                <td>{item.lineTotal.toFixed(2)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          ))}
+        </tbody>
+      </table>
 
-        {/* Refund amount summary */}
-        <div style={{
-          background: 'var(--color-bg)',
-          border: '1px solid var(--color-border-light)',
-          borderRadius: 4,
-          padding: '10px 14px',
-          marginBottom: 14,
-          fontSize: '0.88rem'
-        }}>
-          {refundDiscount > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--color-muted)' }}>
-              <span>خصم نسبي</span><span>-{refundDiscount.toFixed(2)}</span>
-            </div>
-          )}
-          {refundTax > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--color-muted)' }}>
-              <span>ضريبة نسبية</span><span>+{refundTax.toFixed(2)}</span>
-            </div>
-          )}
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            fontWeight: 900,
-            fontSize: '1.05rem',
-            borderTop: '2px solid var(--color-border)',
-            marginTop: 6,
-            paddingTop: 6,
-            color: 'var(--color-danger)'
-          }}>
-            <span>مبلغ الاسترداد</span>
-            <span>{refundTotal.toFixed(2)}</span>
+      {/* Refund amount summary */}
+      <div style={{
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border-light)',
+        borderRadius: 4,
+        padding: '10px 14px',
+        marginBottom: 14,
+        fontSize: '0.88rem'
+      }}>
+        {refundDiscount > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--color-muted)' }}>
+            <span>خصم نسبي</span><span>-{refundDiscount.toFixed(2)}</span>
           </div>
-        </div>
-
-        <label className="field">
-          <span>سبب الاسترداد <span style={{ color: 'var(--color-danger)' }}>*</span></span>
-          <input
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="أدخل سبب الاسترداد..."
-            autoFocus
-          />
-        </label>
-        {!reason.trim() && (
-          <p style={{ fontSize: '0.8rem', color: 'var(--color-danger)', marginBottom: 8 }}>
-            سبب الاسترداد مطلوب
-          </p>
         )}
-
-        <div className="modal-actions">
-          <button
-            type="button"
-            className="btn btn--danger"
-            onClick={handleConfirm}
-            disabled={saving || selected.size === 0 || !reason.trim()}
-          >
-            {saving ? 'جارٍ الاسترداد...' : `تأكيد الاسترداد (${refundTotal.toFixed(2)})`}
-          </button>
-          <button type="button" className="btn btn--secondary" onClick={onCancel}>
-            إلغاء
-          </button>
+        {refundTax > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--color-muted)' }}>
+            <span>ضريبة نسبية</span><span>+{refundTax.toFixed(2)}</span>
+          </div>
+        )}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          fontWeight: 900,
+          fontSize: '1.05rem',
+          borderTop: '2px solid var(--color-border)',
+          marginTop: 6,
+          paddingTop: 6,
+          color: 'var(--color-danger)'
+        }}>
+          <span>مبلغ الاسترداد</span>
+          <span>{refundTotal.toFixed(2)}</span>
         </div>
       </div>
-    </div>
+
+      <label className="field">
+        <span>سبب الاسترداد <span className="text-danger">*</span></span>
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="أدخل سبب الاسترداد..."
+          autoFocus
+        />
+      </label>
+      {!reason.trim() && (
+        <p style={{ fontSize: '0.8rem', color: 'var(--color-danger)', margin: '4px 0 0' }}>
+          سبب الاسترداد مطلوب
+        </p>
+      )}
+    </ConfirmDialog>
   )
 }
 
@@ -685,8 +660,7 @@ export function OrderHistoryPage(): React.ReactElement {
                         {canRefund && (
                           <button
                             type="button"
-                            className="btn btn--secondary btn--sm"
-                            style={{ color: 'var(--color-danger)' }}
+                            className="btn btn--secondary btn--sm text-danger"
                             onClick={() => void openRefundModal(order)}
                           >
                             استرداد
@@ -755,11 +729,11 @@ export function OrderHistoryPage(): React.ReactElement {
               {details.order.cancelReasonAr && (
                 <div className="order-details__meta-row">
                   <span className="order-details__meta-label">سبب الإلغاء / الاسترداد</span>
-                  <span style={{ color: 'var(--color-danger)' }}>{details.order.cancelReasonAr}</span>
+                  <span className="text-danger">{details.order.cancelReasonAr}</span>
                 </div>
               )}
             </div>
-            <table className="data-table" style={{ marginTop: 12 }}>
+            <table className="data-table mt-12">
               <thead>
                 <tr><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr>
               </thead>
@@ -769,7 +743,7 @@ export function OrderHistoryPage(): React.ReactElement {
                     <td>
                       {item.nameAr}
                       {item.sizeLabelAr && (
-                        <div style={{ fontSize: '0.78rem', color: 'var(--color-muted)' }}>
+                        <div className="text-xs text-muted">
                           {item.sizeLabelAr}
                         </div>
                       )}
@@ -783,7 +757,7 @@ export function OrderHistoryPage(): React.ReactElement {
             </table>
             <div className="order-details__totals">
               {details.order.discountAmount ? (
-                <div className="order-details__total-row" style={{ color: 'var(--color-danger)' }}>
+                <div className="order-details__total-row text-danger">
                   <span>خصم</span>
                   <span>- {Math.abs(details.order.discountAmount).toFixed(2)} {currency}</span>
                 </div>
@@ -807,7 +781,7 @@ export function OrderHistoryPage(): React.ReactElement {
                 </strong>
               </div>
             </div>
-            <div className="modal-actions" style={{ marginTop: 16 }}>
+            <div className="modal-actions mt-16">
               <button
                 type="button"
                 className="btn btn--primary btn--sm"
@@ -940,7 +914,7 @@ export function OrderHistoryPage(): React.ReactElement {
                 ))}
               </tbody>
             </table>
-            <div className="modal-actions" style={{ marginTop: 16 }}>
+            <div className="modal-actions mt-16">
               <button
                 type="button"
                 className="btn btn--primary"

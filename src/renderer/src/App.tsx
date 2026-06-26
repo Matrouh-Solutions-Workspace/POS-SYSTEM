@@ -10,6 +10,7 @@ import { PageLoader } from '@renderer/components/PageLoader'
 import { UpdateNotification, useUpdaterBootstrap } from '@renderer/components/UpdateNotification'
 import { WhatsNewModal, useWhatsNewBootstrap } from '@renderer/components/WhatsNewModal'
 import { PinLockScreen } from '@renderer/components/PinLockScreen'
+import { ToastContainer } from '@renderer/components/ui/Toast'
 import { usePinBootstrap } from '@renderer/features/auth/use-pin-bootstrap'
 import { applyThemeColor } from '@renderer/features/theme/theme-store'
 import { getSettings } from '@renderer/features/orders/order-service'
@@ -233,6 +234,7 @@ export default function App(): React.ReactElement {
       <UpdateNotification />
       <WhatsNewModal />
       <SyncProgressNotification />
+      <ToastContainer />
       {sideNetwork && (
         <div className="modal-overlay" style={{ zIndex: 99998 }}>
           <div className="modal" style={{ maxWidth: 520 }}>

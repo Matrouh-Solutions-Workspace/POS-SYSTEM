@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AppUser, EmployeeWorkShift, UserShiftAssignment, WeekDay } from '@shared/types'
-import { MdAdd, MdDelete, MdEdit, MdSave } from 'react-icons/md'
+import { MdAdd, MdDelete, MdEdit } from 'react-icons/md'
 import { listAllAccounts } from '@renderer/features/auth/auth-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { getSettings, updateSettings } from '@renderer/features/orders/order-service'
+import { FormField, FormModal } from '@renderer/components/ui'
 import {
   deleteShiftAssignment,
   deleteWorkShift,
@@ -54,8 +55,14 @@ export function WorkShiftManagement(): React.ReactElement {
   const [cashiers, setCashiers] = useState<AppUser[]>([])
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+
+  // Shift Modal State
+  const [isShiftModalOpen, setIsShiftModalOpen] = useState(false)
   const [shiftForm, setShiftForm] = useState<WorkShiftInput>(EMPTY_SHIFT)
   const [editingShiftId, setEditingShiftId] = useState<string>()
+
+  // Assignment Modal State
+  const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false)
   const [assignmentForm, setAssignmentForm] = useState<ShiftAssignmentInput>({
     userId: '',
     workShiftId: '',
@@ -63,8 +70,6 @@ export function WorkShiftManagement(): React.ReactElement {
     active: true
   })
   const [editingAssignmentId, setEditingAssignmentId] = useState<string>()
-  const shiftFormRef = useRef<HTMLFormElement | null>(null)
-  const assignmentFormRef = useRef<HTMLFormElement | null>(null)
 
   const load = useCallback(async () => {
     const [settings, shifts, savedAssignments, users] = await Promise.all([
@@ -95,14 +100,6 @@ export function WorkShiftManagement(): React.ReactElement {
     setError('')
   }
 
-  function scrollToForm(ref: React.RefObject<HTMLFormElement | null>): void {
-    window.setTimeout(() => {
-      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      const firstField = ref.current?.querySelector<HTMLInputElement | HTMLSelectElement>('input, select')
-      firstField?.focus()
-    }, 0)
-  }
-
   async function toggleFeature(): Promise<void> {
     clearFeedback()
     const next = !enabled
@@ -115,35 +112,39 @@ export function WorkShiftManagement(): React.ReactElement {
     }
   }
 
-  async function submitShift(event: React.FormEvent): Promise<void> {
-    event.preventDefault()
+  async function submitShift(): Promise<void> {
     clearFeedback()
     try {
       await saveWorkShift(shiftForm, actor, editingShiftId)
       setShiftForm(EMPTY_SHIFT)
       setEditingShiftId(undefined)
+      setIsShiftModalOpen(false)
       setMessage(editingShiftId ? 'تم تعديل الوردية' : 'تم إنشاء الوردية')
       await load()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'تعذر حفظ الوردية')
+      throw cause // To prevent modal from closing if we returned false in onSubmit
     }
   }
 
-  function editShift(shift: EmployeeWorkShift): void {
+  function openShiftModal(shift?: EmployeeWorkShift): void {
     clearFeedback()
-    setActiveTab('schedules')
-    setEditingShiftId(shift.id)
-    setShiftForm({
-      name: shift.name,
-      startTime: shift.startTime,
-      endTime: shift.endTime,
-      workingDays: shift.workingDays,
-      overtimeEnabled: shift.overtimeEnabled,
-      maxOvertimeMinutes: shift.maxOvertimeMinutes,
-      active: shift.active
-    })
-    setMessage(`تعديل الوردية: ${shift.name}`)
-    scrollToForm(shiftFormRef)
+    if (shift) {
+      setEditingShiftId(shift.id)
+      setShiftForm({
+        name: shift.name,
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+        workingDays: shift.workingDays,
+        overtimeEnabled: shift.overtimeEnabled,
+        maxOvertimeMinutes: shift.maxOvertimeMinutes,
+        active: shift.active
+      })
+    } else {
+      setEditingShiftId(undefined)
+      setShiftForm(EMPTY_SHIFT)
+    }
+    setIsShiftModalOpen(true)
   }
 
   async function removeShift(shift: EmployeeWorkShift): Promise<void> {
@@ -157,34 +158,37 @@ export function WorkShiftManagement(): React.ReactElement {
     }
   }
 
-  async function submitAssignment(event: React.FormEvent): Promise<void> {
-    event.preventDefault()
+  async function submitAssignment(): Promise<void> {
     clearFeedback()
     try {
       await saveShiftAssignment(assignmentForm, actor, editingAssignmentId)
       setAssignmentForm({ userId: '', workShiftId: '', startDate: todayKey(), active: true })
       setEditingAssignmentId(undefined)
+      setIsAssignmentModalOpen(false)
       setMessage(editingAssignmentId ? 'تم تعديل التعيين' : 'تم تعيين الوردية للموظف')
       await load()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'تعذر حفظ التعيين')
+      throw cause
     }
   }
 
-  function editAssignment(assignment: UserShiftAssignment): void {
+  function openAssignmentModal(assignment?: UserShiftAssignment): void {
     clearFeedback()
-    setActiveTab('assignments')
-    setEditingAssignmentId(assignment.id)
-    setAssignmentForm({
-      userId: assignment.userId,
-      workShiftId: assignment.workShiftId,
-      startDate: assignment.startDate,
-      endDate: assignment.endDate,
-      active: assignment.active
-    })
-    const username = userMap.get(assignment.userId)?.username ?? assignment.userId
-    setMessage(`تعديل تعيين الوردية للمستخدم: ${username}`)
-    scrollToForm(assignmentFormRef)
+    if (assignment) {
+      setEditingAssignmentId(assignment.id)
+      setAssignmentForm({
+        userId: assignment.userId,
+        workShiftId: assignment.workShiftId,
+        startDate: assignment.startDate,
+        endDate: assignment.endDate,
+        active: assignment.active
+      })
+    } else {
+      setEditingAssignmentId(undefined)
+      setAssignmentForm({ userId: '', workShiftId: '', startDate: todayKey(), active: true })
+    }
+    setIsAssignmentModalOpen(true)
   }
 
   async function removeAssignment(assignment: UserShiftAssignment): Promise<void> {
@@ -245,134 +249,145 @@ export function WorkShiftManagement(): React.ReactElement {
 
       {activeTab === 'schedules' && (
         <>
-          {editingShiftId && (
-            <div className="edit-mode-banner">
-              أنت تعدّل وردية موجودة الآن. اضغط حفظ التعديل لتطبيق التغييرات أو إلغاء للرجوع.
-            </div>
-          )}
-          <form ref={shiftFormRef} className={`settings-form-grid shift-form-panel${editingShiftId ? ' shift-form-panel--editing' : ''}`} onSubmit={(event) => void submitShift(event)}>
-            <label className="field">
-              <span>اسم الوردية</span>
-              <input value={shiftForm.name} onChange={(event) => setShiftForm({ ...shiftForm, name: event.target.value })} placeholder="مثال: الوردية الصباحية" />
-            </label>
-            <label className="field">
-              <span>وقت البداية</span>
-              <input type="time" value={shiftForm.startTime} onChange={(event) => setShiftForm({ ...shiftForm, startTime: event.target.value })} />
-            </label>
-            <label className="field">
-              <span>وقت النهاية</span>
-              <input type="time" value={shiftForm.endTime} onChange={(event) => setShiftForm({ ...shiftForm, endTime: event.target.value })} />
-            </label>
-            <label className="field">
-              <span>أقصى عمل إضافي بالدقائق</span>
-              <input type="number" min="0" disabled={!shiftForm.overtimeEnabled} value={shiftForm.maxOvertimeMinutes} onChange={(event) => setShiftForm({ ...shiftForm, maxOvertimeMinutes: Number(event.target.value) })} />
-            </label>
-            <div className="field settings-form-grid__full">
-              <span>أيام العمل</span>
-              <div className="day-picker">
-                {DAYS.map((day) => (
-                  <label key={day.value} className="day-picker__item">
-                    <input
-                      type="checkbox"
-                      checked={shiftForm.workingDays.includes(day.value)}
-                      onChange={(event) => setShiftForm({
-                        ...shiftForm,
-                        workingDays: event.target.checked
-                          ? [...shiftForm.workingDays, day.value]
-                          : shiftForm.workingDays.filter((value) => value !== day.value)
-                      })}
-                    />
-                    <span>{day.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-            <label className="field field--checkbox">
-              <input type="checkbox" checked={shiftForm.overtimeEnabled} onChange={(event) => setShiftForm({ ...shiftForm, overtimeEnabled: event.target.checked })} />
-              <span>السماح بالعمل الإضافي</span>
-            </label>
-            <label className="field field--checkbox">
-              <input type="checkbox" checked={shiftForm.active} onChange={(event) => setShiftForm({ ...shiftForm, active: event.target.checked })} />
-              <span>الوردية نشطة</span>
-            </label>
-            <div className="form-actions settings-form-grid__full">
-              <button className="btn btn--primary" type="submit"><MdSave /> {editingShiftId ? 'حفظ التعديل' : 'إضافة وردية'}</button>
-              {editingShiftId && <button className="btn btn--secondary" type="button" onClick={() => { setEditingShiftId(undefined); setShiftForm(EMPTY_SHIFT) }}>إلغاء</button>}
-            </div>
-          </form>
+          <div className="page-toolbar" style={{ justifyContent: 'flex-end', marginBottom: 16 }}>
+            <button className="btn btn--primary" onClick={() => openShiftModal()}><MdAdd /> إضافة وردية</button>
+          </div>
           <div className="table-scroll">
-          <table className="data-table shifts-table">
-            <thead><tr><th>الوردية</th><th>الوقت</th><th>الأيام</th><th>الإضافي</th><th>الحالة</th><th>إجراءات</th></tr></thead>
-            <tbody>
-              {workShifts.length === 0 ? <tr><td colSpan={6}><div className="empty-state"><strong>لم تتم إضافة ورديات عمل بعد.</strong><span>ابدأ بتعريف وردية صباحية أو مسائية ثم عيّنها للكاشير.</span></div></td></tr> : workShifts.map((shift) => (
-                <tr key={shift.id}>
-                  <td><strong>{shift.name}</strong></td>
-                  <td dir="ltr">{shift.startTime} - {shift.endTime}</td>
-                  <td>{DAYS.filter((day) => shift.workingDays.includes(day.value)).map((day) => day.label).join('، ')}</td>
-                  <td>{shift.overtimeEnabled ? `${shift.maxOvertimeMinutes} دقيقة` : 'غير مسموح'}</td>
-                  <td><span className={`status-pill ${shift.active ? 'status-pill--success' : 'status-pill--muted'}`}>{shift.active ? 'نشطة' : 'متوقفة'}</span></td>
-                  <td><div className="table-actions">
-                    <button className="btn btn--secondary btn--sm" type="button" onClick={() => editShift(shift)}><MdEdit /> تعديل</button>
-                    <button className="btn btn--danger btn--sm" type="button" onClick={() => void removeShift(shift)}><MdDelete /> حذف</button>
-                  </div></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            <table className="data-table shifts-table">
+              <thead><tr><th>الوردية</th><th>الوقت</th><th>الأيام</th><th>الإضافي</th><th>الحالة</th><th>إجراءات</th></tr></thead>
+              <tbody>
+                {workShifts.length === 0 ? <tr><td colSpan={6}><div className="empty-state"><strong>لم تتم إضافة ورديات عمل بعد.</strong><span>ابدأ بتعريف وردية صباحية أو مسائية ثم عيّنها للكاشير.</span></div></td></tr> : workShifts.map((shift) => (
+                  <tr key={shift.id}>
+                    <td><strong>{shift.name}</strong></td>
+                    <td dir="ltr">{shift.startTime} - {shift.endTime}</td>
+                    <td>{DAYS.filter((day) => shift.workingDays.includes(day.value)).map((day) => day.label).join('، ')}</td>
+                    <td>{shift.overtimeEnabled ? `${shift.maxOvertimeMinutes} دقيقة` : 'غير مسموح'}</td>
+                    <td><span className={`status-pill ${shift.active ? 'status-pill--success' : 'status-pill--muted'}`}>{shift.active ? 'نشطة' : 'متوقفة'}</span></td>
+                    <td>
+                      <div className="table-actions">
+                        <button className="btn btn--secondary btn--sm" type="button" onClick={() => openShiftModal(shift)}><MdEdit /> تعديل</button>
+                        <button className="btn btn--danger btn--sm" type="button" onClick={() => void removeShift(shift)}><MdDelete /> حذف</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </>
       )}
 
       {activeTab === 'assignments' && (
         <>
-          {editingAssignmentId && (
-            <div className="edit-mode-banner">
-              أنت تعدّل تعيين موجود الآن. غيّر البيانات ثم اضغط حفظ التعديل.
-            </div>
-          )}
-          <form ref={assignmentFormRef} className={`settings-form-grid shift-form-panel${editingAssignmentId ? ' shift-form-panel--editing' : ''}`} onSubmit={(event) => void submitAssignment(event)}>
-            <label className="field">
-              <span>الكاشير</span>
-              <select value={assignmentForm.userId} onChange={(event) => setAssignmentForm({ ...assignmentForm, userId: event.target.value })}>
-                <option value="">اختر الحساب</option>
-                {cashiers.map((user) => <option key={user.id} value={user.id}>{user.username} - {user.displayName}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span>الوردية</span>
-              <select value={assignmentForm.workShiftId} onChange={(event) => setAssignmentForm({ ...assignmentForm, workShiftId: event.target.value })}>
-                <option value="">اختر الوردية</option>
-                {workShifts.map((shift) => <option key={shift.id} value={shift.id}>{shift.name}</option>)}
-              </select>
-            </label>
-            <label className="field"><span>من تاريخ</span><input type="date" value={assignmentForm.startDate} onChange={(event) => setAssignmentForm({ ...assignmentForm, startDate: event.target.value })} /></label>
-            <label className="field"><span>حتى تاريخ (اختياري)</span><input type="date" value={assignmentForm.endDate ?? ''} onChange={(event) => setAssignmentForm({ ...assignmentForm, endDate: event.target.value || undefined })} /></label>
-            <label className="field field--checkbox"><input type="checkbox" checked={assignmentForm.active} onChange={(event) => setAssignmentForm({ ...assignmentForm, active: event.target.checked })} /><span>التعيين نشط</span></label>
-            <div className="form-actions settings-form-grid__full">
-              <button className="btn btn--primary" type="submit"><MdAdd /> {editingAssignmentId ? 'حفظ التعديل' : 'تعيين الوردية'}</button>
-              {editingAssignmentId && <button className="btn btn--secondary" type="button" onClick={() => { setEditingAssignmentId(undefined); setAssignmentForm({ userId: '', workShiftId: '', startDate: todayKey(), active: true }) }}>إلغاء</button>}
-            </div>
-          </form>
+          <div className="page-toolbar" style={{ justifyContent: 'flex-end', marginBottom: 16 }}>
+            <button className="btn btn--primary" onClick={() => openAssignmentModal()}><MdAdd /> تعيين وردية</button>
+          </div>
           <div className="table-scroll">
-          <table className="data-table shifts-table">
-            <thead><tr><th>المستخدم</th><th>الوردية</th><th>الفترة</th><th>الحالة</th><th>إجراءات</th></tr></thead>
-            <tbody>
-              {assignments.length === 0 ? <tr><td colSpan={5}><div className="empty-state"><strong>لا توجد تعيينات.</strong><span>عيّن وردية لكل كاشير حتى يتم تطبيق قواعد الدخول.</span></div></td></tr> : assignments.map((assignment) => (
-                <tr key={assignment.id}>
-                  <td>{userMap.get(assignment.userId)?.username ?? assignment.userId}</td>
-                  <td>{shiftMap.get(assignment.workShiftId)?.name ?? 'وردية محذوفة'}</td>
-                  <td dir="ltr">{assignment.startDate} → {assignment.endDate ?? 'مستمر'}</td>
-                  <td><span className={`status-pill ${assignment.active ? 'status-pill--success' : 'status-pill--muted'}`}>{assignment.active ? 'نشط' : 'متوقف'}</span></td>
-                  <td><div className="table-actions">
-                    <button className="btn btn--secondary btn--sm" type="button" onClick={() => editAssignment(assignment)}><MdEdit /> تعديل</button>
-                    <button className="btn btn--danger btn--sm" type="button" onClick={() => void removeAssignment(assignment)}><MdDelete /> حذف</button>
-                  </div></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            <table className="data-table shifts-table">
+              <thead><tr><th>المستخدم</th><th>الوردية</th><th>الفترة</th><th>الحالة</th><th>إجراءات</th></tr></thead>
+              <tbody>
+                {assignments.length === 0 ? <tr><td colSpan={5}><div className="empty-state"><strong>لا توجد تعيينات.</strong><span>عيّن وردية لكل كاشير حتى يتم تطبيق قواعد الدخول.</span></div></td></tr> : assignments.map((assignment) => (
+                  <tr key={assignment.id}>
+                    <td>{userMap.get(assignment.userId)?.username ?? assignment.userId}</td>
+                    <td>{shiftMap.get(assignment.workShiftId)?.name ?? 'وردية محذوفة'}</td>
+                    <td dir="ltr">{assignment.startDate} → {assignment.endDate ?? 'مستمر'}</td>
+                    <td><span className={`status-pill ${assignment.active ? 'status-pill--success' : 'status-pill--muted'}`}>{assignment.active ? 'نشط' : 'متوقف'}</span></td>
+                    <td>
+                      <div className="table-actions">
+                        <button className="btn btn--secondary btn--sm" type="button" onClick={() => openAssignmentModal(assignment)}><MdEdit /> تعديل</button>
+                        <button className="btn btn--danger btn--sm" type="button" onClick={() => void removeAssignment(assignment)}><MdDelete /> حذف</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </>
+      )}
+
+      {isShiftModalOpen && (
+        <FormModal
+          open={true}
+          entityName="وردية"
+          isEdit={!!editingShiftId}
+          onClose={() => setIsShiftModalOpen(false)}
+          onSubmit={submitShift}
+        >
+          <FormField label="اسم الوردية" required>
+            <input value={shiftForm.name} onChange={(event) => setShiftForm({ ...shiftForm, name: event.target.value })} placeholder="مثال: الوردية الصباحية" required />
+          </FormField>
+          <FormField label="وقت البداية" required>
+            <input type="time" value={shiftForm.startTime} onChange={(event) => setShiftForm({ ...shiftForm, startTime: event.target.value })} required />
+          </FormField>
+          <FormField label="وقت النهاية" required>
+            <input type="time" value={shiftForm.endTime} onChange={(event) => setShiftForm({ ...shiftForm, endTime: event.target.value })} required />
+          </FormField>
+          <div className="field settings-form-grid__full">
+            <span>أيام العمل</span>
+            <div className="day-picker">
+              {DAYS.map((day) => (
+                <label key={day.value} className="day-picker__item">
+                  <input
+                    type="checkbox"
+                    checked={shiftForm.workingDays.includes(day.value)}
+                    onChange={(event) => setShiftForm({
+                      ...shiftForm,
+                      workingDays: event.target.checked
+                        ? [...shiftForm.workingDays, day.value]
+                        : shiftForm.workingDays.filter((value) => value !== day.value)
+                    })}
+                  />
+                  <span>{day.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <label className="field field--checkbox">
+            <input type="checkbox" checked={shiftForm.overtimeEnabled} onChange={(event) => setShiftForm({ ...shiftForm, overtimeEnabled: event.target.checked })} />
+            <span>السماح بالعمل الإضافي</span>
+          </label>
+          <FormField label="أقصى عمل إضافي بالدقائق">
+            <input type="number" min="0" disabled={!shiftForm.overtimeEnabled} value={shiftForm.maxOvertimeMinutes} onChange={(event) => setShiftForm({ ...shiftForm, maxOvertimeMinutes: Number(event.target.value) })} />
+          </FormField>
+          <label className="field field--checkbox">
+            <input type="checkbox" checked={shiftForm.active} onChange={(event) => setShiftForm({ ...shiftForm, active: event.target.checked })} />
+            <span>الوردية نشطة</span>
+          </label>
+        </FormModal>
+      )}
+
+      {isAssignmentModalOpen && (
+        <FormModal
+          open={true}
+          entityName="تعيين وردية"
+          isEdit={!!editingAssignmentId}
+          onClose={() => setIsAssignmentModalOpen(false)}
+          onSubmit={submitAssignment}
+        >
+          <FormField label="الكاشير" required>
+            <select value={assignmentForm.userId} onChange={(event) => setAssignmentForm({ ...assignmentForm, userId: event.target.value })} required>
+              <option value="">اختر الحساب</option>
+              {cashiers.map((user) => <option key={user.id} value={user.id}>{user.username} - {user.displayName}</option>)}
+            </select>
+          </FormField>
+          <FormField label="الوردية" required>
+            <select value={assignmentForm.workShiftId} onChange={(event) => setAssignmentForm({ ...assignmentForm, workShiftId: event.target.value })} required>
+              <option value="">اختر الوردية</option>
+              {workShifts.map((shift) => <option key={shift.id} value={shift.id}>{shift.name}</option>)}
+            </select>
+          </FormField>
+          <FormField label="من تاريخ" required>
+            <input type="date" value={assignmentForm.startDate} onChange={(event) => setAssignmentForm({ ...assignmentForm, startDate: event.target.value })} required />
+          </FormField>
+          <FormField label="حتى تاريخ (اختياري)">
+            <input type="date" value={assignmentForm.endDate ?? ''} onChange={(event) => setAssignmentForm({ ...assignmentForm, endDate: event.target.value || undefined })} />
+          </FormField>
+          <label className="field field--checkbox">
+            <input type="checkbox" checked={assignmentForm.active} onChange={(event) => setAssignmentForm({ ...assignmentForm, active: event.target.checked })} />
+            <span>التعيين نشط</span>
+          </label>
+        </FormModal>
       )}
     </section>
   )

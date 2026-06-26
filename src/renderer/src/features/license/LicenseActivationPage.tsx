@@ -178,7 +178,7 @@ export function LicenseActivationPage({
               <span>ربط جهاز جانبي</span>
               <code dir="rtl">اكتب عنوان الماستر وكود الربط الظاهر في إعدادات الماستر.</code>
             </div>
-            <div className="settings-form-grid" style={{ marginTop: 12 }}>
+            <div className="settings-form-grid mt-12">
               <label className="field">
                 <span>Master IP / Port</span>
                 <input dir="ltr" value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} placeholder="http://192.168.1.10:47831" />

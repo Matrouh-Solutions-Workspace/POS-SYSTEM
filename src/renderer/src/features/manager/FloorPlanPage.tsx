@@ -392,7 +392,7 @@ function AddTableModal({ floorId, dropX, dropY, onSave, onClose }: AddTableModal
           <h2 className="order-details__title">إضافة ترابيزة</h2>
           <button type="button" className="order-details__close" onClick={onClose}>✕</button>
         </div>
-        <div className="settings-form-grid" style={{ marginBottom: 12 }}>
+        <div className="settings-form-grid mb-12">
           <label className="field settings-form-grid__full">
             <span>اسم الترابيزة</span>
             <input autoFocus value={nameAr} onChange={(e) => setNameAr(e.target.value)}
@@ -472,7 +472,7 @@ function EditTableModal({ table, onSave, onClose }: EditTableModalProps): React.
           <h2 className="order-details__title">تعديل الترابيزة</h2>
           <button type="button" className="order-details__close" onClick={onClose}>✕</button>
         </div>
-        <div className="settings-form-grid" style={{ marginBottom: 12 }}>
+        <div className="settings-form-grid mb-12">
           <label className="field settings-form-grid__full">
             <span>الاسم</span>
             <input autoFocus value={nameAr} onChange={(e) => setNameAr(e.target.value)} />

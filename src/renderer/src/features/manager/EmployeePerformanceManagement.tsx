@@ -136,10 +136,10 @@ export function EmployeePerformanceManagement(): React.ReactElement {
     <section className="card" aria-labelledby="employee-performance-title">
       <div className="page-toolbar" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h2 id="employee-performance-title" className="card__title" style={{ margin: 0 }}>أداء الموظفين ودقة إغلاق الشيفت</h2>
+          <h2 id="employee-performance-title" className="card__title m-0">أداء الموظفين ودقة إغلاق الشيفت</h2>
           <p className="modal-hint">المبيعات، سرعة تنفيذ الطلبات، طرق الدفع، المرتجعات ودقة الكاش من العمليات الفعلية.</p>
         </div>
-        <label className="field field--checkbox" style={{ margin: 0 }}>
+        <label className="field field--checkbox m-0">
           <input type="checkbox" checked={enabled} onChange={() => void toggleEnabled()} />
           <span>{enabled ? 'التتبع مفعّل' : 'التتبع متوقف'}</span>
         </label>
@@ -150,7 +150,7 @@ export function EmployeePerformanceManagement(): React.ReactElement {
         <p className="modal-hint">لن يتم جمع نشاط جديد، وتظل نقطة البيع تعمل دون قيود أداء أو تسوية إلزامية.</p>
       ) : (
         <>
-          <div className="settings-form-grid" style={{ marginBottom: 16 }}>
+          <div className="settings-form-grid mb-16">
             <label className="field"><span>الموظف</span><select value={userId} onChange={(event) => setUserId(event.target.value)}><option value="">كل الموظفين</option>{users.map((user) => <option key={user.id} value={user.id}>{user.username}</option>)}</select></label>
             <label className="field"><span>الوردية</span><select value={workShiftId} onChange={(event) => setWorkShiftId(event.target.value)}><option value="">كل الورديات</option>{workShifts.map((shift) => <option key={shift.id} value={shift.id}>{shift.name}</option>)}</select></label>
             <label className="field"><span>من</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>

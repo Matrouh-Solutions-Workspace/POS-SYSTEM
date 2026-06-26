@@ -5,6 +5,7 @@ import { getSummaryStats } from '@renderer/features/reports/reports-service'
 import { MdRestartAlt } from 'react-icons/md'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { hasPermission } from '@shared/types/user'
+import { ConfirmDialog } from '@renderer/components/ui'
 
 export function ManagerDashboard(): React.ReactElement {
   const user = useAuthStore((s) => s.user)!
@@ -13,20 +14,31 @@ export function ManagerDashboard(): React.ReactElement {
   const canManageSettings = hasPermission(user, 'manage_settings')
   const [stats, setStats] = useState({ todayOrders: 0, todayRevenue: 0, weekRevenue: 0 })
   const [restarting, setRestarting] = useState(false)
+  const [confirmRestart, setConfirmRestart] = useState(false)
 
   useEffect(() => {
     if (!canViewReports) return
     void getSummaryStats().then(setStats)
   }, [canViewReports])
-
   function handleRestart(): void {
-    if (!window.confirm('إعادة تشغيل التطبيق؟')) return
+    setConfirmRestart(true)
+  }
+
+  function executeRestart(): void {
+    setConfirmRestart(false)
     setRestarting(true)
     window.electronAPI?.restartApp().catch(() => setRestarting(false))
   }
 
   return (
     <>
+      <ConfirmDialog
+        open={confirmRestart}
+        onCancel={() => setConfirmRestart(false)}
+        onConfirm={executeRestart}
+        title="إعادة تشغيل التطبيق"
+        message="هل أنت متأكد أنك تريد إعادة تشغيل التطبيق؟"
+      />
       <header className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 className="page-header__title">لوحة التحكم</h1>

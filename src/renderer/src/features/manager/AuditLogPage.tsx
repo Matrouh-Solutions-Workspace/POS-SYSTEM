@@ -242,7 +242,7 @@ export function AuditLogPage(): React.ReactElement {
         />
       </div>
 
-      <div className="settings-form-grid" style={{ marginBottom: 16 }}>
+      <div className="settings-form-grid mb-16">
         <label className="field">
           <span>نوع الحدث</span>
           <select value={actionFilter} onChange={(e) => setActionFilter(e.target.value as typeof actionFilter)}>
@@ -277,7 +277,7 @@ export function AuditLogPage(): React.ReactElement {
 
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h2 className="card__title" style={{ margin: 0 }}>سجل الأحداث</h2>
+          <h2 className="card__title m-0">سجل الأحداث</h2>
           <span style={{ fontSize: '0.82rem', color: 'var(--color-muted)' }}>
             {filtered.length} حدث
           </span>
@@ -349,7 +349,7 @@ export function AuditLogPage(): React.ReactElement {
               )}
             </div>
             <p style={{ margin: '14px 0 0', lineHeight: 1.8, color: 'var(--color-text)' }}>{detailsEntry.detailAr}</p>
-            <div className="modal-actions" style={{ marginTop: 16 }}>
+            <div className="modal-actions mt-16">
               <button type="button" className="btn btn--primary btn--sm" onClick={() => setDetailsEntry(null)}>إغلاق</button>
             </div>
           </div>
