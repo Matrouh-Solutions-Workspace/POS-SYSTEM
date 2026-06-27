@@ -133,7 +133,6 @@ function App(): React.JSX.Element {
           <h1>License Activation</h1>
           <p>ارفع ملف طلب التفعيل، سجل بيانات العميل، وطلع ملف الرخصة الموقّع مباشرة.</p>
         </div>
-        <div className="status-pill">Vercel + Supabase Ready</div>
       </section>
 
       <section className="grid">
