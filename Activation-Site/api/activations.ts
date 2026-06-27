@@ -5,7 +5,7 @@ import {
   supabaseSelect,
   type VercelRequest,
   type VercelResponse
-} from './_shared'
+} from './_shared.js'
 
 interface ActivationRow {
   license_id: string

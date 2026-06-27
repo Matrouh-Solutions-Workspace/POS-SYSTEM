@@ -8,7 +8,7 @@ import {
   supabaseInsert,
   type VercelRequest,
   type VercelResponse
-} from './_shared'
+} from './_shared.js'
 
 interface IssueLicenseBody {
   password?: string

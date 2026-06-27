@@ -42,3 +42,13 @@ vercel dev
 - Website/API usage events.
 
 The private signing key and Supabase service role key are only used in serverless API routes.
+
+## Quick Production Check
+
+Open:
+
+```text
+/api/health
+```
+
+It returns which required environment variables are visible to Vercel without exposing their values.
