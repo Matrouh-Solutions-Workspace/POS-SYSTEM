@@ -1113,6 +1113,13 @@ textarea {
   border: none !important;
 }
 
+.unified-page__panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 /* Inner tab strip — sits below the browser tab bar, above page content */
 .inner-tabs {
   display: flex;
@@ -1201,6 +1208,7 @@ textarea {
 /* Tab content scroll area */
 .tab-content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 16px;
   direction: rtl;
@@ -3584,9 +3592,13 @@ textarea {
 
 .settings-page {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   align-items: start;
+}
+
+.settings-page > .card {
+  min-width: 0;
 }
 
 .settings-page__full {
@@ -4820,6 +4832,69 @@ select.inline-edit-input {
 
 .supplier-return-filters {
   grid-template-columns: repeat(5, minmax(120px, 1fr));
+}
+
+.suppliers-page {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.suppliers-page > .card {
+  margin-bottom: 0;
+}
+
+.suppliers-page__table-scroll {
+  max-width: 100%;
+  border-color: var(--color-border-light);
+}
+
+.table-scroll .suppliers-page__table {
+  table-layout: fixed;
+  min-width: 0;
+}
+
+.table-scroll .suppliers-page__returns-table {
+  min-width: 780px;
+}
+
+.suppliers-page__table th,
+.suppliers-page__table td {
+  vertical-align: middle;
+}
+
+.suppliers-page__table th,
+.suppliers-page__table td {
+  overflow-wrap: anywhere;
+}
+
+.suppliers-page__table th:last-child,
+.suppliers-page__table td:last-child {
+  width: 112px;
+}
+
+.suppliers-page__transactions-table th:nth-child(1),
+.suppliers-page__transactions-table td:nth-child(1) {
+  width: 170px;
+  white-space: nowrap;
+}
+
+.suppliers-page__transactions-table th:nth-child(2),
+.suppliers-page__transactions-table td:nth-child(2) {
+  width: 24%;
+}
+
+.suppliers-page__transactions-table th:nth-child(3),
+.suppliers-page__transactions-table td:nth-child(3) {
+  width: 150px;
+}
+
+.suppliers-page__transactions-table th:nth-child(4),
+.suppliers-page__transactions-table td:nth-child(4) {
+  width: 110px;
+}
+
+.suppliers-page__table td:last-child,
+.suppliers-page__table th:last-child {
+  white-space: normal;
 }
 
 .supplier-return-filters__action {

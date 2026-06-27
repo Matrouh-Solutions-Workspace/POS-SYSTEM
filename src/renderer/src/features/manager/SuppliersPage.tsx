@@ -154,13 +154,14 @@ export function SuppliersPage(): React.ReactElement {
     <>
       {message && <p className={`form-message ${message.includes('تعذر') || message.includes('فشل') ? 'form-message--error' : 'form-message--ok'}`}>{message}</p>}
       
-      <div className="settings-page">
+      <div className="settings-page suppliers-page">
         <div className="card">
           <div className="page-toolbar section-action-header mb-16">
             <h2 className="card__title m-0">الموردين ({suppliers.length})</h2>
             <button type="button" className="btn btn--primary" onClick={() => { setForm({ nameAr: '', phone: '', noteAr: '' }); setSupplierFormOpen(true) }}>+ إضافة مورد</button>
           </div>
-          <table className="data-table">
+          <div className="table-scroll suppliers-page__table-scroll">
+            <table className="data-table suppliers-page__table">
             <thead><tr><th>الاسم</th><th>الهاتف</th><th>الرصيد</th><th>الحالة</th><th>إجراءات</th></tr></thead>
             <tbody>
               {suppliers.map((s) => (
@@ -204,7 +205,8 @@ export function SuppliersPage(): React.ReactElement {
                 <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-muted)' }}>لا يوجد موردين بعد</td></tr>
               )}
             </tbody>
-          </table>
+            </table>
+          </div>
         </div>
 
         <div className="card">
@@ -212,7 +214,8 @@ export function SuppliersPage(): React.ReactElement {
             <h2 className="card__title m-0">سجل عمليات التوريد</h2>
             <button type="button" className="btn btn--primary" onClick={() => { setTxForm({ supplierId: '', type: 'payment', amount: '', noteAr: '' }); setTxFormOpen(true) }}>+ إضافة حركة حساب</button>
           </div>
-          <table className="data-table">
+          <div className="table-scroll suppliers-page__table-scroll">
+            <table className="data-table suppliers-page__table suppliers-page__transactions-table">
             <thead>
               <tr><th>الوقت</th><th>المورد</th><th>نوع الحركة</th><th>المبلغ</th><th>ملاحظة</th></tr>
             </thead>
@@ -229,10 +232,11 @@ export function SuppliersPage(): React.ReactElement {
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </div>
         </div>
 
-        <div className="card">
+        <div className="card settings-page__full">
           <div className="page-toolbar section-action-header mb-16">
             <h2 className="card__title m-0">سجل مرتجعات الموردين</h2>
             <button type="button" className="btn btn--danger" onClick={() => { setReturnForm({ supplierId: '', ingredientId: '', quantity: '', reason: '' }); setReturnFormOpen(true) }}>+ تسجيل مرتجع</button>
@@ -244,7 +248,8 @@ export function SuppliersPage(): React.ReactElement {
             <label className="field"><span>الصنف</span><select value={returnFilters.ingredientId} onChange={(e) => setReturnFilters((filters) => ({ ...filters, ingredientId: e.target.value }))}><option value="">الكل</option>{ingredients.map((ingredient) => <option key={ingredient.id} value={ingredient.id}>{ingredient.nameAr}</option>)}</select></label>
             <div className="supplier-return-filters__action"><button type="button" className="btn btn--secondary" onClick={() => void applyReturnFilters()}>تطبيق الفلاتر</button></div>
           </div>
-          <table className="data-table">
+          <div className="table-scroll suppliers-page__table-scroll">
+            <table className="data-table suppliers-page__table suppliers-page__returns-table">
             <thead><tr><th>التاريخ</th><th>المورد</th><th>الصنف</th><th>الكمية</th><th>قيمة المرتجع</th><th>المستخدم</th><th>السبب</th></tr></thead>
             <tbody>
               {returns.length === 0 ? <tr><td colSpan={7} className="text-center">لا توجد مرتجعات</td></tr> : returns.flatMap((record) => record.items.map((item) => (
@@ -259,7 +264,8 @@ export function SuppliersPage(): React.ReactElement {
                 </tr>
               )))}
             </tbody>
-          </table>
+            </table>
+          </div>
         </div>
       </div>
 

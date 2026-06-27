@@ -411,12 +411,12 @@ export function PurchasesPage(): React.ReactElement {
       )}
 
       {activeTab === 'stock' && (
-        <div ref={stockTabRef}>
+        <div ref={stockTabRef} className="unified-page__panel">
           <StockTab stocks={stocks} ingredients={ingredients} suppliers={suppliers} onRefresh={load} setMessage={setMessage} />
         </div>
       )}
       {activeTab === 'ingredients' && (
-        <div ref={ingredientsTabRef}>
+        <div ref={ingredientsTabRef} className="unified-page__panel">
           <IngredientsTab ingredients={ingredients} onRefresh={load} setMessage={setMessage} />
         </div>
       )}
