@@ -25,7 +25,15 @@ npm install
 npm run dev
 ```
 
-For local API testing, run with Vercel CLI:
+`npm run dev` also serves the local API routes under `/api/*`, including:
+
+```text
+/api/health
+/api/issue-license
+/api/activations
+```
+
+For a stricter Vercel simulation, you can still run:
 
 ```bash
 npm i -g vercel
