@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { RESTAURANT_NAME_AR } from '@shared/constants/branding'
 import { PasswordInput } from '@renderer/components/PasswordInput'
-import { createFirstOfflineManager, hasOfflineAuthUsers, loginAndLoadUser } from './auth-service'
+import { createFirstOfflineManager, devResetManagerLogin, hasOfflineAuthUsers, loginAndLoadUser } from './auth-service'
 import { useAuthStore } from './auth-store'
 import type { AppUser } from '@shared/types'
 
@@ -17,10 +17,29 @@ export function LoginPage(): React.ReactElement {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(false)
   const [hasLocalUsers, setHasLocalUsers] = useState(true)
   const [localSetupMode, setLocalSetupMode] = useState(false)
   const [isSideDevice, setIsSideDevice] = useState(false)
+  const resetCode = 'resetmanager153'
+  const wantsManagerReset = username.trim().toLowerCase() === resetCode || password.trim().toLowerCase() === resetCode
+
+  async function handleDevManagerReset(): Promise<void> {
+    setError('')
+    setNotice('')
+    setLoading(true)
+    try {
+      const reset = await devResetManagerLogin()
+      setUsername(reset.username)
+      setPassword(reset.password)
+      setNotice(`تم إعادة ضبط المدير: ${reset.username} / ${reset.password}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'فشل إعادة ضبط المدير')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
     let disposed = false
@@ -38,13 +57,30 @@ export function LoginPage(): React.ReactElement {
     return () => { disposed = true }
   }, [])
 
+  useEffect(() => {
+    function handleRecoveryShortcut(event: KeyboardEvent): void {
+      if (!event.ctrlKey || event.key !== 'Enter' || loading) return
+      if (!wantsManagerReset) return
+      event.preventDefault()
+      void handleDevManagerReset()
+    }
+
+    window.addEventListener('keydown', handleRecoveryShortcut)
+    return () => window.removeEventListener('keydown', handleRecoveryShortcut)
+  }, [loading, wantsManagerReset])
+
   if (user) {
     return <Navigate to={homeFor(user)} replace />
   }
 
   async function handleSubmit(e: FormEvent): Promise<void> {
     e.preventDefault()
+    if (wantsManagerReset) {
+      await handleDevManagerReset()
+      return
+    }
     setError('')
+    setNotice('')
     setLoading(true)
     try {
       const appUser = localSetupMode && !isSideDevice
@@ -90,6 +126,17 @@ export function LoginPage(): React.ReactElement {
             <PasswordInput value={password} onChange={setPassword} autoComplete="off" />
           </label>
           {error && <p className="form-error">{error}</p>}
+          {notice && <p className="form-message form-message--ok">{notice}</p>}
+          {wantsManagerReset && (
+            <button
+              type="button"
+              className="btn btn--ghost btn--lg"
+              disabled={loading}
+              onClick={() => void handleDevManagerReset()}
+            >
+              Reset manager login
+            </button>
+          )}
           <button type="submit" className="btn btn--primary btn--lg" disabled={loading}>
             {loading
               ? 'جاري التنفيذ...'

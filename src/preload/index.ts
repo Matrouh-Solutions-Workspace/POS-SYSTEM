@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('license:create-activation-request'),
   importLicense: (): Promise<{ ok: boolean; status?: unknown; error?: string }> =>
     ipcRenderer.invoke('license:import-license'),
+  activateWithDevCode: (code: string): Promise<{ ok: boolean; status?: unknown; error?: string }> =>
+    ipcRenderer.invoke('license:activate-with-dev-code', code),
   getNetworkStatus: (): Promise<unknown> =>
     ipcRenderer.invoke('network:get-status'),
   pairSideDevice: (params: { masterUrl: string; deviceName: string; code: string }): Promise<{ ok: boolean; error?: string }> =>
@@ -105,6 +107,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }> => ipcRenderer.invoke('api-sync:push'),
   devResetDatabase: (): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('dev:reset-database'),
+  devResetManagerLogin: (): Promise<{ ok: boolean; username?: string; password?: string; error?: string }> =>
+    ipcRenderer.invoke('dev:reset-manager-login'),
 
   // Auto-updater
   updaterCheckNow: (): Promise<void> =>

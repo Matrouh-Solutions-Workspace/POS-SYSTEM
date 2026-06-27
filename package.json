@@ -1,6 +1,6 @@
 {
   "name": "shift-pos",
-  "version": "2.2.1",
+  "version": "2.2.3",
   "description": "Restaurant Management and POS - Arabic RTL",
   "main": "./out/main/index.js",
   "private": true,
@@ -15,7 +15,8 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
     "seed:local": "node --experimental-sqlite scripts/seed-local.mjs",
-    "seed": "npm run seed:local"
+    "seed": "npm run seed:local",
+    "reset:manager": "node --experimental-sqlite scripts/reset-manager-login.mjs"
   },
   "dependencies": {
     "electron-updater": "6.8.3",

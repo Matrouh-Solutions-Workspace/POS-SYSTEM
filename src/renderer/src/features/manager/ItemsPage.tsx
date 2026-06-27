@@ -769,7 +769,6 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
           </thead>
           <tbody>
             {items.map((item, idx) => {
-              const isEditing = editingItem?.id === item.id
               const linkedPrinterNames = (item.kitchenPrinterIds ?? [])
                 .map((id) => printers.find((printer) => printer.id === id)?.name)
                 .filter(Boolean)
@@ -781,136 +780,59 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
                       <button type="button" className="sort-arrow-btn" disabled={idx === items.length - 1} onClick={() => void moveMenuItem(idx, 1)}><MdArrowDownward /></button>
                     </div>
                   </td>
-                  <td>{isEditing
-                    ? <input className="inline-edit-input" value={editingItem.nameAr} onChange={(e) => setEditingItem({...editingItem,nameAr:e.target.value})} autoFocus />
-                    : (
-                        <div>
-                          {item.imageUrl && <img className="product-list-thumb" src={item.imageUrl} alt="" />}
-                          <div>{item.nameAr}</div>
-                          {linkedPrinterNames.length > 0 && (
-                            <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginTop: 3 }}>
-                              <MdPrint style={{ verticalAlign: 'middle', marginLeft: 3 }} />
-                              {linkedPrinterNames.join('، ')}
-                            </div>
-                          )}
+                  <td>
+                    <div>
+                      {item.imageUrl && <img className="product-list-thumb" src={item.imageUrl} alt="" />}
+                      <div>{item.nameAr}</div>
+                      {linkedPrinterNames.length > 0 && (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginTop: 3 }}>
+                          <MdPrint style={{ verticalAlign: 'middle', marginLeft: 3 }} />
+                          {linkedPrinterNames.join('، ')}
                         </div>
                       )}
+                    </div>
                   </td>
                   <td>
-                    {isEditing ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <select className="inline-edit-input" value={editingItem.itemType} onChange={(e) => setEditingItem({...editingItem, itemType: e.target.value as MenuItemType})}>
-                          {(Object.entries(ITEM_TYPE_LABELS) as [MenuItemType, string][]).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
-                        </select>
-                        {editingItem.itemType === 'product' && (
-                          <select className="inline-edit-input" value={editingItem.productType} onChange={(e) => setEditingItem({...editingItem, productType: e.target.value as ProductType})}>
-                            {(Object.entries(PRODUCT_TYPE_LABELS) as [ProductType, string][]).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
-                          </select>
-                        )}
-                      </div>
-                    ) : (
-                      <div>
-                        <span className={`items-type-badge items-type-badge--${item.itemType ?? 'product'}`}>
-                          {ITEM_TYPE_LABELS[item.itemType ?? 'product']}
-                        </span>
-                        {item.itemType === 'product' && item.productType && (
-                          <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginTop: 2 }}>
-                            {PRODUCT_TYPE_LABELS[item.productType]}
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    <div>
+                      <span className={`items-type-badge items-type-badge--${item.itemType ?? 'product'}`}>
+                        {ITEM_TYPE_LABELS[item.itemType ?? 'product']}
+                      </span>
+                      {item.itemType === 'product' && item.productType && (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginTop: 2 }}>
+                          {PRODUCT_TYPE_LABELS[item.productType]}
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td>
-                    {isEditing
-                      ? (editingItem.isWeighted
-                          ? <span style={{color:'var(--color-muted)',fontSize:'0.82rem'}}>من أسعار الميزان</span>
-                          : <input className="inline-edit-input" type="number" step="0.01" value={editingItem.price} onChange={(e) => setEditingItem({...editingItem,price:e.target.value})} style={{width:80}} />)
-                      : (item.isWeighted ? 'ميزان' : item.price.toFixed(2))}
+                    {item.isWeighted ? 'ميزان' : item.price.toFixed(2)}
                   </td>
                   <td>
-                    {isEditing
-                      ? <select className="inline-edit-input" value={editingItem.categoryId} onChange={(e) => setEditingItem({...editingItem,categoryId:e.target.value})}>
-                          {categories.map((c)=><option key={c.id} value={c.id}>{c.nameAr}</option>)}
-                        </select>
-                      : categories.find((c) => c.id === item.categoryId)?.nameAr ?? '-'}
+                    {categories.find((c) => c.id === item.categoryId)?.nameAr ?? '-'}
                   </td>
                   <td>
-                    {isEditing
-                      ? <select className="inline-edit-input" value={editingItem.active?'active':'inactive'} onChange={(e)=>setEditingItem({...editingItem,active:e.target.value==='active'})}>
-                          <option value="active">مفعّل</option><option value="inactive">معطّل</option>
-                        </select>
-                      : <span style={{color:item.active?'var(--color-success)':'var(--color-muted)',fontWeight:700,fontSize:'0.82rem'}}>{item.active?'مفعّل':'معطّل'}</span>}
+                    <span style={{color:item.active?'var(--color-success)':'var(--color-muted)',fontWeight:700,fontSize:'0.82rem'}}>{item.active?'مفعّل':'معطّل'}</span>
                   </td>
                   <td>
                     <div className="table-actions">
-                      {isEditing ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 320 }}>
-                          {/* inline edit: sizes */}
-                          {editingItem.itemType !== 'raw_material' && renderSizeSection(editingItem.sizeOptions, editingItem.isWeighted, false)}
-                          {/* inline edit: attachments */}
-                          {editingItem.itemType !== 'raw_material' && renderAttachmentsSection(editingItem.attachments, false)}
-                          {renderPrinterSection(editingItem.kitchenPrinterIds, false)}
-                          {needsLinkedStock(editingItem.itemType, editingItem.productType) && (
-                            <select
-                              className="inline-edit-input"
-                              value={editingItem.linkedIngredientId}
-                              onChange={(e) => setEditingItem({ ...editingItem, linkedIngredientId: e.target.value })}
-                            >
-                              <option value="">بدون ربط مخزون</option>
-                              {ingredients.filter((i) => i.active).map((i) => (
-                                <option key={i.id} value={i.id}>{i.nameAr} ({i.unit})</option>
-                              ))}
-                            </select>
-                          )}
-                          {/* inline edit: weighted */}
-                          {editingItem.itemType === 'product' && editingItem.isWeighted && (
-                            <div className="weighted-pricing-editor">
-                              <h3>أسعار الميزان</h3>
-                              {editingItem.weightedPriceOptions.map((o, idx) => (
-                                <div key={o.id} className="weighted-pricing-row">
-                                  <input value={o.label} onChange={(e) => setEditingItem((p) => p ? { ...p, weightedPriceOptions: p.weightedPriceOptions.map((w,i)=>i===idx?{...w,label:e.target.value}:w) } : p)} placeholder="اسم الزر" />
-                                  <input type="number" min="1" step="1" value={o.weightGrams} onChange={(e) => setEditingItem((p) => p ? { ...p, weightedPriceOptions: p.weightedPriceOptions.map((w,i)=>i===idx?{...w,weightGrams:e.target.value}:w) } : p)} placeholder="جرام" />
-                                  <input type="number" min="0" step="0.01" value={o.price} onChange={(e) => setEditingItem((p) => p ? { ...p, weightedPriceOptions: p.weightedPriceOptions.map((w,i)=>i===idx?{...w,price:e.target.value}:w) } : p)} placeholder="السعر" />
-                                  <button type="button" className="btn btn--danger btn--sm" onClick={() => setEditingItem((p) => p ? { ...p, weightedPriceOptions: p.weightedPriceOptions.filter((_,i)=>i!==idx) } : p)}><MdClose /></button>
-                                </div>
-                              ))}
-                              <button type="button" className="btn btn--secondary btn--sm" onClick={() => setEditingItem((p) => p ? { ...p, weightedPriceOptions: [...p.weightedPriceOptions, newWeightedOption()] } : p)}>+ سعر ميزان</button>
-                            </div>
-                          )}
-                          {/* inline edit: recipe (recipe products) */}
-                          {showEditRecipeSection && (
-                            <div style={{ fontSize: '0.82rem', color: 'var(--color-muted)', fontStyle: 'italic' }}>
-                              لتعديل مكوّنات الوصفة اضغط "الوصفة" بعد الحفظ
-                            </div>
-                          )}
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button type="button" className="btn btn--primary btn--sm" onClick={()=>void saveItemEdit()}><MdCheck/> حفظ</button>
-                            <button type="button" className="btn btn--secondary btn--sm" onClick={()=>setEditingItem(null)}><MdClose/></button>
-                          </div>
-                        </div>
-                      ) : (
-                        <>
-                          <button type="button" className="btn btn--secondary btn--sm" onClick={()=>startEditItem(item)}><MdEdit/> تعديل</button>
-                          {(item.itemType == null || item.itemType === 'product') && item.productType !== 'no_inventory' && item.productType !== 'ready_made' && item.productType !== 'manufactured' && (
-                            <button type="button" className="btn btn--secondary btn--sm" onClick={()=>void openRecipe(item)}>الوصفة</button>
-                          )}
-                          <ConfirmDialog
-                            open={itemToDelete === item.id}
-                            onCancel={() => setItemToDelete(null)}
-                            onConfirm={async () => {
-                              await deleteMenuItem(item.id, item.recipeId, user)
-                              setItemToDelete(null)
-                              await onRefresh()
-                            }}
-                            title="تأكيد الحذف"
-                            message={`حذف "${item.nameAr}"؟`}
-                            confirmLabel="حذف"
-                            danger
-                          />
-                          <button type="button" className="btn btn--danger btn--sm" onClick={() => setItemToDelete(item.id)}><MdDelete /></button>
-                        </>
+                      <button type="button" className="btn btn--secondary btn--sm" onClick={()=>startEditItem(item)}><MdEdit/> تعديل</button>
+                      {(item.itemType == null || item.itemType === 'product') && item.productType !== 'no_inventory' && item.productType !== 'ready_made' && item.productType !== 'manufactured' && (
+                        <button type="button" className="btn btn--secondary btn--sm" onClick={()=>void openRecipe(item)}>الوصفة</button>
                       )}
+                      <ConfirmDialog
+                        open={itemToDelete === item.id}
+                        onCancel={() => setItemToDelete(null)}
+                        onConfirm={async () => {
+                          await deleteMenuItem(item.id, item.recipeId, user)
+                          setItemToDelete(null)
+                          await onRefresh()
+                        }}
+                        title="تأكيد الحذف"
+                        message={`حذف "${item.nameAr}"؟`}
+                        confirmLabel="حذف"
+                        danger
+                      />
+                      <button type="button" className="btn btn--danger btn--sm" onClick={() => setItemToDelete(item.id)}><MdDelete /></button>
                     </div>
                   </td>
                 </tr>

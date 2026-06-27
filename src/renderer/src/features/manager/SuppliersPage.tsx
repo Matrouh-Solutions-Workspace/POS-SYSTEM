@@ -156,7 +156,7 @@ export function SuppliersPage(): React.ReactElement {
       
       <div className="settings-page">
         <div className="card">
-          <div className="page-toolbar mb-16">
+          <div className="page-toolbar section-action-header mb-16">
             <h2 className="card__title m-0">الموردين ({suppliers.length})</h2>
             <button type="button" className="btn btn--primary" onClick={() => { setForm({ nameAr: '', phone: '', noteAr: '' }); setSupplierFormOpen(true) }}>+ إضافة مورد</button>
           </div>
@@ -208,7 +208,7 @@ export function SuppliersPage(): React.ReactElement {
         </div>
 
         <div className="card">
-          <div className="page-toolbar mb-16">
+          <div className="page-toolbar section-action-header mb-16">
             <h2 className="card__title m-0">سجل عمليات التوريد</h2>
             <button type="button" className="btn btn--primary" onClick={() => { setTxForm({ supplierId: '', type: 'payment', amount: '', noteAr: '' }); setTxFormOpen(true) }}>+ إضافة حركة حساب</button>
           </div>
@@ -233,16 +233,16 @@ export function SuppliersPage(): React.ReactElement {
         </div>
 
         <div className="card">
-          <div className="page-toolbar mb-16">
+          <div className="page-toolbar section-action-header mb-16">
             <h2 className="card__title m-0">سجل مرتجعات الموردين</h2>
             <button type="button" className="btn btn--danger" onClick={() => { setReturnForm({ supplierId: '', ingredientId: '', quantity: '', reason: '' }); setReturnFormOpen(true) }}>+ تسجيل مرتجع</button>
           </div>
-          <div className="settings-form-grid mb-12">
+          <div className="settings-form-grid supplier-return-filters mb-12">
             <label className="field"><span>من</span><input type="date" value={returnFilters.from} onChange={(e) => setReturnFilters((filters) => ({ ...filters, from: e.target.value }))} /></label>
             <label className="field"><span>إلى</span><input type="date" value={returnFilters.to} onChange={(e) => setReturnFilters((filters) => ({ ...filters, to: e.target.value }))} /></label>
             <label className="field"><span>المورد</span><select value={returnFilters.supplierId} onChange={(e) => setReturnFilters((filters) => ({ ...filters, supplierId: e.target.value }))}><option value="">الكل</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.nameAr}</option>)}</select></label>
             <label className="field"><span>الصنف</span><select value={returnFilters.ingredientId} onChange={(e) => setReturnFilters((filters) => ({ ...filters, ingredientId: e.target.value }))}><option value="">الكل</option>{ingredients.map((ingredient) => <option key={ingredient.id} value={ingredient.id}>{ingredient.nameAr}</option>)}</select></label>
-            <div style={{ alignSelf: 'flex-end' }}><button type="button" className="btn btn--secondary" onClick={() => void applyReturnFilters()}>تطبيق الفلاتر</button></div>
+            <div className="supplier-return-filters__action"><button type="button" className="btn btn--secondary" onClick={() => void applyReturnFilters()}>تطبيق الفلاتر</button></div>
           </div>
           <table className="data-table">
             <thead><tr><th>التاريخ</th><th>المورد</th><th>الصنف</th><th>الكمية</th><th>قيمة المرتجع</th><th>المستخدم</th><th>السبب</th></tr></thead>

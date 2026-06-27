@@ -1,3 +1,51 @@
+@font-face {
+  font-family: "Cairo";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/cairo/Cairo-400.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Cairo";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./assets/fonts/cairo/Cairo-500.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Cairo";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./assets/fonts/cairo/Cairo-600.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Cairo";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./assets/fonts/cairo/Cairo-700.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Cairo";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("./assets/fonts/cairo/Cairo-800.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Cairo";
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url("./assets/fonts/cairo/Cairo-900.ttf") format("truetype");
+}
+
 :root {
   font-family: "Cairo", "Segoe UI", Tahoma, Arial, sans-serif;
   color: #171717;

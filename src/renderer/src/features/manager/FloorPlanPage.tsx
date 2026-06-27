@@ -1455,14 +1455,16 @@ export function FloorPlanPage(): React.ReactElement {
               <h3>المنطقة</h3>
               <p className="fp-sidebar__name">{activeFloor.nameAr}</p>
               <p className="fp-sidebar__meta">{tables.length} ترابيزة — {chairs.length} كرسي</p>
-              <button type="button" className="btn btn--secondary btn--sm" style={{ width: '100%', marginTop: 8 }}
-                onClick={() => { setEditingFloor(activeFloor); setFloorName(activeFloor.nameAr); setFloorFormOpen(true) }}>
-                <MdEdit /> تعديل المنطقة
-              </button>
-              <ConfirmDeleteButton
-                confirmMessage={`حذف "${activeFloor.nameAr}"؟`}
-                onConfirm={() => handleDeleteFloor(activeFloor.id)}
-              />
+              <div className="fp-sidebar__actions">
+                <button type="button" className="btn btn--secondary btn--sm"
+                  onClick={() => { setEditingFloor(activeFloor); setFloorName(activeFloor.nameAr); setFloorFormOpen(true) }}>
+                  <MdEdit /> تعديل
+                </button>
+                <ConfirmDeleteButton
+                  confirmMessage={`حذف "${activeFloor.nameAr}"؟`}
+                  onConfirm={() => handleDeleteFloor(activeFloor.id)}
+                />
+              </div>
             </div>
 
             <div className="fp-sidebar__section">

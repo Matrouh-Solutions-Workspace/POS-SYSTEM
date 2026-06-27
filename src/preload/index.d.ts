@@ -97,6 +97,11 @@ export interface ElectronAPI {
     status?: { valid: boolean; reason?: string }
     error?: string
   }>
+  activateWithDevCode: (code: string) => Promise<{
+    ok: boolean
+    status?: { valid: boolean; reason?: string }
+    error?: string
+  }>
   getNetworkStatus: () => Promise<unknown>
   pairSideDevice: (params: { masterUrl: string; deviceName: string; code: string }) => Promise<{ ok: boolean; error?: string }>
   clearSideConnection: () => Promise<{ ok: boolean }>
@@ -147,6 +152,7 @@ export interface ElectronAPI {
     error?: string
   }>
   devResetDatabase: () => Promise<{ ok: boolean; error?: string }>
+  devResetManagerLogin: () => Promise<{ ok: boolean; username?: string; password?: string; error?: string }>
 
   // Auto-updater — actions
   updaterCheckNow: () => Promise<void>

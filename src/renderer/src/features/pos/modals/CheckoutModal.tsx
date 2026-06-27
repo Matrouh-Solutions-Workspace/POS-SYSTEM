@@ -45,6 +45,7 @@ export interface CheckoutModalProps {
   message: string
   loading: boolean
   onSubmit: () => void
+  onSubmitUnpaid?: () => void
   onClose: () => void
 }
 
@@ -92,8 +93,11 @@ export function CheckoutModal({
   message,
   loading,
   onSubmit,
+  onSubmitUnpaid,
   onClose
 }: CheckoutModalProps): React.ReactElement {
+  const canSubmitPaid = !loading && !cashInsufficient && !discountOverLimit && !roundingInvalid
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal checkout-modal" onClick={(e) => e.stopPropagation()}>
@@ -104,9 +108,9 @@ export function CheckoutModal({
           </button>
         </div>
 
-        {orderType === 'takeaway' && (
+        {(orderType === 'takeaway' || orderType === 'delivery') && (
           <div className="checkout-modal__section">
-            <p className="checkout-modal__label">طريقة الدفع</p>
+            <p className="checkout-modal__label">{orderType === 'delivery' ? 'الدفع الآن (اختياري)' : 'طريقة الدفع'}</p>
             <div className="order-type-toggle">
               {(['cash', 'card', 'split'] as const).map((method) => (
                 <button
@@ -129,7 +133,7 @@ export function CheckoutModal({
 
             {checkoutMethod === 'cash' && (
               <div className="checkout-modal__cash">
-                {roundingAccess.enabled && (
+                {orderType === 'takeaway' && roundingAccess.enabled && (
                   <div className="checkout-modal__rounding">
                     <div className="checkout-modal__label">تقريب الدفع النقدي</div>
                     {roundingAccess.allowed ? (
@@ -293,14 +297,24 @@ export function CheckoutModal({
 
         {message && <p className="form-error">{message}</p>}
 
-        <div className="modal-actions">
+        <div className={`modal-actions${orderType === 'delivery' ? ' modal-actions--stacked' : ''}`}>
+          {orderType === 'delivery' && onSubmitUnpaid && (
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={loading || discountOverLimit}
+              onClick={onSubmitUnpaid}
+            >
+              {loading ? 'جارٍ...' : 'حفظ كغير مدفوع'}
+            </button>
+          )}
           <button
             type="button"
-            className="btn btn--primary"
-            disabled={loading || cashInsufficient || discountOverLimit || roundingInvalid}
+            className={orderType === 'delivery' ? 'btn btn--secondary' : 'btn btn--primary'}
+            disabled={!canSubmitPaid}
             onClick={onSubmit}
           >
-            {loading ? 'جارٍ...' : 'تأكيد الطلب'}
+            {loading ? 'جارٍ...' : orderType === 'delivery' ? 'تحصيل الآن' : 'تأكيد الطلب'}
           </button>
           <button type="button" className="btn btn--secondary" onClick={onClose}>
             إلغاء

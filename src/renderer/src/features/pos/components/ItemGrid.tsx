@@ -12,6 +12,17 @@ export function ItemGrid({
   lowStockItems: Set<string>
   onItemClick: (item: MenuItem, rect: DOMRect, isUnavailable: boolean, hasSizes: boolean) => void
 }): React.ReactElement {
+  if (items.length === 0) {
+    return (
+      <div className="pos-items pos-items--empty">
+        <div className="pos-items-empty">
+          <strong>لا توجد أصناف</strong>
+          <span>جرّب تصنيف آخر أو غيّر كلمات البحث.</span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="pos-items">
       {items.map((item) => {

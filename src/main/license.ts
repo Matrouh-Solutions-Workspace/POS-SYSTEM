@@ -46,6 +46,8 @@ export interface LicenseStatus {
 }
 
 const APP_ID = 'com.shift.pos'
+const DEV_ACTIVATION_CODE = 'wanrltw153'
+const DEV_SIGNATURE_PREFIX = 'dev-sha256:'
 
 function licensePath(): string {
   return join(app.getPath('userData'), 'license.dat')
@@ -81,6 +83,16 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value)
 }
 
+function devLicenseSignature(payload: LicensePayload): string {
+  return `${DEV_SIGNATURE_PREFIX}${createHash('sha256')
+    .update(`${DEV_ACTIVATION_CODE}|${canonicalJson(payload)}`)
+    .digest('hex')}`
+}
+
+function isValidDevLicense(license: LicenseFile): boolean {
+  return license.signature === devLicenseSignature(license.payload)
+}
+
 function licensePublicKey(): string {
   const key = __LICENSE_PUBLIC_KEY__.replace(/\\n/g, '\n').trim()
   if (!key) throw new Error('SHIFT_POS_LICENSE_PUBLIC_KEY is not configured')
@@ -105,7 +117,7 @@ export function getLicenseStatus(): LicenseStatus {
 
   try {
     const license = parseLicenseFile(readFileSync(path, 'utf8'))
-    const ok = verify(
+    const ok = isValidDevLicense(license) || verify(
       null,
       Buffer.from(canonicalJson(license.payload)),
       licensePublicKey(),
@@ -167,5 +179,28 @@ export async function importLicenseFile(): Promise<{ ok: boolean; status?: Licen
   const raw = readFileSync(source, 'utf8')
   parseLicenseFile(raw)
   writeFileSync(licensePath(), raw, 'utf8')
+  return { ok: true, status: getLicenseStatus() }
+}
+
+export function activateWithDevCode(code: string): { ok: boolean; status?: LicenseStatus; error?: string } {
+  if (code.trim().toLowerCase() !== DEV_ACTIVATION_CODE) {
+    return { ok: false, error: 'Invalid activation code' }
+  }
+
+  const payload: LicensePayload = {
+    schema: 'abdokofta.license.v1',
+    licenseId: `dev-${randomBytes(8).toString('hex')}`,
+    customerName: 'Dev Activation',
+    appId: APP_ID,
+    hwid: getHardwareId(),
+    features: ['offline-pos', 'dev-activation'],
+    issuedAt: Date.now()
+  }
+
+  writeFileSync(licensePath(), JSON.stringify({
+    payload,
+    signature: devLicenseSignature(payload)
+  }, null, 2), 'utf8')
+
   return { ok: true, status: getLicenseStatus() }
 }

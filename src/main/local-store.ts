@@ -616,6 +616,65 @@ export function storeAuthCredential(
   }
 }
 
+export function resetManagerLoginForDev(): {
+  ok: boolean
+  username?: string
+  password?: string
+  user?: unknown
+  error?: string
+} {
+  try {
+    const now = Date.now()
+    const username = 'manager'
+    const password = 'Manager123'
+    const users = readCachedDocuments('users') as Array<{
+      id?: string
+      email?: string
+      username?: string
+      displayName?: string
+      role?: string
+      active?: boolean
+      createdAt?: number
+      updatedAt?: number
+      permissions?: string[]
+      allowCashRounding?: boolean
+      maxCashRoundingDifference?: number
+      [key: string]: unknown
+    }>
+    const existing = users.find((user) => user.role === 'manager' && normalizeUsername(user.username ?? '') === username)
+      ?? users.find((user) => user.role === 'manager' && normalizeUsername(user.username ?? '') === 'admin')
+      ?? users.find((user) => user.role === 'manager')
+
+    const user = {
+      ...(existing ?? {}),
+      id: existing?.id ?? 'local_manager',
+      email: `${username}@abdokofta.local`,
+      username,
+      displayName: existing?.displayName || 'المدير',
+      role: 'manager',
+      permissions: existing?.permissions ?? [
+        'pos', 'order_history', 'cashier_inventory',
+        'view_reports', 'manage_shifts', 'manage_menu',
+        'manage_purchases', 'manage_suppliers',
+        'manage_accounts', 'manage_settings'
+      ],
+      allowCashRounding: existing?.allowCashRounding ?? true,
+      maxCashRoundingDifference: existing?.maxCashRoundingDifference ?? 5,
+      active: true,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now
+    }
+
+    cacheDocuments('users', [{ id: user.id, data: user }])
+    deleteAuthCredentialForUser(user.id)
+    const credential = storeAuthCredential(username, password, user)
+    if (!credential.ok) return { ok: false, error: credential.error }
+    return { ok: true, username, password, user }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 export function verifyAuthCredential(
   username: string,
   password: string

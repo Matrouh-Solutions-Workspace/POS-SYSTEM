@@ -1,28 +1,23 @@
-import type { MenuCategory } from '@shared/types'
+import type { MenuCategory, MenuItem } from '@shared/types'
 
 export function CategoryBrowser({
   categories,
   categoryChildren,
+  items,
   selectedCategory,
   onSelectCategory
 }: {
   categories: MenuCategory[]
   categoryChildren: Map<string, MenuCategory[]>
-  selectedCategory: string
-  onSelectCategory: (id: string) => void
+  items: MenuItem[]
+  selectedCategory: string | null
+  onSelectCategory: (id: string | null) => void
 }): React.ReactElement {
   const categoriesById = new Map(categories.map((category) => [category.id, category]))
-  const selected = selectedCategory === 'all' ? undefined : categoriesById.get(selectedCategory)
+  const selected = selectedCategory ? categoriesById.get(selectedCategory) : undefined
   const roots = categories.filter(
     (category) => !category.parentId || !categoriesById.has(category.parentId)
   )
-  const selectedChildren = selected ? (categoryChildren.get(selected.id) ?? []) : roots
-  const visibleCategories =
-    selected && selectedChildren.length === 0
-      ? selected.parentId
-        ? (categoryChildren.get(selected.parentId) ?? roots)
-        : roots
-      : selectedChildren
   const breadcrumb: MenuCategory[] = []
   let cursor = selected
 
@@ -31,30 +26,88 @@ export function CategoryBrowser({
     cursor = cursor.parentId ? categoriesById.get(cursor.parentId) : undefined
   }
 
+  const countItemsInCategory = (categoryId: string): number => {
+    const visibleIds = new Set<string>([categoryId])
+    const collectChildren = (id: string): void => {
+      for (const child of categoryChildren.get(id) ?? []) {
+        visibleIds.add(child.id)
+        collectChildren(child.id)
+      }
+    }
+    collectChildren(categoryId)
+    return items.filter((item) => visibleIds.has(item.categoryId)).length
+  }
+
+  if (!selected) {
+    return (
+      <div className="pos-category-browser pos-category-browser--landing">
+        <div className="pos-category-landing__header">
+          <div>
+            <h2>التصنيفات</h2>
+            <p>اختر تصنيف لعرض الأصناف داخله</p>
+          </div>
+        </div>
+        <div className="pos-category-grid">
+          {roots.map((category) => {
+            const childrenCount = categoryChildren.get(category.id)?.length ?? 0
+            const itemCount = countItemsInCategory(category.id)
+            return (
+              <button
+                key={category.id}
+                type="button"
+                className="pos-category-card"
+                onClick={() => onSelectCategory(category.id)}
+              >
+                <span className="pos-category-card__name">{category.nameAr}</span>
+                <span className="pos-category-card__meta">
+                  {itemCount} صنف{childrenCount > 0 ? ` / ${childrenCount} فرعي` : ''}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  const selectedChildren = categoryChildren.get(selected.id) ?? []
+
   return (
     <div className="pos-category-browser">
-      <div className="pos-category-breadcrumb" aria-label="مسار التصنيف">
+      <div className="pos-category-header">
         <button
           type="button"
-          className={`pos-category-breadcrumb__item${selectedCategory === 'all' ? ' active' : ''}`}
-          onClick={() => onSelectCategory('all')}
+          className="pos-category-back"
+          onClick={() => onSelectCategory(null)}
         >
-          الكل
+          رجوع للتصنيفات
         </button>
-        {breadcrumb.map((category) => (
-          <button
-            key={category.id}
-            type="button"
-            className={`pos-category-breadcrumb__item${selectedCategory === category.id ? ' active' : ''}`}
-            onClick={() => onSelectCategory(category.id)}
-          >
-            {category.nameAr}
-          </button>
-        ))}
+        <div className="pos-category-title">
+          <h2>{selected.nameAr}</h2>
+          <div className="pos-category-breadcrumb" aria-label="مسار التصنيف">
+            <button
+              type="button"
+              className="pos-category-breadcrumb__item"
+              onClick={() => onSelectCategory(null)}
+            >
+              التصنيفات
+            </button>
+            {breadcrumb.map((category) => (
+              <button
+                key={category.id}
+                type="button"
+                className={`pos-category-breadcrumb__item${selectedCategory === category.id ? ' active' : ''}`}
+                onClick={() => onSelectCategory(category.id)}
+              >
+                {category.nameAr}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
-      <div className="pos-categories">
-        {selected && selectedChildren.length > 0 && (
+      {selectedChildren.length > 0 && (
+        <div className="pos-categories">
           <button
             type="button"
             className="pos-cat-btn pos-cat-btn--current active"
@@ -62,21 +115,19 @@ export function CategoryBrowser({
           >
             كل {selected.nameAr}
           </button>
-        )}
-        {visibleCategories.map((category) => (
-          <button
-            key={category.id}
-            type="button"
-            className={`pos-cat-btn${selectedCategory === category.id ? ' active' : ''}`}
-            onClick={() => onSelectCategory(category.id)}
-          >
-            <span>{category.nameAr}</span>
-            {(categoryChildren.get(category.id)?.length ?? 0) > 0 && (
-              <span className="pos-cat-btn__children">›</span>
-            )}
-          </button>
-        ))}
-      </div>
+          {selectedChildren.map((category) => (
+            <button
+              key={category.id}
+              type="button"
+              className={`pos-cat-btn${selectedCategory === category.id ? ' active' : ''}`}
+              onClick={() => onSelectCategory(category.id)}
+            >
+              <span>{category.nameAr}</span>
+              <span className="pos-cat-btn__count">{countItemsInCategory(category.id)}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

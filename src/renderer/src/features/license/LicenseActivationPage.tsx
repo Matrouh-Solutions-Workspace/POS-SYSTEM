@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 interface LicenseActivationPageProps {
   status: {
@@ -11,6 +11,7 @@ interface LicenseActivationPageProps {
 }
 
 type ActivationStep = 'license' | 'role' | 'pair'
+const DEV_ACTIVATION_CODE = 'wanrltw153'
 
 export function LicenseActivationPage({
   status,
@@ -22,6 +23,27 @@ export function LicenseActivationPage({
   const [masterUrl, setMasterUrl] = useState('http://192.168.1.10:47831')
   const [deviceName, setDeviceName] = useState(() => `POS-${Math.floor(Math.random() * 900 + 100)}`)
   const [pairingCode, setPairingCode] = useState('')
+  const hiddenCodeBuffer = useRef('')
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.ctrlKey && event.key === 'Enter') {
+        if (hiddenCodeBuffer.current.endsWith(DEV_ACTIVATION_CODE) && !busy) {
+          event.preventDefault()
+          void activateWithHiddenCode()
+        }
+        hiddenCodeBuffer.current = ''
+        return
+      }
+
+      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        hiddenCodeBuffer.current = `${hiddenCodeBuffer.current}${event.key.toLowerCase()}`.slice(-DEV_ACTIVATION_CODE.length)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [busy])
 
   async function createRequest(): Promise<void> {
     setBusy(true)
@@ -39,6 +61,21 @@ export function LicenseActivationPage({
     setBusy(true)
     try {
       const result = await window.electronAPI.importLicense()
+      if (result.ok && result.status?.valid) {
+        setMessage('تم تفعيل الرخصة. اختر نوع هذا الجهاز.')
+        setStep('role')
+      } else {
+        setMessage(result.status?.reason ?? result.error ?? 'ملف الرخصة غير صالح')
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function activateWithHiddenCode(): Promise<void> {
+    setBusy(true)
+    try {
+      const result = await window.electronAPI.activateWithDevCode(DEV_ACTIVATION_CODE)
       if (result.ok && result.status?.valid) {
         setMessage('تم تفعيل الرخصة. اختر نوع هذا الجهاز.')
         setStep('role')

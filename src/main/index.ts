@@ -356,6 +356,7 @@ function startBackupScheduler(): void {
 import { pushOutboxToApi } from './api-sync'
 import { initAutoUpdater } from './auto-updater'
 import {
+  activateWithDevCode,
   createActivationRequestFile,
   getLicenseStatus,
   importLicenseFile
@@ -374,6 +375,7 @@ import {
   initLocalStore,
   readCachedDocument,
   readCachedDocuments,
+  resetManagerLoginForDev,
   resetDatabase,
   runConfiguredBackup,
   deleteAuthCredentialForUser,
@@ -402,6 +404,7 @@ app.whenReady().then(() => {
   ipcMain.handle('license:get-status', async () => getLicenseStatus())
   ipcMain.handle('license:create-activation-request', () => createActivationRequestFile())
   ipcMain.handle('license:import-license', () => importLicenseFile())
+  ipcMain.handle('license:activate-with-dev-code', (_, code: string) => activateWithDevCode(code))
   ipcMain.handle('network:get-status', async () => {
     const side = readSideConnection()
     if (side) {
@@ -586,6 +589,11 @@ app.whenReady().then(() => {
   ipcMain.handle('dev:reset-database', () => {
     if (isSideMode()) return { ok: false, error: 'Reset is available on the master device only' }
     return resetDatabase()
+  })
+
+  ipcMain.handle('dev:reset-manager-login', () => {
+    if (isSideMode()) return { ok: false, error: 'Manager login reset is available on the master device only' }
+    return resetManagerLoginForDev()
   })
 
   ipcMain.handle('app:restart', () => {

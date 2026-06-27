@@ -71,6 +71,14 @@ export async function hasOfflineAuthUsers(): Promise<boolean> {
   return result?.ok === true && result.hasUsers
 }
 
+export async function devResetManagerLogin(): Promise<{ username: string; password: string }> {
+  const result = await window.electronAPI.devResetManagerLogin()
+  if (!result.ok || !result.username || !result.password) {
+    throw new Error(result.error ?? 'فشل إعادة ضبط حساب المدير')
+  }
+  return { username: result.username, password: result.password }
+}
+
 /** Restore session from localStorage → look up user in SQLite */
 export async function restoreSessionFromLocal(): Promise<AppUser | null> {
   const session = readSession()

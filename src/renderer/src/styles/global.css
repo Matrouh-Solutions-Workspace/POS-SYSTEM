@@ -1,5 +1,53 @@
 @import './utilities.css';
 
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/cairo/Cairo-400.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../assets/fonts/cairo/Cairo-500.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../assets/fonts/cairo/Cairo-600.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../assets/fonts/cairo/Cairo-700.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('../assets/fonts/cairo/Cairo-800.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url('../assets/fonts/cairo/Cairo-900.ttf') format('truetype');
+}
+
 :root {
   --color-bg: #ececec;
   --color-surface: #ffffff;
@@ -1640,7 +1688,7 @@ textarea {
 .shifts-section-tab--active {
   border-color: var(--color-primary);
   background: var(--color-primary-soft);
-  box-shadow: inset 4px 0 0 var(--color-primary);
+  box-shadow: inset -4px 0 0 var(--color-primary);
 }
 
 .shifts-section-tab--active strong {
@@ -2072,7 +2120,113 @@ textarea {
 .pos-category-browser {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
+  min-height: 0;
+}
+
+.pos-category-browser--landing {
+  flex: 1;
+  overflow: hidden;
+}
+
+.pos-category-landing__header,
+.pos-category-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 2px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.pos-category-landing__header h2,
+.pos-category-title h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  line-height: 1.25;
+}
+
+.pos-category-landing__header p {
+  margin: 3px 0 0;
+  color: var(--color-muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.pos-category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+  overflow-y: auto;
+  align-content: start;
+  flex: 1;
+  min-height: 0;
+}
+
+.pos-category-card {
+  min-height: 124px;
+  padding: 16px;
+  border: 2px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition:
+    transform var(--t-fast) var(--ease-out),
+    background var(--t-mid) var(--ease-out),
+    border-color var(--t-mid) var(--ease-out),
+    box-shadow var(--t-mid) var(--ease-out);
+}
+
+.pos-category-card__name {
+  font-size: 1.2rem;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.pos-category-card__meta {
+  color: var(--color-primary);
+  font-weight: 900;
+  font-size: 0.86rem;
+}
+
+@media (hover: hover) {
+  .pos-category-card:hover {
+    transform: translate(-2px, -2px);
+    border-color: var(--color-primary);
+    background: var(--color-primary-soft);
+    box-shadow: var(--shadow-hover-primary);
+  }
+}
+
+.pos-category-header {
+  justify-content: flex-start;
+}
+
+.pos-category-back {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 2px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+@media (hover: hover) {
+  .pos-category-back:hover {
+    border-color: var(--color-primary);
+    background: var(--color-primary-soft);
+    color: var(--color-primary);
+  }
+}
+
+.pos-category-title {
+  min-width: 0;
 }
 
 .pos-category-breadcrumb {
@@ -2096,7 +2250,7 @@ textarea {
 }
 
 .pos-category-breadcrumb__item:not(:last-child)::after {
-  content: "/";
+  content: "›";
   margin-inline-start: 8px;
   color: var(--color-muted);
 }
@@ -2109,9 +2263,10 @@ textarea {
 
 .pos-categories {
   display: flex;
-  gap: 0;
+  gap: 8px;
   overflow-x: auto;
-  border: 2px solid var(--color-border);
+  border: 0;
+  padding-bottom: 2px;
 }
 
 .pos-cat-btn {
@@ -2122,14 +2277,14 @@ textarea {
   gap: 8px;
   min-height: 44px;
   padding: 0 16px;
-  border: none;
-  border-left: 1px solid var(--color-border);
+  border: 2px solid var(--color-border);
   background: var(--color-surface);
   cursor: pointer;
-  font-weight: 700;
+  font-weight: 900;
   transition:
     background var(--t-mid) var(--ease-out),
-    color var(--t-mid) var(--ease-out);
+    color var(--t-mid) var(--ease-out),
+    border-color var(--t-mid) var(--ease-out);
 }
 
 @media (hover: hover) {
@@ -2150,23 +2305,56 @@ textarea {
   opacity: 0.75;
 }
 
+.pos-cat-btn__count {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid currentColor;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
 .pos-cat-btn--current {
-  border-inline-start: 0;
+  border-color: var(--color-primary);
 }
 
 .pos-items {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
   overflow-y: auto;
   flex: 1;
   align-content: start;
+  min-height: 0;
+}
+
+.pos-items--empty {
+  display: grid;
+  place-items: center;
+}
+
+.pos-items-empty {
+  border: 2px dashed var(--color-border-light);
+  background: var(--color-surface);
+  padding: 22px;
+  text-align: center;
+  color: var(--color-muted);
+}
+
+.pos-items-empty strong {
+  display: block;
+  color: var(--color-text);
+  font-size: 1rem;
+  margin-bottom: 4px;
 }
 
 .pos-item-btn {
   width: 100%;
   flex: 1;
-  min-height: 80px;
+  min-height: 96px;
   padding: 12px;
   border: 0;
   background: var(--color-surface);
@@ -2547,6 +2735,7 @@ textarea {
 
 .checkout-actions {
   display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
@@ -2554,6 +2743,33 @@ textarea {
   flex: 1;
   min-height: 48px;
   font-size: 0.95rem;
+}
+
+.checkout-actions__hold {
+  width: 100%;
+  min-height: 42px !important;
+  opacity: 0.86;
+  font-size: 0.84rem !important;
+}
+
+.checkout-actions__payments {
+  display: grid;
+  grid-template-columns: minmax(88px, 1.28fr) minmax(74px, 1fr) minmax(74px, 1fr);
+  gap: 8px;
+  width: 100%;
+}
+
+.checkout-actions__payment {
+  width: 100%;
+  min-width: 0;
+  min-height: 58px !important;
+  padding-inline: 8px;
+  font-size: 1rem !important;
+  font-weight: 900;
+}
+
+.checkout-actions__payment--main {
+  font-size: 1.08rem !important;
 }
 
 .checkout-modal {
@@ -2801,6 +3017,14 @@ textarea {
   gap: 10px;
   justify-content: flex-end;
   margin-top: 8px;
+}
+
+.modal-actions--stacked {
+  flex-wrap: wrap;
+}
+
+.modal-actions--stacked .btn {
+  flex: 1 1 140px;
 }
 
 .form-actions {
@@ -3367,6 +3591,20 @@ textarea {
 
 .settings-page__full {
   grid-column: 1 / -1;
+}
+
+.section-action-header {
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.section-action-header .card__title {
+  margin-bottom: 0;
+}
+
+.section-action-header .btn {
+  flex: 0 0 auto;
+  margin-top: 0;
 }
 
 .table-manager-form {
@@ -4580,6 +4818,18 @@ select.inline-edit-input {
   align-items: end;
 }
 
+.supplier-return-filters {
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+}
+
+.supplier-return-filters__action {
+  align-self: end;
+}
+
+.supplier-return-filters__action .btn {
+  width: 100%;
+}
+
 .settings-form-grid__full {
   grid-column: 1 / -1;
 }
@@ -5751,6 +6001,27 @@ select.inline-edit-input {
   font-size: 0.78rem;
   color: var(--color-muted);
   margin: 0 0 8px;
+}
+
+.fp-sidebar__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.fp-sidebar__actions .btn {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 8px;
+}
+
+.fp-sidebar__actions .confirm-delete-inline {
+  grid-column: 1 / -1;
+}
+
+.fp-sidebar__actions .confirm-delete-inline > .btn {
+  width: auto;
 }
 
 .fp-sidebar__empty {

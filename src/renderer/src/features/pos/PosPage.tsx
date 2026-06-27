@@ -104,7 +104,7 @@ export function PosPage(): React.ReactElement {
   const [unavailableItems, setUnavailableItems] = useState<Map<string, string>>(new Map())
   const [lowStockItems, setLowStockItems] = useState<Set<string>>(new Set())
   const [posLogoUrl, setPosLogoUrl] = useState('/image.png')
-  const [selectedCategory, setSelectedCategory] = useState<string | 'all'>('all')
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
   // Pos Store
@@ -274,7 +274,7 @@ export function PosPage(): React.ReactElement {
 
   const filteredItems = useMemo(() => {
     let list = items
-    if (selectedCategory !== 'all') {
+    if (selectedCategory) {
       const visibleIds = new Set<string>([selectedCategory])
       const collectChildren = (categoryId: string): void => {
         for (const child of categoryChildren.get(categoryId) ?? []) {
@@ -284,6 +284,8 @@ export function PosPage(): React.ReactElement {
       }
       collectChildren(selectedCategory)
       list = list.filter((item) => visibleIds.has(item.categoryId))
+    } else if (!search.trim()) {
+      return []
     }
     if (search.trim()) {
       const q = search.trim().toLowerCase()
@@ -304,7 +306,7 @@ export function PosPage(): React.ReactElement {
   const total = orderTotal(subtotal, discountAmt, taxAmt, deliveryFeeNum, serviceAmt)
   const roundedTotalNum = roundedTotal.trim() === '' ? total : Number(roundedTotal)
   const roundingDifference = Math.round((total - roundedTotalNum) * 100) / 100
-  const roundingApplied = checkoutMethod === 'cash' && roundedTotal.trim() !== '' && Math.abs(roundingDifference) >= 0.001
+  const roundingApplied = orderType === 'takeaway' && checkoutMethod === 'cash' && roundedTotal.trim() !== '' && Math.abs(roundingDifference) >= 0.001
   const roundingInvalid = roundingApplied && (
     !roundingAccess.allowed ||
     !Number.isFinite(roundedTotalNum) ||
@@ -509,7 +511,7 @@ export function PosPage(): React.ReactElement {
         setMessage('المبلغ المستلم أقل من الإجمالي')
         return
       }
-      if (roundingInvalid) {
+      if (orderType === 'takeaway' && roundingInvalid) {
         setMessage(
           !roundingAccess.allowed
             ? (roundingAccess.reason ?? 'غير مصرح باستخدام التقريب')
@@ -553,8 +555,8 @@ export function PosPage(): React.ReactElement {
         customerName: customerName || undefined,
         customerPhone: customerPhone || undefined,
         customerAddress: customerAddress || undefined,
-        roundedTotal: roundingApplied ? roundedTotalNum : undefined,
-        roundingReason: roundingApplied ? roundingReason.trim() : undefined
+        roundedTotal: orderType === 'takeaway' && roundingApplied ? roundedTotalNum : undefined,
+        roundingReason: orderType === 'takeaway' && roundingApplied ? roundingReason.trim() : undefined
       })
       const [orderItems, settings] = await Promise.all([getOrderItems(order.id), getSettings()])
       setCart([])
@@ -563,6 +565,45 @@ export function PosPage(): React.ReactElement {
       resetCheckoutFields()
       setMessage(`تم إتمام الطلب #${orderReference(order)}`)
       printReceipt(order, orderItems, settings).catch(() => {})
+      printKitchenAfterSave(order, orderItems, settings, 'تم حفظ الطلب')
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'فشل')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function submitDeliveryUnpaid(): Promise<void> {
+    if (cart.length === 0 || orderType !== 'delivery') return
+
+    if (discountOverLimit) {
+      setMessage(`الخصم يتجاوز الحد المسموح به (${maxDiscountPct}%) — يتطلب موافقة المدير`)
+      return
+    }
+
+    setLoading(true)
+    setMessage('')
+    try {
+      const order = await completeOrder({
+        cashierId: user.id,
+        cashierName: user.displayName,
+        cashierCode: user.cashierCode,
+        lines: cart,
+        orderNoteAr: orderNote || undefined,
+        orderType: 'delivery',
+        discountType: discountValue ? discountType : undefined,
+        discountValue: discountValue ? Number(discountValue) : undefined,
+        deliveryFee: Number(deliveryFee) || 0,
+        customerName: customerName || undefined,
+        customerPhone: customerPhone || undefined,
+        customerAddress: customerAddress || undefined
+      })
+      const [orderItems, settings] = await Promise.all([getOrderItems(order.id), getSettings()])
+      setCart([])
+      setOrderNote('')
+      setCheckoutOpen(false)
+      resetCheckoutFields()
+      setMessage(`تم إنشاء طلب دليفري غير مدفوع #${orderReference(order)}`)
       printKitchenAfterSave(order, orderItems, settings, 'تم حفظ الطلب')
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'فشل')
@@ -820,21 +861,24 @@ export function PosPage(): React.ReactElement {
         <CategoryBrowser
           categories={categories}
           categoryChildren={categoryChildren}
+          items={items}
           selectedCategory={selectedCategory}
           onSelectCategory={setSelectedCategory}
         />
 
-        <ItemGrid
-          items={filteredItems}
-          unavailableItems={unavailableItems}
-          lowStockItems={lowStockItems}
-          onItemClick={(item, rect, isUnavailable, hasSizes) => {
-            if (isUnavailable) return
-            if (item.isWeighted) setWeightPopup({ item, rect })
-            else if (hasSizes) setSizePopup({ item, rect })
-            else openAddonsOrAddToCart({ item, quantity: 1, unitPrice: item.price, anchor: rect })
-          }}
-        />
+        {(selectedCategory || search.trim()) && (
+          <ItemGrid
+            items={filteredItems}
+            unavailableItems={unavailableItems}
+            lowStockItems={lowStockItems}
+            onItemClick={(item, rect, isUnavailable, hasSizes) => {
+              if (isUnavailable) return
+              if (item.isWeighted) setWeightPopup({ item, rect })
+              else if (hasSizes) setSizePopup({ item, rect })
+              else openAddonsOrAddToCart({ item, quantity: 1, unitPrice: item.price, anchor: rect })
+            }}
+          />
+        )}
       </section>
 
       {/* ── Item popups ── */}
@@ -980,6 +1024,7 @@ export function PosPage(): React.ReactElement {
           message={message}
           loading={loading}
           onSubmit={() => void submitCheckout()}
+          onSubmitUnpaid={orderType === 'delivery' ? () => void submitDeliveryUnpaid() : undefined}
           onClose={() => setCheckoutOpen(false)}
         />
       )}

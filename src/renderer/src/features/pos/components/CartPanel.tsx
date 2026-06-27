@@ -246,19 +246,17 @@ export function CartPanel({
               {cart.length > 0 && (
                 <button
                   type="button"
-                  className="btn btn--secondary btn--sm"
-                  style={{ width: '100%', marginBottom: 6, opacity: 0.75, fontSize: '0.82rem' }}
+                  className="btn btn--secondary btn--sm checkout-actions__hold"
                   onClick={handleHoldOrder}
                   title="تعليق الطلب الحالي واستئنافه لاحقاً"
                 >
-                  ⏸ تعليق الطلب
+                  تعليق الطلب
                 </button>
               )}
-              <div style={{ display: 'flex', gap: 6, width: '100%' }}>
+              <div className="checkout-actions__payments">
                 <button
                   type="button"
-                  className="btn btn--primary"
-                  style={{ flex: 2 }}
+                  className="btn btn--primary checkout-actions__payment checkout-actions__payment--main"
                   disabled={loading || cart.length === 0}
                   onClick={() => handleCheckout('cash')}
                 >
@@ -266,7 +264,7 @@ export function CartPanel({
                 </button>
                 <button
                   type="button"
-                  className="btn btn--secondary flex-1"
+                  className="btn btn--secondary checkout-actions__payment"
                   disabled={loading || cart.length === 0}
                   onClick={() => handleCheckout('card')}
                 >
@@ -274,7 +272,7 @@ export function CartPanel({
                 </button>
                 <button
                   type="button"
-                  className="btn btn--secondary flex-1"
+                  className="btn btn--secondary checkout-actions__payment"
                   disabled={loading || cart.length === 0}
                   onClick={() => {
                     setCheckoutMethod('split')
