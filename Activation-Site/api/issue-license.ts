@@ -38,6 +38,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       features: body.features
     })
     const meta = requestMeta(req)
+    const createdAt = new Date().toISOString()
 
     await supabaseInsert('license_activations', [{
       license_id: issued.payload.licenseId,
@@ -54,7 +55,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       issued_at: new Date(issued.payload.issuedAt).toISOString(),
       expires_at: issued.payload.expiresAt ? new Date(issued.payload.expiresAt).toISOString() : null,
       requester_ip: meta.ip,
-      user_agent: meta.userAgent
+      user_agent: meta.userAgent,
+      created_at: createdAt
     }])
 
     await supabaseInsert('activation_site_events', [{
@@ -67,7 +69,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         storeName: issued.payload.storeName
       },
       requester_ip: meta.ip,
-      user_agent: meta.userAgent
+      user_agent: meta.userAgent,
+      created_at: createdAt
     }])
 
     res.status(200).json({

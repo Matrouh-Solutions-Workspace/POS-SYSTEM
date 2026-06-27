@@ -1,4 +1,6 @@
 import { randomUUID, sign, timingSafeEqual } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 export interface ActivationRequest {
   schema: 'abdokofta.activation-request.v1'
@@ -37,6 +39,13 @@ export interface VercelResponse {
   setHeader(name: string, value: string): void
   send(value: string): void
 }
+
+interface LocalStore {
+  license_activations: unknown[]
+  activation_site_events: unknown[]
+}
+
+type LocalTable = keyof LocalStore
 
 export function getEnv(name: string): string {
   const value = process.env[name]
@@ -104,7 +113,10 @@ export function issueLicense(params: {
 export async function supabaseInsert(table: string, rows: unknown[]): Promise<void> {
   const supabaseUrl = process.env.SUPABASE_URL
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!supabaseUrl || !serviceKey) return
+  if (!shouldUseSupabase() || !supabaseUrl || !serviceKey) {
+    writeLocalRows(table, rows)
+    return
+  }
 
   const response = await fetch(`${supabaseUrl}/rest/v1/${table}`, {
     method: 'POST',
@@ -124,8 +136,10 @@ export async function supabaseInsert(table: string, rows: unknown[]): Promise<vo
 }
 
 export async function supabaseSelect<T>(path: string): Promise<T[]> {
-  const supabaseUrl = getEnv('SUPABASE_URL')
-  const serviceKey = getEnv('SUPABASE_SERVICE_ROLE_KEY')
+  const supabaseUrl = process.env.SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!shouldUseSupabase() || !supabaseUrl || !serviceKey) return readLocalRows<T>(path)
+
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
     headers: {
       apikey: serviceKey,
@@ -137,6 +151,10 @@ export async function supabaseSelect<T>(path: string): Promise<T[]> {
     throw new Error(`Supabase query failed: ${response.status} ${detail}`)
   }
   return await response.json() as T[]
+}
+
+export function activationStorageMode(): 'supabase' | 'local-json' {
+  return shouldUseSupabase() ? 'supabase' : 'local-json'
 }
 
 export function requestMeta(req: VercelRequest): { ip: string; userAgent: string } {
@@ -164,4 +182,88 @@ function cleanOptional(value: string | undefined): string | undefined {
 
 function firstHeader(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value
+}
+
+function shouldUseSupabase(): boolean {
+  const mode = process.env.ACTIVATION_SITE_STORAGE_MODE?.trim().toLowerCase()
+  if (mode === 'local' || mode === 'local-json' || mode === 'offline') return false
+  return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+}
+
+function localStorePath(): string {
+  return process.env.ACTIVATION_SITE_LOCAL_STORE_PATH
+    ? process.env.ACTIVATION_SITE_LOCAL_STORE_PATH
+    : join(process.cwd(), '.local-data', 'activation-site.json')
+}
+
+function emptyLocalStore(): LocalStore {
+  return {
+    license_activations: [],
+    activation_site_events: []
+  }
+}
+
+function memoryStore(): LocalStore {
+  const globalStore = globalThis as typeof globalThis & { __SHIFT_POS_ACTIVATION_STORE__?: LocalStore }
+  if (!globalStore.__SHIFT_POS_ACTIVATION_STORE__) {
+    globalStore.__SHIFT_POS_ACTIVATION_STORE__ = emptyLocalStore()
+  }
+  return globalStore.__SHIFT_POS_ACTIVATION_STORE__
+}
+
+function readLocalStore(): LocalStore {
+  const fallback = memoryStore()
+  const path = localStorePath()
+  try {
+    if (!existsSync(path)) return fallback
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<LocalStore>
+    fallback.license_activations = Array.isArray(parsed.license_activations) ? parsed.license_activations : []
+    fallback.activation_site_events = Array.isArray(parsed.activation_site_events) ? parsed.activation_site_events : []
+  } catch {
+    // Keep the in-memory store usable if the local JSON file is unavailable.
+  }
+  return fallback
+}
+
+function writeLocalStore(store: LocalStore): void {
+  const path = localStorePath()
+  const globalStore = memoryStore()
+  globalStore.license_activations = store.license_activations
+  globalStore.activation_site_events = store.activation_site_events
+  try {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, JSON.stringify(store, null, 2), 'utf8')
+  } catch {
+    // Vercel functions may not have durable writable storage; in-memory fallback is enough there.
+  }
+}
+
+function writeLocalRows(table: string, rows: unknown[]): void {
+  const tableName = localTableName(table)
+  if (!tableName) return
+  const store = readLocalStore()
+  store[tableName].unshift(...rows)
+  writeLocalStore(store)
+}
+
+function readLocalRows<T>(path: string): T[] {
+  const tableName = localTableName(path)
+  if (!tableName) return []
+  const limit = Number(path.match(/(?:\?|&)limit=(\d+)/)?.[1] ?? 100)
+  return readLocalStore()[tableName]
+    .slice()
+    .sort(compareCreatedAtDesc)
+    .slice(0, Number.isFinite(limit) ? limit : 100) as T[]
+}
+
+function localTableName(value: string): LocalTable | null {
+  if (value.startsWith('license_activations')) return 'license_activations'
+  if (value.startsWith('activation_site_events')) return 'activation_site_events'
+  return null
+}
+
+function compareCreatedAtDesc(left: unknown, right: unknown): number {
+  const leftTime = Date.parse(String((left as { created_at?: unknown }).created_at ?? ''))
+  const rightTime = Date.parse(String((right as { created_at?: unknown }).created_at ?? ''))
+  return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0)
 }
