@@ -20,8 +20,15 @@ export interface SupplierTransaction {
   supplierId: string
   type: SupplierTransactionType
   amount: number
+  paidAmount?: number
+  remainingAmount?: number
+  paymentMethod?: 'cash' | 'card' | 'bank' | 'other'
+  paymentSource?: 'cash_drawer' | 'external'
   noteAr?: string
   shiftId?: string
   createdBy: string
+  createdByName?: string
+  paidBy?: string
+  paidByName?: string
   createdAt: number
 }

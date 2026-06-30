@@ -24,65 +24,76 @@ export function CashierInventoryPage(): React.ReactElement {
 
   async function handlePurchase(e: FormEvent): Promise<void> {
     e.preventDefault()
-    const ingredient = ingredients.find((i) => i.id === purchase.ingredientId)
-    if (!ingredient) return
-    const shift = await getOpenShiftForCashier(user.id)
-    const qty = Number(purchase.qty)
-    const totalCost = Math.max(0, Number(purchase.totalCost || 0))
-    const paid = Math.max(0, Number(purchase.paid || 0))
-    await recordPurchase({
-      ingredientId: ingredient.id,
-      quantity: qty,
-      unit: ingredient.unit,
-      totalCost,
-      noteAr: purchase.noteAr || undefined,
-      createdBy: user.id,
-      supplierId: purchase.supplierId || undefined,
-      shiftId: shift?.id,
-      actor: user
-    })
-    if (paid > 0) {
-      await recordCashDrawerTransaction({
-        type: 'purchase_payment',
-        amount: -paid,
-        shiftId: shift?.id,
-        supplierId: purchase.supplierId || undefined,
-        noteAr: purchase.noteAr || 'توريد مخزون',
-        createdBy: user.id
-      })
-    }
-    if (purchase.supplierId && totalCost > paid) {
-      await recordSupplierTransaction({
-        supplierId: purchase.supplierId,
-        type: 'purchase_credit',
-        amount: totalCost - paid,
-        noteAr: purchase.noteAr || 'توريد على الحساب',
-        shiftId: shift?.id,
+    try {
+      const ingredient = ingredients.find((i) => i.id === purchase.ingredientId)
+      if (!ingredient) return
+      const shift = await getOpenShiftForCashier(user.id)
+      const qty = Number(purchase.qty)
+      const totalCost = Math.max(0, Number(purchase.totalCost || 0))
+      const paid = Math.max(0, Number(purchase.paid || 0))
+      if (paid > totalCost + 0.001) throw new Error('لا يمكن دفع مبلغ أكبر من قيمة التوريد')
+      await recordPurchase({
+        ingredientId: ingredient.id,
+        quantity: qty,
+        unit: ingredient.unit,
+        totalCost,
+        noteAr: purchase.noteAr || undefined,
         createdBy: user.id,
+        supplierId: purchase.supplierId || undefined,
+        shiftId: shift?.id,
         actor: user
       })
+      if (paid > 0) {
+        await recordCashDrawerTransaction({
+          type: 'purchase_payment',
+          amount: -paid,
+          shiftId: shift?.id,
+          supplierId: purchase.supplierId || undefined,
+          noteAr: purchase.noteAr || 'توريد مخزون',
+          createdBy: user.id,
+          actor: user
+        })
+      }
+      if (purchase.supplierId && totalCost > paid) {
+        await recordSupplierTransaction({
+          supplierId: purchase.supplierId,
+          type: 'purchase_credit',
+          amount: totalCost - paid,
+          noteAr: purchase.noteAr || 'توريد على الحساب',
+          shiftId: shift?.id,
+          createdBy: user.id,
+          actor: user
+        })
+      }
+      setPurchase({ ingredientId: '', supplierId: '', qty: '', totalCost: '', paid: '', noteAr: '' })
+      setMessage('تم تسجيل التوريد')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'فشل تسجيل التوريد')
     }
-    setPurchase({ ingredientId: '', supplierId: '', qty: '', totalCost: '', paid: '', noteAr: '' })
-    setMessage('تم تسجيل التوريد')
   }
 
   async function handleExpense(e: FormEvent): Promise<void> {
     e.preventDefault()
-    const shift = await getOpenShiftForCashier(user.id)
-    await recordCashDrawerTransaction({
-      type: 'expense',
-      amount: -Math.abs(Number(expense.amount)),
-      shiftId: shift?.id,
-      noteAr: expense.noteAr || 'مصروفات نثرية',
-      createdBy: user.id
-    })
-    setExpense({ amount: '', noteAr: '' })
-    setMessage('تم تسجيل المصروف')
+    try {
+      const shift = await getOpenShiftForCashier(user.id)
+      await recordCashDrawerTransaction({
+        type: 'expense',
+        amount: -Math.abs(Number(expense.amount)),
+        shiftId: shift?.id,
+        noteAr: expense.noteAr || 'مصروفات نثرية',
+        createdBy: user.id,
+        actor: user
+      })
+      setExpense({ amount: '', noteAr: '' })
+      setMessage('تم تسجيل المصروف')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'فشل تسجيل المصروف')
+    }
   }
 
   return (
     <div className="settings-page">
-      {message && <p className="form-message form-message--ok">{message}</p>}
+      {message && <p className={`form-message pos-floating-message ${message.includes('فشل') || message.includes('لا يمكن') ? 'form-message--error' : 'form-message--ok'}`}>{message}</p>}
       <div className="card">
         <h2 className="card__title">توريد مخزون</h2>
         <form onSubmit={(e) => void handlePurchase(e)}>

@@ -30,7 +30,8 @@ import {
   orderTotal,
   computeDiscount,
   computeTax,
-  computeService
+  computeService,
+  effectiveTaxRate
 } from '@shared/services/order-calculator'
 import { orderReference } from '@shared/services/order-reference'
 import {
@@ -300,7 +301,13 @@ export function PosPage(): React.ReactElement {
     discountValue ? discountType : undefined,
     discountValue ? Number(discountValue) : undefined
   )
-  const taxAmt = computeTax(subtotal - discountAmt, posSettings?.taxRate ?? 0)
+  const effectiveTax = effectiveTaxRate(
+    posSettings?.taxRate,
+    orderType,
+    posSettings?.taxApplicationMode,
+    posSettings?.taxOrderTypes
+  )
+  const taxAmt = computeTax(subtotal - discountAmt, effectiveTax)
   const serviceAmt = computeService(subtotal - discountAmt, posSettings?.serviceRate ?? 0)
   const deliveryFeeNum = orderType === 'delivery' ? (Number(deliveryFee) || 0) : 0
   const total = orderTotal(subtotal, discountAmt, taxAmt, deliveryFeeNum, serviceAmt)
@@ -324,8 +331,10 @@ export function PosPage(): React.ReactElement {
 
   // REQ-6: discount over-limit check
   const isDiscountLimited = user.role === 'cashier' && maxDiscountPct != null && maxDiscountPct < 100
-  const appliedDiscountPct = discountType === 'percent' ? Number(discountValue) || 0 : 0
-  const discountOverLimit = isDiscountLimited && discountType === 'percent' && appliedDiscountPct > (maxDiscountPct ?? 100)
+  const appliedDiscountPct = discountType === 'percent'
+    ? Number(discountValue) || 0
+    : subtotal > 0 ? (discountAmt / subtotal) * 100 : 0
+  const discountOverLimit = isDiscountLimited && appliedDiscountPct > (maxDiscountPct ?? 100)
 
   const occupiedTableIds = useMemo(
     () => new Set(unpaidOrders.map((o) => o.tableId).filter(Boolean) as string[]),

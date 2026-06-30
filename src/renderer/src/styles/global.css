@@ -297,6 +297,30 @@ textarea {
   background: #f0fdf4;
 }
 
+.inline-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.inline-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.pos-floating-message {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100000;
+  width: min(520px, calc(100vw - 32px));
+  margin: 0;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
+
 /* Login — sharp industrial */
 .login-page {
   min-height: 100%;
@@ -3000,12 +3024,6 @@ textarea {
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@media (hover: hover) {
-  .modal-overlay:hover {
-    background: rgba(0, 0, 0, 0.65);
   }
 }
 

@@ -1,4 +1,4 @@
-import type { DiscountType } from '../types/order'
+import type { DiscountType, OrderType } from '../types/order'
 
 export interface CartLineInput {
   unitPrice: number
@@ -36,6 +36,25 @@ export function computeDiscount(
 export function computeTax(afterDiscount: number, taxRate?: number): number {
   if (!taxRate || taxRate <= 0) return 0
   return Math.round(afterDiscount * taxRate) / 100
+}
+
+export function taxAppliesToOrderType(
+  orderType: OrderType,
+  taxApplicationMode?: 'all' | 'selected',
+  taxOrderTypes?: OrderType[]
+): boolean {
+  if (taxApplicationMode !== 'selected') return true
+  return (taxOrderTypes ?? []).includes(orderType)
+}
+
+export function effectiveTaxRate(
+  taxRate: number | undefined,
+  orderType: OrderType,
+  taxApplicationMode?: 'all' | 'selected',
+  taxOrderTypes?: OrderType[]
+): number {
+  if (!taxRate || taxRate <= 0) return 0
+  return taxAppliesToOrderType(orderType, taxApplicationMode, taxOrderTypes) ? taxRate : 0
 }
 
 /** Compute service amount from (subtotal - discount) */

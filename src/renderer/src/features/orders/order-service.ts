@@ -27,7 +27,8 @@ import {
   lineTotal,
   computeDiscount,
   computeTax,
-  computeService
+  computeService,
+  effectiveTaxRate
 } from '@shared/services/order-calculator'
 import { COLLECTIONS } from '@shared/constants/collections'
 import { SETTINGS_DOC_ID } from '@shared/constants/collections'
@@ -71,6 +72,8 @@ export async function getSettings(): Promise<AppSettings> {
     autoLockMinutes: 5,
     nextOrderNumber: 1,
     taxRate: 0,
+    taxApplicationMode: 'all',
+    taxOrderTypes: ['takeaway', 'dine_in', 'delivery'],
     serviceRate: 0,
     defaultDeliveryFee: 0,
     shiftManagementEnabled: false,
@@ -114,6 +117,8 @@ export async function updateSettings(
       | 'pinEnabled'
       | 'autoLockMinutes'
       | 'taxRate'
+      | 'taxApplicationMode'
+      | 'taxOrderTypes'
       | 'serviceRate'
       | 'defaultDeliveryFee'
       | 'shiftManagementEnabled'
@@ -184,6 +189,27 @@ export interface CartLine {
   noteAr?: string
 }
 
+async function enforceDiscountPermission(params: {
+  cashierId: string
+  subtotal: number
+  discountType?: DiscountType
+  discountValue?: number
+  discountAmount: number
+  settings: AppSettings
+}): Promise<void> {
+  if (!params.discountType || !params.discountValue || params.discountAmount <= 0) return
+  const cashier = await getCachedDoc<AppUser>(COLLECTIONS.users, params.cashierId)
+  if (!cashier || cashier.role !== 'cashier') return
+  const maxPct = params.settings.maxCashierDiscountPct
+  if (maxPct == null || maxPct >= 100) return
+  const appliedPct = params.discountType === 'percent'
+    ? params.discountValue
+    : params.subtotal > 0 ? (params.discountAmount / params.subtotal) * 100 : 0
+  if (appliedPct > maxPct + 0.001) {
+    throw new Error(`الخصم يتجاوز الحد المسموح لهذا الكاشير (${maxPct}%)`)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Complete order
 // ---------------------------------------------------------------------------
@@ -215,8 +241,21 @@ export async function completeOrder(params: {
   const deliveryFee = params.deliveryFee ?? (orderType === 'delivery' ? (settings.defaultDeliveryFee ?? 0) : 0)
 
   const discountAmount = computeDiscount(subtotal, params.discountType, params.discountValue)
+  await enforceDiscountPermission({
+    cashierId: params.cashierId,
+    subtotal,
+    discountType: params.discountType,
+    discountValue: params.discountValue,
+    discountAmount,
+    settings
+  })
   const afterDiscount = subtotal - discountAmount
-  const taxRate = settings.taxRate ?? 0
+  const taxRate = effectiveTaxRate(
+    settings.taxRate,
+    orderType,
+    settings.taxApplicationMode,
+    settings.taxOrderTypes
+  )
   const taxAmount = computeTax(afterDiscount, taxRate)
   const serviceRate = settings.serviceRate ?? 0
   const serviceAmount = computeService(afterDiscount, serviceRate)
@@ -694,7 +733,12 @@ export async function editOrderItems(params: {
   const subtotal = orderSubtotal(params.lines)
   const discountAmount = computeDiscount(subtotal, order.discountType, order.discountValue)
   const afterDiscount = subtotal - discountAmount
-  const taxRate = settings.taxRate ?? 0
+  const taxRate = effectiveTaxRate(
+    settings.taxRate,
+    order.orderType ?? 'takeaway',
+    settings.taxApplicationMode,
+    settings.taxOrderTypes
+  )
   const taxAmount = computeTax(afterDiscount, taxRate)
   const serviceRate = settings.serviceRate ?? 0
   const serviceAmount = computeService(afterDiscount, serviceRate)

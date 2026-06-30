@@ -367,22 +367,29 @@ function AddTableModal({ floorId, dropX, dropY, onSave, onClose }: AddTableModal
   const [w, setW]           = useState(DEFAULT_W)
   const [h, setH]           = useState(DEFAULT_H)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   async function handleSave(): Promise<void> {
     if (!nameAr.trim()) return
     setSaving(true)
-    const tx = snap(dropX ?? 120)
-    const ty = snap(dropY ?? 120)
-    const t  = await saveDiningTable({
-      nameAr: nameAr.trim(), floorId,
-      x: tx, y: ty, w, h, shape,
-      seats, active: true, sortOrder: Date.now()
-    })
-    const chairs = defaultChairPositions(tx, ty, w, h, seats, shape).map((c) => ({
-      ...c, tableId: t.id
-    }))
-    onSave(t, chairs)
-    setSaving(false)
+    setError('')
+    try {
+      const tx = snap(dropX ?? 120)
+      const ty = snap(dropY ?? 120)
+      const t  = await saveDiningTable({
+        nameAr: nameAr.trim(), floorId,
+        x: tx, y: ty, w, h, shape,
+        seats, active: true, sortOrder: Date.now()
+      })
+      const chairs = defaultChairPositions(tx, ty, w, h, seats, shape).map((c) => ({
+        ...c, tableId: t.id
+      }))
+      onSave(t, chairs)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'فشل حفظ الترابيزة')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -393,6 +400,7 @@ function AddTableModal({ floorId, dropX, dropY, onSave, onClose }: AddTableModal
           <button type="button" className="order-details__close" onClick={onClose}>✕</button>
         </div>
         <div className="settings-form-grid mb-12">
+          {error && <p className="form-message form-message--error settings-form-grid__full">{error}</p>}
           <label className="field settings-form-grid__full">
             <span>اسم الترابيزة</span>
             <input autoFocus value={nameAr} onChange={(e) => setNameAr(e.target.value)}
@@ -456,13 +464,20 @@ function EditTableModal({ table, onSave, onClose }: EditTableModalProps): React.
   const [h, setH]             = useState(table.h ?? DEFAULT_H)
   const [rotation, setRot]    = useState(table.rotation ?? 0)
   const [saving, setSaving]   = useState(false)
+  const [error, setError] = useState('')
 
   async function handleSave(): Promise<void> {
     if (!nameAr.trim()) return
     setSaving(true)
-    const updated = await saveDiningTable({ ...table, nameAr, w, h, rotation })
-    onSave(updated)
-    setSaving(false)
+    setError('')
+    try {
+      const updated = await saveDiningTable({ ...table, nameAr, w, h, rotation })
+      onSave(updated)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'فشل حفظ الترابيزة')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -473,6 +488,7 @@ function EditTableModal({ table, onSave, onClose }: EditTableModalProps): React.
           <button type="button" className="order-details__close" onClick={onClose}>✕</button>
         </div>
         <div className="settings-form-grid mb-12">
+          {error && <p className="form-message form-message--error settings-form-grid__full">{error}</p>}
           <label className="field settings-form-grid__full">
             <span>الاسم</span>
             <input autoFocus value={nameAr} onChange={(e) => setNameAr(e.target.value)} />

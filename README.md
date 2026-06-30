@@ -1,5 +1,25 @@
 # POS MVP Launch Assessment
 
+## Current PR: POS accounting, permissions, and UX fixes
+
+### Completed
+
+- Prevented duplicate active dining table names after trimming/case normalization.
+- Added cash/accounting guards for supplier payments, including supplier overpayment blocking and cash drawer supplier-payment entries.
+- Expanded supplier transaction records with paid amount, remaining balance, payment method/source, and acting user.
+- Added audit logging for petty cash expenses.
+- Enforced cashier discount limits for both percentage and fixed discounts.
+- Added configurable tax application by order type while keeping all order types taxable by default.
+- Kept POS totals aligned with shared tax calculation settings.
+- Reduced POS alert layout shift by rendering inventory/cashier messages as a floating notification.
+- Removed a modal overlay hover repaint that could cause popup/dropdown visual glitches.
+
+### Remaining manual validation
+
+- Confirm real cash drawer reconciliation with supplier payments on production data.
+- Confirm tax/service receipt output on real printers.
+- Confirm rounding and discount permission behavior with each configured employee role.
+
 ## Private GitHub releases and updates
 
 The repo can stay private. Publishing and update checks require a GitHub token with access to `xlargetomato/AbdoKoftaDesktop`.

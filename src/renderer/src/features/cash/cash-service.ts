@@ -5,6 +5,7 @@ import type { CashDrawerTransaction, CashDrawerTransactionType } from '@shared/t
 import { COLLECTIONS } from '@shared/constants/collections'
 import { cacheDocs, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 import { generateId } from '@renderer/lib/utils/id'
+import { actorAuditName, type AuditActor } from '@renderer/features/audit/audit-service'
 
 export async function recordCashDrawerTransaction(params: {
   type: CashDrawerTransactionType
@@ -14,6 +15,7 @@ export async function recordCashDrawerTransaction(params: {
   supplierId?: string
   noteAr?: string
   createdBy: string
+  actor?: AuditActor
 }): Promise<CashDrawerTransaction> {
   const tx: CashDrawerTransaction = {
     id: generateId(),
@@ -27,6 +29,18 @@ export async function recordCashDrawerTransaction(params: {
     createdAt: Date.now()
   }
   await cacheDocs(COLLECTIONS.cashDrawerTransactions, [tx])
+  if (params.type === 'expense') {
+    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+      logAudit({
+        action: 'cash_out',
+        actorId: params.actor?.id ?? params.createdBy,
+        actorName: params.actor ? actorAuditName(params.actor) : params.createdBy,
+        targetId: tx.id,
+        targetType: 'cash',
+        detailAr: `Petty cash expense — amount ${Math.abs(params.amount).toFixed(2)} — reason: ${params.noteAr ?? '-'} — cash drawer impact ${params.amount.toFixed(2)}`
+      })
+    )
+  }
   return tx
 }
 

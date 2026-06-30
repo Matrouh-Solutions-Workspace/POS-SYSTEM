@@ -9,7 +9,6 @@ import {
   recordSupplierTransaction,
   updateSupplier
 } from '@renderer/features/suppliers/supplier-service'
-import { recordCashDrawerTransaction } from '@renderer/features/cash/cash-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { ConfirmDialog, FormModal, FormField } from '@renderer/components/ui'
 import { listIngredients, listInventoryBatches } from '@renderer/features/inventory/inventory-service'
@@ -102,19 +101,12 @@ export function SuppliersPage(): React.ReactElement {
       supplierId: txForm.supplierId,
       type: txForm.type,
       amount,
+      paymentMethod: 'cash',
+      paymentSource: 'cash_drawer',
       noteAr: txForm.noteAr || undefined,
       createdBy: user.id,
       actor: user
     })
-    if (txForm.type === 'payment' || txForm.type === 'settlement') {
-      await recordCashDrawerTransaction({
-        type: 'supplier_payment',
-        amount: -amount,
-        supplierId: txForm.supplierId,
-        noteAr: txForm.noteAr || 'دفع مورد',
-        createdBy: user.id
-      })
-    }
     setTxForm((f) => ({ ...f, amount: '', noteAr: '' }))
     setMessage('تم تسجيل حركة المورد')
     setTxFormOpen(false)
@@ -217,17 +209,21 @@ export function SuppliersPage(): React.ReactElement {
           <div className="table-scroll suppliers-page__table-scroll">
             <table className="data-table suppliers-page__table suppliers-page__transactions-table">
             <thead>
-              <tr><th>الوقت</th><th>المورد</th><th>نوع الحركة</th><th>المبلغ</th><th>ملاحظة</th></tr>
+              <tr><th>{'الوقت'}</th><th>{'المورد'}</th><th>{'نوع الحركة'}</th><th>{'المبلغ'}</th><th>{'المدفوع'}</th><th>{'المتبقي'}</th><th>{'طريقة الدفع'}</th><th>{'المستخدم'}</th><th>{'ملاحظة'}</th></tr>
             </thead>
             <tbody>
               {transactions.length === 0 ? (
-                <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-muted)' }}>لا توجد عمليات توريد بعد</td></tr>
+                <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--color-muted)' }}>لا توجد عمليات توريد بعد</td></tr>
               ) : transactions.map((tx) => (
                 <tr key={tx.id}>
                   <td>{new Date(tx.createdAt).toLocaleString('ar-EG')}</td>
                   <td>{suppliers.find((s) => s.id === tx.supplierId)?.nameAr ?? tx.supplierId}</td>
                   <td>{TX_TYPES.find((t) => t.value === tx.type)?.label ?? tx.type}</td>
                   <td>{tx.amount.toFixed(2)}</td>
+                  <td>{tx.paidAmount != null ? tx.paidAmount.toFixed(2) : '-'}</td>
+                  <td>{tx.remainingAmount != null ? tx.remainingAmount.toFixed(2) : '-'}</td>
+                  <td>{tx.paymentMethod ? `${tx.paymentMethod}${tx.paymentSource ? ` / ${tx.paymentSource}` : ''}` : '-'}</td>
+                  <td>{tx.paidByName ?? tx.createdByName ?? tx.createdBy}</td>
                   <td>{tx.noteAr ?? '-'}</td>
                 </tr>
               ))}

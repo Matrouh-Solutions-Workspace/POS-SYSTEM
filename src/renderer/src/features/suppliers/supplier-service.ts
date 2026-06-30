@@ -1,10 +1,10 @@
 /**
  * Suppliers service — SQLite primary database.
  */
-import type { Supplier, SupplierTransaction, SupplierTransactionType } from '@shared/types'
+import type { CashDrawerTransaction, Supplier, SupplierTransaction, SupplierTransactionType } from '@shared/types'
 import { COLLECTIONS } from '@shared/constants/collections'
 import { cacheDocs, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
-import { dbDelete } from '@renderer/lib/db/sqlite-db'
+import { dbBatch, dbDelete, type DbBatchOp } from '@renderer/lib/db/sqlite-db'
 import { generateId } from '@renderer/lib/utils/id'
 import { actorAuditName, describePatch, type AuditActor } from '@renderer/features/audit/audit-service'
 
@@ -95,24 +95,56 @@ export async function recordSupplierTransaction(params: {
   supplierId: string
   type: SupplierTransactionType
   amount: number
+  paymentMethod?: 'cash' | 'card' | 'bank' | 'other'
+  paymentSource?: 'cash_drawer' | 'external'
   noteAr?: string
   shiftId?: string
   createdBy: string
   actor?: AuditActor
 }): Promise<SupplierTransaction> {
+  const suppliers = await getCachedDocs<Supplier>(COLLECTIONS.suppliers)
+  const supplierName = suppliers.find((supplier) => supplier.id === params.supplierId)?.nameAr ?? params.supplierId
+  const currentBalance = await getSupplierBalance(params.supplierId)
+  const isPayment = params.type === 'payment' || params.type === 'debt_decrease' || params.type === 'settlement'
+  if (isPayment && params.amount > currentBalance + 0.001) {
+    throw new Error(`لا يمكن دفع مبلغ أكبر من مديونية المورد الحالية (${currentBalance.toFixed(2)})`)
+  }
+  const remainingAmount = isPayment
+    ? Math.max(0, Math.round((currentBalance - params.amount) * 100) / 100)
+    : Math.round((currentBalance + params.amount) * 100) / 100
+  const actorName = params.actor ? actorAuditName(params.actor) : params.createdBy
   const tx: SupplierTransaction = {
     id: generateId(),
     supplierId: params.supplierId,
     type: params.type,
     amount: params.amount,
+    paidAmount: isPayment ? params.amount : undefined,
+    remainingAmount,
+    paymentMethod: isPayment ? (params.paymentMethod ?? 'cash') : undefined,
+    paymentSource: isPayment ? (params.paymentSource ?? 'cash_drawer') : undefined,
     noteAr: params.noteAr,
     shiftId: params.shiftId,
     createdBy: params.createdBy,
+    createdByName: actorName,
+    paidBy: isPayment ? params.createdBy : undefined,
+    paidByName: isPayment ? actorName : undefined,
     createdAt: Date.now()
   }
-  await cacheDocs(COLLECTIONS.supplierTransactions, [tx])
-  const suppliers = await getCachedDocs<Supplier>(COLLECTIONS.suppliers)
-  const supplierName = suppliers.find((supplier) => supplier.id === params.supplierId)?.nameAr ?? params.supplierId
+  const ops: DbBatchOp[] = [{ collection: COLLECTIONS.supplierTransactions, id: tx.id, data: tx, op: 'set' }]
+  if (isPayment && tx.paymentSource === 'cash_drawer' && tx.paymentMethod === 'cash') {
+    const drawerTx: CashDrawerTransaction = {
+      id: generateId(),
+      type: 'supplier_payment',
+      amount: -Math.abs(params.amount),
+      shiftId: params.shiftId,
+      supplierId: params.supplierId,
+      noteAr: params.noteAr || 'دفع مورد',
+      createdBy: params.createdBy,
+      createdAt: tx.createdAt
+    }
+    ops.push({ collection: COLLECTIONS.cashDrawerTransactions, id: drawerTx.id, data: drawerTx, op: 'set' })
+  }
+  await dbBatch(ops)
   audit(params.actor, {
     action: 'supplier_transaction_recorded',
     actorId: params.actor?.id ?? params.createdBy,
@@ -121,6 +153,16 @@ export async function recordSupplierTransaction(params: {
     targetType: 'supplier',
     detailAr: `حركة مورد — ${supplierName} — ${SUPPLIER_TX_LABELS[params.type]} — المبلغ ${params.amount}${params.noteAr ? ` — ملاحظة: ${params.noteAr}` : ''}`
   })
+  if (isPayment) {
+    audit(params.actor, {
+      action: 'supplier_transaction_recorded',
+      actorId: params.actor?.id ?? params.createdBy,
+      actorName,
+      targetId: tx.id,
+      targetType: 'supplier',
+      detailAr: `${actorName} paid ${params.amount.toFixed(2)} EGP to supplier ${supplierName} from ${tx.paymentSource === 'cash_drawer' ? 'cash drawer' : 'external source'} — remaining ${remainingAmount.toFixed(2)} — method ${tx.paymentMethod ?? 'cash'}`
+    })
+  }
   return tx
 }
 

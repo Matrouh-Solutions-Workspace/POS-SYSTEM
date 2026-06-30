@@ -7,7 +7,20 @@ import { MdSave } from 'react-icons/md'
 
 export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSettings, onSettingsSaved: (s: AppSettings) => void }): React.ReactElement {
   const user = useAuthStore((s) => s.user)!
-  const [receiptForm, setReceiptForm] = useState({ restaurantNameAr: '', currencySymbol: '', phoneNumber: '', receiptFooterAr: '', taxRate: '', serviceRate: '', defaultDeliveryFee: '', maxCashierDiscountPct: '', cashRoundingEnabled: false, maxCashRoundingDifference: '5' })
+  const [receiptForm, setReceiptForm] = useState({
+    restaurantNameAr: '',
+    currencySymbol: '',
+    phoneNumber: '',
+    receiptFooterAr: '',
+    taxRate: '',
+    taxApplicationMode: 'all' as 'all' | 'selected',
+    taxOrderTypes: ['takeaway', 'dine_in', 'delivery'] as Array<'takeaway' | 'dine_in' | 'delivery'>,
+    serviceRate: '',
+    defaultDeliveryFee: '',
+    maxCashierDiscountPct: '',
+    cashRoundingEnabled: false,
+    maxCashRoundingDifference: '5'
+  })
   const [receiptSaving, setReceiptSaving] = useState(false)
   const [receiptMsg, setReceiptMsg] = useState<string | null>(null)
 
@@ -18,6 +31,8 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
       phoneNumber: settings.phoneNumber ?? '',
       receiptFooterAr: settings.receiptFooterAr ?? '',
       taxRate: settings.taxRate != null && settings.taxRate > 0 ? String(settings.taxRate) : '',
+      taxApplicationMode: settings.taxApplicationMode ?? 'all',
+      taxOrderTypes: settings.taxOrderTypes ?? ['takeaway', 'dine_in', 'delivery'],
       serviceRate: settings.serviceRate != null && settings.serviceRate > 0 ? String(settings.serviceRate) : '',
       defaultDeliveryFee: settings.defaultDeliveryFee != null && settings.defaultDeliveryFee > 0 ? String(settings.defaultDeliveryFee) : '',
       maxCashierDiscountPct: settings.maxCashierDiscountPct != null && settings.maxCashierDiscountPct < 100 ? String(settings.maxCashierDiscountPct) : '',
@@ -37,6 +52,8 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
         phoneNumber: receiptForm.phoneNumber.trim() || undefined,
         receiptFooterAr: receiptForm.receiptFooterAr.trim() || undefined,
         taxRate: receiptForm.taxRate ? Number(receiptForm.taxRate) : 0,
+        taxApplicationMode: receiptForm.taxApplicationMode,
+        taxOrderTypes: receiptForm.taxApplicationMode === 'selected' ? receiptForm.taxOrderTypes : ['takeaway', 'dine_in', 'delivery'],
         serviceRate: receiptForm.serviceRate ? Number(receiptForm.serviceRate) : 0,
         defaultDeliveryFee: receiptForm.defaultDeliveryFee ? Number(receiptForm.defaultDeliveryFee) : 0,
         maxCashierDiscountPct: receiptForm.maxCashierDiscountPct ? Number(receiptForm.maxCashierDiscountPct) : undefined,
@@ -48,6 +65,15 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
       setReceiptMsg('تم حفظ إعدادات الإيصال')
     } catch { setReceiptMsg('فشل الحفظ') }
     finally { setReceiptSaving(false) }
+  }
+
+  function toggleTaxOrderType(type: 'takeaway' | 'dine_in' | 'delivery'): void {
+    setReceiptForm((form) => ({
+      ...form,
+      taxOrderTypes: form.taxOrderTypes.includes(type)
+        ? form.taxOrderTypes.filter((item) => item !== type)
+        : [...form.taxOrderTypes, type]
+    }))
   }
 
   return (
@@ -76,6 +102,23 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
             <span>ضريبة القيمة المضافة % (0 = بدون ضريبة)</span>
             <input type="number" min="0" max="100" step="0.1" value={receiptForm.taxRate} onChange={(e) => setReceiptForm((f) => ({ ...f, taxRate: e.target.value }))} placeholder="0" />
           </label>
+          <label className="field">
+            <span>تطبيق الضريبة</span>
+            <select value={receiptForm.taxApplicationMode} onChange={(e) => setReceiptForm((f) => ({ ...f, taxApplicationMode: e.target.value as 'all' | 'selected' }))}>
+              <option value="all">كل أنواع الطلبات تخضع للضريبة</option>
+              <option value="selected">تحديد أنواع الطلبات الخاضعة للضريبة</option>
+            </select>
+          </label>
+            {receiptForm.taxApplicationMode === 'selected' && (
+            <div className="field settings-form-grid__full">
+              <span>أنواع الطلبات الخاضعة للضريبة</span>
+              <div className="inline-options">
+                <label><input type="checkbox" checked={receiptForm.taxOrderTypes.includes('dine_in')} onChange={() => toggleTaxOrderType('dine_in')} /> صالة</label>
+                <label><input type="checkbox" checked={receiptForm.taxOrderTypes.includes('takeaway')} onChange={() => toggleTaxOrderType('takeaway')} /> تيك أواي</label>
+                <label><input type="checkbox" checked={receiptForm.taxOrderTypes.includes('delivery')} onChange={() => toggleTaxOrderType('delivery')} /> دليفري</label>
+              </div>
+            </div>
+            )}
           <label className="field">
             <span>نسبة الخدمة % (0 = بدون خدمة)</span>
             <input type="number" min="0" max="100" step="0.1" value={receiptForm.serviceRate} onChange={(e) => setReceiptForm((f) => ({ ...f, serviceRate: e.target.value }))} placeholder="0" />
