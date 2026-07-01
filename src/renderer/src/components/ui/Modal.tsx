@@ -5,6 +5,7 @@
  * Provides a consistent header (title + close), body, and optional footer.
  */
 import { useEffect, useRef, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 export interface ModalProps {
   /** Whether the modal is visible */
@@ -58,7 +59,7 @@ export function Modal({
 
   if (!open) return null
 
-  return (
+  const modal = (
     <div
       className="modal-overlay"
       onClick={persistent ? undefined : onClose}
@@ -93,4 +94,6 @@ export function Modal({
       </div>
     </div>
   )
+
+  return typeof document === 'undefined' ? modal : createPortal(modal, document.body)
 }
