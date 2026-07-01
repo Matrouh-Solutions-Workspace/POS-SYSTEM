@@ -114,7 +114,7 @@ export function PosPage(): React.ReactElement {
   const [unavailableItems, setUnavailableItems] = useState<Map<string, string>>(new Map())
   const [lowStockItems, setLowStockItems] = useState<Set<string>>(new Set())
   const [posLogoUrl, setPosLogoUrl] = useState('/image.png')
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(ALL_CATEGORY_ID)
   const [search, setSearch] = useState('')
 
   // Pos Store

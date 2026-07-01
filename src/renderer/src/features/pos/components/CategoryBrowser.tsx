@@ -15,13 +15,27 @@ export function CategoryBrowser({
   allCategoryId?: string
   onSelectCategory: (id: string | null) => void
 }): React.ReactElement {
-  const categoriesById = new Map(categories.map((category) => [category.id, category]))
-  const selected = selectedCategory && selectedCategory !== allCategoryId
+  const allCategory: MenuCategory | undefined = allCategoryId
+    ? {
+      id: allCategoryId,
+      nameAr: 'الكل',
+      sortOrder: -1,
+      active: true,
+      createdAt: 0,
+      updatedAt: 0
+    }
+    : undefined
+  const allCategories = allCategory ? [allCategory, ...categories] : categories
+  const categoriesById = new Map(allCategories.map((category) => [category.id, category]))
+  const selected = selectedCategory
     ? categoriesById.get(selectedCategory)
     : undefined
-  const roots = categories.filter(
+  const realRoots = categories.filter(
     (category) => !category.parentId || !categoriesById.has(category.parentId)
   )
+  const roots = allCategory ? [allCategory, ...realRoots] : realRoots
+  const visibleCategoryChildren = new Map(categoryChildren)
+  if (allCategory) visibleCategoryChildren.set(allCategory.id, realRoots)
   const breadcrumb: MenuCategory[] = []
   let cursor = selected
 
@@ -31,9 +45,10 @@ export function CategoryBrowser({
   }
 
   const countItemsInCategory = (categoryId: string): number => {
+    if (categoryId === allCategoryId) return items.length
     const visibleIds = new Set<string>([categoryId])
     const collectChildren = (id: string): void => {
-      for (const child of categoryChildren.get(id) ?? []) {
+      for (const child of visibleCategoryChildren.get(id) ?? []) {
         visibleIds.add(child.id)
         collectChildren(child.id)
       }
@@ -52,18 +67,8 @@ export function CategoryBrowser({
           </div>
         </div>
         <div className="pos-category-grid">
-          {allCategoryId && (
-            <button
-              type="button"
-              className="pos-category-card pos-category-card--all"
-              onClick={() => onSelectCategory(allCategoryId)}
-            >
-              <span className="pos-category-card__name">الكل</span>
-              <span className="pos-category-card__meta">{items.length} صنف</span>
-            </button>
-          )}
           {roots.map((category) => {
-            const childrenCount = categoryChildren.get(category.id)?.length ?? 0
+            const childrenCount = visibleCategoryChildren.get(category.id)?.length ?? 0
             const itemCount = countItemsInCategory(category.id)
             return (
               <button
@@ -84,7 +89,8 @@ export function CategoryBrowser({
     )
   }
 
-  const selectedChildren = categoryChildren.get(selected.id) ?? []
+  const selectedChildren = visibleCategoryChildren.get(selected.id) ?? []
+  const currentCategoryLabel = selected.id === allCategoryId ? 'كل الأصناف' : `كل ${selected.nameAr}`
 
   return (
     <div className="pos-category-browser">
@@ -127,7 +133,7 @@ export function CategoryBrowser({
             className="pos-cat-btn pos-cat-btn--current active"
             onClick={() => onSelectCategory(selected.id)}
           >
-            كل {selected.nameAr}
+            {currentCategoryLabel}
           </button>
           {selectedChildren.map((category) => (
             <button
