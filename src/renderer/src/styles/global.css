@@ -4967,7 +4967,7 @@ select.inline-edit-input {
 }
 
 .table-scroll .suppliers-page__transactions-table {
-  min-width: 1080px;
+  min-width: 1320px;
 }
 
 .table-scroll .suppliers-page__returns-table {
@@ -4981,7 +4981,8 @@ select.inline-edit-input {
 
 .suppliers-page__table th,
 .suppliers-page__table td {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .suppliers-page__table th:last-child,
@@ -4997,7 +4998,10 @@ select.inline-edit-input {
 
 .suppliers-page__transactions-table th:nth-child(2),
 .suppliers-page__transactions-table td:nth-child(2) {
-  width: 24%;
+  width: 220px;
+  min-width: 220px;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .suppliers-page__transactions-table th:nth-child(3),
