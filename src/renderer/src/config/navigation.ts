@@ -80,7 +80,7 @@ export const MANAGER_NAV: NavItem[] = [
   { to: '/manager/cashiers',        label: 'الحسابات',      hint: 'المستخدمون والصلاحيات',      icon: MdPeople,       iconKey: 'MdPeople',       permission: 'manage_accounts' },
   { to: '/manager/shifts',          label: 'الشيفتات',      hint: 'مراجعة وتقفيل وأرشفة',       icon: MdWorkHistory,  iconKey: 'MdWorkHistory',  permission: 'manage_shifts' },
   { to: '/manager/suppliers',       label: 'الموردين',      hint: 'حسابات وتوريدات الموردين',   icon: MdPersonSearch, iconKey: 'MdPersonSearch', permission: 'manage_suppliers' },
-  { to: '/manager/contacts',        label: 'عملاء الدليفري', hint: 'أرقام وعناوين عملاء التوصيل', icon: MdPersonSearch, iconKey: 'MdPersonSearch', permission: 'manage_settings' },
+  { to: '/manager/contacts',        label: 'إدارة العملاء', hint: 'أرقام وعناوين عملاء التوصيل', icon: MdPersonSearch, iconKey: 'MdPersonSearch', permission: 'manage_settings' },
   { to: '/manager/cashier-history', label: 'سجل الكاشيرات', hint: 'أورردرات الكاشير اليومية',   icon: MdHistory,      iconKey: 'MdHistory',      anyPermission: ['order_history', 'view_reports'] },
   { to: '/manager/reports',         label: 'التقارير',      hint: 'إيرادات وملخصات',            icon: MdBarChart,     iconKey: 'MdBarChart',     permission: 'view_reports' },
   { to: '/manager/audit',           label: 'سجل الأحداث',   hint: 'مراقبة وتدقيق العمليات',     icon: MdSecurity,     iconKey: 'MdSecurity',     permission: 'manage_settings' },

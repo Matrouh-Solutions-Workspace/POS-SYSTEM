@@ -1090,11 +1090,8 @@ export function PosPage(): React.ReactElement {
           onClearContact={() => setContactId(undefined)}
           onCreateContact={createContactFromCheckout}
           customerName={customerName}
-          setCustomerName={setCustomerName}
           customerPhone={customerPhone}
-          setCustomerPhone={setCustomerPhone}
           customerAddress={customerAddress}
-          setCustomerAddress={setCustomerAddress}
           deliveryFee={deliveryFee}
           setDeliveryFee={setDeliveryFee}
           subtotal={subtotal}

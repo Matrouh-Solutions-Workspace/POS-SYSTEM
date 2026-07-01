@@ -39,11 +39,8 @@ export interface CheckoutModalProps {
   onClearContact: () => void
   onCreateContact: (form: { name: string; phone: string; address?: string; notes?: string }) => Promise<DeliveryContact>
   customerName: string
-  setCustomerName: (value: string) => void
   customerPhone: string
-  setCustomerPhone: (value: string) => void
   customerAddress: string
-  setCustomerAddress: (value: string) => void
   deliveryFee: string
   setDeliveryFee: (value: string) => void
   subtotal: number
@@ -95,11 +92,8 @@ export function CheckoutModal({
   onClearContact,
   onCreateContact,
   customerName,
-  setCustomerName,
   customerPhone,
-  setCustomerPhone,
   customerAddress,
-  setCustomerAddress,
   deliveryFee,
   setDeliveryFee,
   subtotal,
@@ -283,21 +277,29 @@ export function CheckoutModal({
         {orderType === 'delivery' && (
           <div className="checkout-modal__section">
             <div className="delivery-contact-picker">
-              <label className="field">
-                <span>بحث في العملاء</span>
-                <input
-                  value={contactSearch}
-                  onChange={(event) => {
-                    setContactSearch(event.target.value)
-                    if (selectedContactId) onClearContact()
-                  }}
-                  placeholder="ابحث بالاسم أو رقم الهاتف"
-                  dir="auto"
-                />
-              </label>
+              <div className="delivery-contact-picker__search">
+                <label className="field m-0">
+                  <span>بحث في العملاء</span>
+                  <input
+                    value={contactSearch}
+                    onChange={(event) => {
+                      setContactSearch(event.target.value)
+                      if (selectedContactId) onClearContact()
+                    }}
+                    placeholder="ابحث بالاسم أو رقم الهاتف"
+                    dir="auto"
+                  />
+                </label>
+                <button type="button" className="btn btn--secondary btn--sm" onClick={startCreateContact}>
+                  إضافة عميل جديد
+                </button>
+              </div>
               {selectedContact && (
                 <div className="delivery-contact-picker__selected">
-                  <span>العميل المحدد: {selectedContact.name} - {selectedContact.phone}</span>
+                  <span>
+                    العميل المحدد: {selectedContact.name} - {selectedContact.phone}
+                    {selectedContact.address ? ` - ${selectedContact.address}` : ''}
+                  </span>
                   <button type="button" className="btn btn--secondary btn--sm" onClick={onClearContact}>إلغاء الاختيار</button>
                 </div>
               )}
@@ -313,9 +315,7 @@ export function CheckoutModal({
                 </div>
               )}
               {contactQuery && deliveryContacts.length === 0 && !creatingContact && (
-                <button type="button" className="btn btn--secondary btn--sm" onClick={startCreateContact}>
-                  {searchLooksLikePhone ? `إنشاء عميل برقم ${contactQuery}` : `إنشاء عميل باسم ${contactQuery}`}
-                </button>
+                <p className="modal-hint m-0">لا يوجد عميل مطابق. استخدم زر إضافة عميل جديد لحفظ بياناته.</p>
               )}
               {creatingContact && (
                 <div className="delivery-contact-picker__create">
@@ -343,19 +343,6 @@ export function CheckoutModal({
                 </div>
               )}
             </div>
-            <p className="checkout-modal__label">بيانات التوصيل</p>
-            <label className="field">
-              <span>اسم العميل</span>
-              <input value={customerName} onChange={(event) => { setCustomerName(event.target.value); onClearContact() }} placeholder="اسم العميل" />
-            </label>
-            <label className="field">
-              <span>رقم الهاتف</span>
-              <input value={customerPhone} onChange={(event) => { setCustomerPhone(event.target.value); onClearContact() }} placeholder="01xxxxxxxxx" dir="ltr" />
-            </label>
-            <label className="field">
-              <span>العنوان</span>
-              <input value={customerAddress} onChange={(event) => { setCustomerAddress(event.target.value); onClearContact() }} placeholder="العنوان التفصيلي" />
-            </label>
             <label className="field">
               <span>رسوم التوصيل</span>
               <input type="number" min="0" step="0.01" value={deliveryFee} onChange={(event) => setDeliveryFee(event.target.value)} placeholder="0.00" />
