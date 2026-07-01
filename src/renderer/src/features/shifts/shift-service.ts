@@ -69,6 +69,7 @@ export interface ShiftClosurePreview {
   shift: Shift
   pendingOrders: Order[]
   incompletePaymentOrders: Order[]
+  unpaidOrdersTotal: number
   openingCash: number
   cashSales: number
   cardSales: number
@@ -260,6 +261,11 @@ export async function getShiftClosurePreview(shift: Shift): Promise<ShiftClosure
       .reduce((sum, payment) => sum + payment.amount, 0)
     return paid + 0.01 < order.total
   })
+  const unpaidOrdersById = new Map<string, Order>()
+  for (const order of pendingOrders) unpaidOrdersById.set(order.id, order)
+  for (const order of incompletePaymentOrders) unpaidOrdersById.set(order.id, order)
+  const unpaidOrdersTotal = Array.from(unpaidOrdersById.values())
+    .reduce((sum, order) => sum + Math.max(0, order.total), 0)
   const shiftPayments = payments.filter((payment) => orderIds.has(payment.orderId))
   const netCashSales = shiftPayments
     .filter((payment) => payment.method === 'cash' && payment.amount > 0)
@@ -344,6 +350,7 @@ export async function getShiftClosurePreview(shift: Shift): Promise<ShiftClosure
     shift,
     pendingOrders,
     incompletePaymentOrders,
+    unpaidOrdersTotal,
     openingCash,
     cashSales,
     cardSales,

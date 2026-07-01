@@ -97,6 +97,7 @@ export function CloseShiftModal({
           <div className="stat-card"><div className="stat-card__label">مدفوعات الموردين</div><div className="stat-card__value">{preview.supplierPaymentsTotal.toFixed(2)}</div></div>
           <div className="stat-card"><div className="stat-card__label">مصروفات نثرية</div><div className="stat-card__value">{preview.pettyCashExpensesTotal.toFixed(2)}</div></div>
           <div className="stat-card"><div className="stat-card__label">تسويات التقريب</div><div className="stat-card__value">{preview.roundingAdjustments.toFixed(2)}</div></div>
+          <div className="stat-card"><div className="stat-card__label">إجمالي الطلبات غير المدفوعة</div><div className="stat-card__value">{preview.unpaidOrdersTotal.toFixed(2)}</div></div>
           <div className="stat-card"><div className="stat-card__label">الكاش المتوقع</div><div className="stat-card__value">{preview.expectedCash.toFixed(2)}</div></div>
         </div>
 
