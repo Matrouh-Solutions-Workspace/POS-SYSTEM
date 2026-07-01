@@ -4935,6 +4935,10 @@ select.inline-edit-input {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.contacts-page {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .suppliers-page > .card {
   margin-bottom: 0;
 }

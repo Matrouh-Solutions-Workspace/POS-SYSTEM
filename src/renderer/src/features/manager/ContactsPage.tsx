@@ -99,10 +99,10 @@ export function ContactsPage(): React.ReactElement {
     <div className="settings-page contacts-page">
       {message && <p className={`form-message form-message--${messageKind}`}>{message}</p>}
 
-      <div className="card">
+      <div className="card settings-page__full">
         <div className="page-toolbar section-action-header mb-16">
           <div>
-            <h2 className="card__title m-0">عملاء الدليفري ({contacts.length})</h2>
+            <h2 className="card__title m-0">إدارة العملاء</h2>
             <p className="muted m-0">إدارة أرقام وعناوين العملاء لاستخدامها بسرعة في طلبات الدليفري.</p>
           </div>
           <button type="button" className="btn btn--primary" onClick={openCreate}>+ إضافة عميل</button>
