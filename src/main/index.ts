@@ -22,6 +22,23 @@ const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
 let mainWindow: BrowserWindow | null = null
 let backupScheduler: ReturnType<typeof setInterval> | null = null
 
+function enableWindowsStartup(): void {
+  if (process.platform !== 'win32' || isDev || !app.isPackaged) return
+
+  try {
+    const path = process.execPath
+    const settings = app.getLoginItemSettings({ path })
+    if (!settings.openAtLogin) {
+      app.setLoginItemSettings({
+        openAtLogin: true,
+        path
+      })
+    }
+  } catch (error) {
+    console.warn('[startup]', error)
+  }
+}
+
 function toggleDevTools(win: BrowserWindow | null = mainWindow): void {
   if (!isDev || !win) return
   if (win.webContents.isDevToolsOpened()) {
@@ -388,6 +405,7 @@ app.whenReady().then(() => {
   if (!isDev) {
     Menu.setApplicationMenu(null)
   }
+  enableWindowsStartup()
 
   // Init updater in both dev and prod
   // (forceDevUpdateConfig handles the dev case via dev-app-update.yml)

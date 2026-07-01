@@ -11,32 +11,17 @@ import { dbDelete } from '@renderer/lib/db/sqlite-db'
 import { actorAuditName, describePatch, type AuditActor } from '@renderer/features/audit/audit-service'
 
 // ---------------------------------------------------------------------------
-// Session persistence (localStorage)
+// Session guard
 // ---------------------------------------------------------------------------
 
 const SESSION_KEY = 'abdokofta.session.v2'
 
-interface StoredSession {
-  userId: string
-  updatedAt: number
-}
-
-function readSession(): StoredSession | null {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY)
-    if (!raw) return null
-    return JSON.parse(raw) as StoredSession
-  } catch {
-    return null
-  }
-}
-
-function writeSession(userId: string): void {
-  localStorage.setItem(SESSION_KEY, JSON.stringify({ userId, updatedAt: Date.now() }))
-}
-
 function clearSession(): void {
   localStorage.removeItem(SESSION_KEY)
+}
+
+export function clearSavedSession(): void {
+  clearSession()
 }
 
 function normalizeUsername(username: string): string {
@@ -79,21 +64,6 @@ export async function devResetManagerLogin(): Promise<{ username: string; passwo
   return { username: result.username, password: result.password }
 }
 
-/** Restore session from localStorage → look up user in SQLite */
-export async function restoreSessionFromLocal(): Promise<AppUser | null> {
-  const session = readSession()
-  if (!session) return null
-  const user = await getCachedDoc<AppUser>(COLLECTIONS.users, session.userId)
-  if (!user?.active) return null
-  try {
-    await enforceCashierWorkShift(user)
-  } catch {
-    clearSession()
-    return null
-  }
-  return user
-}
-
 /** Login with username + password from the local credential store. */
 export async function loginAndLoadUser(username: string, password: string): Promise<AppUser> {
   const normalized = normalizeUsername(username)
@@ -101,9 +71,9 @@ export async function loginAndLoadUser(username: string, password: string): Prom
   if (mainAuth?.ok && mainAuth.user) {
     const user = mainAuth.user as AppUser
     await enforceCashierWorkShift(user)
-    writeSession(user.id)
+    clearSession()
     void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
-      logAudit({ action: 'login', actorId: user.id, actorName: actorAuditName(user), detailAr: `ØªØ³Ø¬ÙŠÙ„ Ø¯Ø®ÙˆÙ„: ${user.displayName}` })
+      logAudit({ action: 'login', actorId: user.id, actorName: actorAuditName(user), detailAr: `تسجيل دخول: ${user.displayName}` })
     )
     return user
   }
@@ -123,7 +93,7 @@ export async function loginAndLoadUser(username: string, password: string): Prom
     throw new Error('الحساب غير نشط')
   }
   await enforceCashierWorkShift(user)
-  writeSession(user.id)
+  clearSession()
   // Audit: login
   void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
     logAudit({ action: 'login', actorId: user.id, actorName: actorAuditName(user), detailAr: `تسجيل دخول: ${user.displayName}` })
@@ -170,7 +140,7 @@ export async function createFirstOfflineManager(params: {
   }
   await cacheDocs(COLLECTIONS.users, [user])
   await storeLocalCredential(user, params.password)
-  writeSession(user.id)
+  clearSession()
   return user
 }
 

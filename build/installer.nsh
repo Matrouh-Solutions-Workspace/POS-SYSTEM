@@ -44,6 +44,12 @@ FunctionEnd
     RMDir /r "$APPDATA\SHIFT POS"
     RMDir /r "$APPDATA\abdokofta-pos"
   ${EndIf}
+
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "SHIFT POS" '"$INSTDIR\SHIFT POS.exe"'
 !macroend
 
 !endif
+
+!macro customUnInstall
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "SHIFT POS"
+!macroend

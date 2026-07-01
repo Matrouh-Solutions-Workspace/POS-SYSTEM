@@ -1,10 +1,10 @@
 /**
- * Restores the user session from SQLite on app load.
- * The session is stored locally.
+ * Forces a fresh login on app load.
+ * Accounts stay stored, but the current user session is not resumed.
  */
 import { useEffect } from 'react'
 import { useAuthStore } from './auth-store'
-import { restoreSessionFromLocal } from './auth-service'
+import { clearSavedSession } from './auth-service'
 
 export function useAuthBootstrap(): void {
   const setUser = useAuthStore((s) => s.setUser)
@@ -12,17 +12,8 @@ export function useAuthBootstrap(): void {
 
   useEffect(() => {
     setLoading(true)
-
-    restoreSessionFromLocal()
-      .then((user) => {
-        setUser(user)
-      })
-      .catch((e) => {
-        console.error('[auth bootstrap] session restore failed:', e)
-        setUser(null)
-      })
-      .finally(() => {
-        setLoading(false)
-      })
+    clearSavedSession()
+    setUser(null)
+    setLoading(false)
   }, [setUser, setLoading])
 }
