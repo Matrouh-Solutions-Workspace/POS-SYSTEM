@@ -268,7 +268,7 @@ export function CheckoutModal({
             </div>
             {discountOverLimit && (
               <div className="checkout-modal__warning">
-                Maximum allowed discount is {maxDiscountPct}%
+                الخصم يتجاوز الحد المسموح ({maxDiscountPct}%)
               </div>
             )}
           </div>

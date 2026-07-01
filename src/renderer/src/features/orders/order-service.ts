@@ -206,14 +206,16 @@ async function enforceDiscountPermission(params: {
     throw new Error('الخصومات غير مفعلة من إعدادات المدير')
   }
   const cashier = await getCachedDoc<AppUser>(COLLECTIONS.users, params.cashierId)
-  if (!cashier || cashier.role !== 'cashier') return
-  const maxPct = params.settings.maxCashierDiscountPct
-  if (maxPct == null || maxPct >= 100) return
+  if (!cashier) throw new Error('تعذر التحقق من صلاحية الخصم للمستخدم الحالي')
+  if (cashier.role === 'manager') return
+  const maxPct = Number(params.settings.maxCashierDiscountPct)
+  if (!Number.isFinite(maxPct) || maxPct >= 100) return
+  const effectiveMaxPct = Math.max(0, maxPct)
   const appliedPct = params.discountType === 'percent'
     ? params.discountValue
     : params.subtotal > 0 ? (params.discountAmount / params.subtotal) * 100 : 0
-  if (appliedPct > maxPct + 0.001) {
-    throw new Error(`الخصم يتجاوز الحد المسموح لهذا الكاشير (${maxPct}%)`)
+  if (appliedPct > effectiveMaxPct + 0.001) {
+    throw new Error(`الخصم يتجاوز الحد المسموح (${effectiveMaxPct}%)`)
   }
 }
 

@@ -228,6 +228,7 @@ export function PosPage(): React.ReactElement {
     setDeliveryContacts(contacts)
     setPosLogoUrl(settings.receiptLogoDataUrl || settings.receiptLogoProcessedDataUrl || '/image.png')
     setPosSettings(settings)
+    setMaxDiscountPct(settings.maxCashierDiscountPct)
     setRoundingAccess(access)
     if (diningTables.length > 0) setSelectedTableId((prev) => prev || diningTables[0]!.id)
 
@@ -347,11 +348,15 @@ export function PosPage(): React.ReactElement {
   const cashInsufficient = checkoutMethod === 'cash' && cashReceived.trim() !== '' && cashReceivedNum < checkoutTotal
 
   // REQ-6: discount over-limit check
-  const isDiscountLimited = discountsEnabled && user.role === 'cashier' && maxDiscountPct != null && maxDiscountPct < 100
+  const configuredDiscountLimitPct = maxDiscountPct == null ? undefined : Number(maxDiscountPct)
+  const discountLimitPct = configuredDiscountLimitPct != null && Number.isFinite(configuredDiscountLimitPct)
+    ? Math.max(0, configuredDiscountLimitPct)
+    : undefined
+  const isDiscountLimited = discountsEnabled && user.role !== 'manager' && discountLimitPct != null && discountLimitPct < 100
   const appliedDiscountPct = discountType === 'percent'
     ? Number(discountValue) || 0
     : subtotal > 0 ? (discountAmt / subtotal) * 100 : 0
-  const discountOverLimit = isDiscountLimited && appliedDiscountPct > (maxDiscountPct ?? 100)
+  const discountOverLimit = isDiscountLimited && appliedDiscountPct > (discountLimitPct ?? 100)
 
   const occupiedTableIds = useMemo(
     () => new Set(unpaidOrders.map((o) => o.tableId).filter(Boolean) as string[]),
@@ -575,7 +580,7 @@ export function PosPage(): React.ReactElement {
 
     // REQ-6: enforce discount limit for cashiers
     if (discountOverLimit) {
-      setMessage(`Maximum allowed discount is ${maxDiscountPct}%`)
+      setMessage(`الخصم يتجاوز الحد المسموح (${discountLimitPct}%)`)
       return
     }
 
@@ -646,7 +651,7 @@ export function PosPage(): React.ReactElement {
     }
 
     if (discountOverLimit) {
-      setMessage(`Maximum allowed discount is ${maxDiscountPct}%`)
+      setMessage(`الخصم يتجاوز الحد المسموح (${discountLimitPct}%)`)
       return
     }
 
@@ -1081,7 +1086,7 @@ export function PosPage(): React.ReactElement {
           setDiscountValue={setDiscountValue}
           discountsEnabled={discountsEnabled}
           discountOverLimit={discountOverLimit}
-          maxDiscountPct={maxDiscountPct}
+          maxDiscountPct={discountLimitPct}
           deliveryContacts={contactSearchResults}
           contactSearch={contactSearch}
           setContactSearch={setContactSearch}
@@ -1306,7 +1311,7 @@ export function PosPage(): React.ReactElement {
                   color: 'var(--color-danger)',
                   fontWeight: 700
                 }}>
-                  ⚠️ الخصم يتجاوز الحد المسموح به ({maxDiscountPct}%). يتطلب موافقة المدير.
+                  ⚠️ الخصم يتجاوز الحد المسموح به ({discountLimitPct}%).
                 </div>
               )}
             </div>
