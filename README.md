@@ -1,225 +1,277 @@
-# POS MVP Launch Assessment
+﻿# POS MVP Launch Assessment
 
-## Current PR: Delivery contacts management and customer lookup
+Assessment date: 2026-07-01
+Product version reviewed: 2.2.6
+Scope: first real-world MVP launch in a single restaurant or cafe, primarily Windows desktop, local SQLite, optional LAN master/side mode.
 
-### Completed
+This assessment is based on the current codebase shape and implemented modules, not on previous README notes.
 
-- Added a SQLite-backed `delivery_contacts` collection for saved delivery customers.
-- Added phone/name search in the delivery checkout flow, with fast selection that fills customer name, phone, and address.
-- Added "create new contact" from an empty delivery search while preserving the typed phone number or name.
-- Stored `contactId` plus customer name/phone/address snapshots on delivery orders.
-- Added a manager Contacts page for searching, adding, editing, viewing, and deleting delivery customers.
-- Added audit log support for contact creation, updates, and deletion.
+## Executive Summary
 
-### Remaining manual validation
+The system is close to a functional restaurant MVP, but it is not yet ready to install in a real venue without a controlled pilot.
 
-- Test delivery checkout on a real cashier terminal with phone-first search.
-- Confirm duplicate phone handling against the restaurant's expected customer data format.
-- Confirm deleted contacts do not affect old delivery order snapshots.
+Most core workflows exist: cashier sales, dine-in, delivery contacts, order history, payment tracking, shifts, cash drawer activity, inventory basics, suppliers, reports, printing configuration, audit logs, licensing, backups, and LAN master/side mode.
 
-## Previous PR: Shift, payment, discount, rounding, and POS UX fixes
+The remaining risk is not missing features as much as launch reliability: Arabic text corruption in source-visible strings, insufficient real-device validation, weak relational integrity because most business data is stored as JSON documents, and business logic spread through renderer services.
 
-### Completed
+Recommended MVP status: internal pilot ready after blockers are fixed, first paying customer ready after one full restaurant-day trial.
 
-- Added configurable automatic cash rounding to the nearest manager-selected cash step, with signed rounding differences for rounding down or up.
-- Kept cash rounding server-side controlled: POS submits the system-calculated total only, and order/payment records store the original total, final total, and adjustment.
-- Updated receipts, checkout, order history cash payment, refunds, cancellations, and shift reconciliation to handle signed rounding correctly.
-- Added manager/supervisor shift-close override flow for pending or incomplete orders, with a required override reason stored on the closure record.
-- Logged manager/supervisor discount overrides when the applied discount exceeds the cashier discount limit.
-- Added an "All" POS category entry so cashiers can show all active items without drilling into a category first.
-- Improved cashier inventory notifications with lower floating placement, auto-dismiss, and manual close.
+## MVP Readiness Score
 
-### Remaining manual validation
+Current score: 72 / 100
 
-- Validate cash rounding with step values 1, 5, and 10 against real cash drawer expectations.
-- Confirm manager/supervisor shift-close override wording and closure records in a real shift.
-- Confirm printer receipt output for rounding up and rounding down cases.
+Breakdown:
 
-## Current PR: POS accounting, permissions, and UX fixes
+| Area | Score | Notes |
+|---|---:|---|
+| Cashier sales workflow | 82 | Order creation, payment, dine-in, delivery, held orders, editing, and history are mostly present. |
+| Shift and cash control | 76 | Shifts, closure preview, expected cash, unpaid totals, supplier/petty cash activity, and manager override exist. Needs real close-day testing. |
+| Inventory and suppliers | 70 | Ingredients, FIFO-ish stock movement, suppliers, returns, and purchase flows exist. Needs data integrity hardening and validation checks. |
+| Printing | 68 | Receipt, report, default printer, kitchen printer, and test print flows exist. Needs hardware certification on actual printers. |
+| Data reliability | 64 | SQLite WAL and atomic batch writes exist, but JSON-document storage limits constraints, reporting integrity, and migration safety. |
+| Security and permissions | 72 | Permissions, scrypt credentials, fresh login, and license checks exist. LAN API and local admin flows need hardening before wider rollout. |
+| UI/UX for restaurant use | 74 | Arabic RTL interface and touch-oriented screens exist. Several layout fixes were done, but real cashier speed testing is still needed. |
+| Reporting and audit trail | 70 | Reports, audit log, employee activity, rounding reports, exports, and shift summaries exist. Needs verification that all manager actions are consistently logged. |
+| Deployment/update/backup | 68 | Installer, GitHub update config, startup registration, clean install option, backup settings, and restore exist. Needs full install/update/restore rehearsal. |
 
-### Completed
+## Current System Assessment
 
-- Prevented duplicate active dining table names after trimming/case normalization.
-- Added cash/accounting guards for supplier payments, including supplier overpayment blocking and cash drawer supplier-payment entries.
-- Expanded supplier transaction records with paid amount, remaining balance, payment method/source, and acting user.
-- Added audit logging for petty cash expenses.
-- Enforced cashier discount limits for both percentage and fixed discounts.
-- Added configurable tax application by order type while keeping all order types taxable by default.
-- Kept POS totals aligned with shared tax calculation settings.
-- Reduced POS alert layout shift by rendering inventory/cashier messages as a floating notification.
-- Removed a modal overlay hover repaint that could cause popup/dropdown visual glitches.
+### Architecture
 
-### Remaining manual validation
+Current implementation:
+- Electron desktop app with React renderer, Electron main process, preload APIs, and shared TypeScript types.
+- Renderer feature services contain much of the business logic.
+- Main process owns SQLite access, printing, license, backups, updates, and LAN master/side HTTP transport.
+- App supports standalone, master, and side modes.
 
-- Confirm real cash drawer reconciliation with supplier payments on production data.
-- Confirm tax/service receipt output on real printers.
-- Confirm rounding and discount permission behavior with each configured employee role.
+Why it matters:
+- This is acceptable for a first local MVP, but the renderer-heavy business logic makes long-term testing and correctness harder.
+- Side/master mode adds operational complexity that must be tested separately from standalone mode.
 
-## Private GitHub releases and updates
+Recommended change:
+- For MVP, do not rewrite architecture. Freeze scope and harden the existing workflows.
+- Add focused smoke tests/check scripts for critical flows: login, create order, pay order, close shift, backup, restore, print test.
+- After MVP, gradually move critical business operations behind main-process or shared domain services.
 
-The repo can stay private. Publishing and update checks require a GitHub token with access to `xlargetomato/AbdoKoftaDesktop`.
+Priority: High
+Effort: Medium
 
-- To publish a Windows release, put `GH_TOKEN=github_pat_...` in `.env.local` or set it as an OS environment variable, then run `npm run dist:win:publish`.
-- For installed master devices checking private GitHub releases, set `GH_TOKEN`, `GITHUB_TOKEN`, or `SHIFT_POS_UPDATE_TOKEN` as an OS environment variable, or place a local token file at `%APPDATA%\shift-pos\updater-auth.json` with `{ "token": "github_pat_..." }`.
-- Do not commit real tokens. Use a fine-scoped token that can read repository release assets. Side devices do not need a GitHub token; they update from the master over LAN.
+### Database
 
-## 1. System Assessment
+Current implementation:
+- SQLite database under user data.
+- WAL enabled.
+- Main table pattern stores most entities in `cached_documents` as JSON documents.
+- Some specialized tables exist: `seed_auth`, `sync_outbox`, `ingredient_stock`, and `meta`.
+- Atomic batch writes exist for multi-entity operations.
+- Basic migration runner exists.
+- Backup and restore APIs exist.
 
-**Verdict: Not ready for real restaurant deployment yet.**
+Why it matters:
+- SQLite is a good MVP choice.
+- JSON-document collections are fast to evolve, but they do not enforce foreign keys, required fields, uniqueness, or referential integrity.
+- A bad write can create broken reports, orphaned order items, or inconsistent inventory if validation misses something.
 
-The system has a strong functional base:
+Recommended change:
+- Before first deployment, add a database health check screen or script that validates:
+  - orders have matching order items,
+  - payments reference real orders,
+  - open shifts are not duplicated per cashier,
+  - menu items referenced in orders still have snapshot names/prices,
+  - inventory batches and transactions are internally consistent,
+  - users with credentials have matching user documents.
+- Run a backup and restore drill on the target machine.
+- Keep JSON-document storage for MVP, but document it as a conscious temporary design.
 
-- Offline-first Electron application.
-- SQLite with WAL mode.
-- Atomic order, payment, inventory, and cash writes.
-- Orders, dine-in, delivery, refunds, shifts, inventory, suppliers, reports, permissions, audit, backups, and printing.
-- Good basic touch targets and Arabic RTL support.
-- `npm run typecheck` and production build pass.
+Priority: Critical
+Effort: Medium
 
-## Main Architectural Weaknesses
+### Business Logic
 
-- Business rules live mostly in renderer services.
-- SQLite is used as a generic JSON document store with limited database constraints.
-- State is divided between Zustand, component state, SQLite, and `localStorage`.
-- No schema migration framework.
-- No automated test suite.
-- LAN, sync, licensing, and updater features increase launch complexity.
+Current implementation:
+- Order creation supports takeaway, dine-in, delivery, discounts, tax, service charge, delivery fee, cash/card/split payment, rounding, and inventory movements.
+- Dine-in can create unpaid table orders and add items to an occupied table.
+- Cancellations, refunds, order editing, and inventory reversal logic exist.
+- Shift closure includes expected cash, supplier payments, petty expenses, unpaid totals, and manager override.
+- Supplier and purchase workflows exist.
+- Audit logging exists for many important actions.
 
-## Deployment Recommendation
+Why it matters:
+- The MVP feature surface is strong.
+- The biggest launch risk is correctness under real restaurant pressure: editing, cancelling, refunding, and closing shifts after mixed payment orders.
 
-For the first restaurant:
+Recommended change:
+- Before deployment, run a scripted restaurant-day scenario:
+  - open shift,
+  - create takeaway cash/card/split orders,
+  - create dine-in unpaid order,
+  - add items to same table,
+  - pay dine-in order,
+  - create delivery order with saved contact,
+  - cancel paid order,
+  - refund part of an order,
+  - record supplier payment and petty expense,
+  - close shift and compare expected cash manually.
+- Keep a signed paper checklist for the first live day.
 
-- Deploy **standalone mode only**.
-- Disable API sync.
-- Disable LAN side-device mode.
+Priority: Critical
+Effort: Medium
 
-Core sales accounting must be proven before adding distributed features.
+### UI/UX
 
----
+Current implementation:
+- Arabic RTL UI.
+- Manager and POS modes with permission-based navigation.
+- Touch-friendly buttons and large table views.
+- Keyboard shortcuts and arrow focus navigation exist.
+- Several recent layout issues have been fixed.
 
-# 2. MVP Readiness Score
+Why it matters:
+- Restaurant MVP success depends on speed and mistake prevention more than feature count.
+- A cashier must be able to complete common orders without confusion during rush time.
 
-**Overall Score: 44 / 100**
+Recommended change:
+- Fix all visible mojibake/corrupted Arabic strings before launch.
+- Test the app at the actual screen resolution of the POS machine.
+- Validate touch targets, scrolling tables, modal placement, and receipt preview on the hardware.
+- Make sure every destructive action has clear Arabic confirmation.
 
-| Area | Score |
-|---|---:|
-| Feature coverage | 78 |
-| Architecture | 62 |
-| Database/offline reliability | 52 |
-| Business correctness | 32 |
-| UI/restaurant usability | 68 |
-| Security | 30 |
-| Testing/operations | 15 |
+Priority: Critical
+Effort: Medium
 
----
+### Technical Quality
 
-# 3. Findings And Required Modifications
+Current implementation:
+- TypeScript typecheck and production build pass.
+- Packaging scripts exist.
+- Phase checks exist for license/password regressions.
+- Runtime warnings remain around mixed static/dynamic imports.
+- Some source files still show corrupted Arabic strings.
 
-| Issue | Current Implementation | Real-world Impact | Recommended Change | Priority | Effort |
-|---|---|---|---|---|---|
-| Displayed total differs from charged total | POS preview calculates tax as zero and ignores service, while saving applies both | Wrong displayed total, wrong change calculation, cash validation issues | Load settings before checkout and use one shared calculation result | Critical | Small |
-| Delivery payments are not recorded | Only takeaway sets `isPaid`; delivery remains draft/unpaid despite selected payment | Missing revenue, payment, and drawer records | Mark delivery orders as paid when payment is supplied | Critical | Small |
-| Split payments accept excess values | Validation only rejects totals below order total | Revenue and drawer can be overstated | Require exact total within rounding tolerance; define cash change handling | Critical | Small |
-| Payment is not idempotent | `markOrderPaid` does not reject already paid orders | Double-click/retry can duplicate payments | Reject paid orders and add idempotency guard | Critical | Medium |
-| Refunds can exceed original sale | No cumulative refund validation exists | Same item can be refunded repeatedly | Track refunded quantities and validate every refund line | Critical | Medium |
-| Refund accounting is incorrect | Refund always creates `cash_out`, including card sales | Cash drawer and reports become inaccurate | Refund according to original payment method | Critical | Medium |
-| Refund preview differs from saved refund | UI and service calculate different values | Operator approves wrong refund amount | Use one shared refund calculator | High | Small |
-| Cancellation corrupts reconciliation | Uses negative order total without preserving payment split | Card/cash balances become incorrect | Reverse original payment records by payment method | Critical | Medium |
-| Shifts may close with unpaid tables | Warning exists but closure is still allowed | Closed shift totals can change later | Block closure or transfer unpaid tables | High | Medium |
-| Shifts can stay open indefinitely | No business-date validation | Multiple days can merge into one shift | Detect stale shifts on startup/login | High | Small |
-| Stock migration may create false zero stock | Existing materialized stock is trusted if rows exist | Inventory may appear missing | Rebuild materialized stock through migration | Critical | Medium |
-| No formal database migrations | Uses `CREATE IF NOT EXISTS` only | Schema upgrades can silently fail | Add sequential migration system | High | Medium |
-| Restore process is unsafe | No explicit DB close/integrity verification | Failed restore may corrupt restaurant data | Validate backup, preserve current DB, restore safely | High | Medium |
-| Weak password storage | Fast unsalted SHA-256 hashes | Offline password cracking risk | Use Argon2id/scrypt with unique salts | Critical | Medium |
-| Credentials exist in Git history | `.env` contains operational credentials | Repository access exposes secrets | Rotate credentials and clean Git history | Critical | Small |
-| Production activation bypass exists | Master key/hash exists in production source | Licensing can be bypassed | Remove production bypass | High | Small |
-| Cashiers can void/refund orders | Broad permissions allow sensitive actions | Fraud or accidental losses | Require manager authorization | High | Medium |
-| Audit is not guaranteed | Audit writes are fire-and-forget | Missing financial history | Make audit atomic with transactions | High | Medium |
-| Reports silently truncate data | Reports load limited orders/items | Reports become inaccurate over time | Query complete date ranges directly from SQLite | High | Medium |
-| No automated tests | No test files or test runner | Financial bugs reach production | Add unit and integration tests | Critical | Large |
-| Electron hardening incomplete | Sandbox disabled, broad IPC access | Renderer compromise exposes data | Enable sandbox/CSP and validate IPC | Medium | Medium |
-| Controls are too small | Some controls around 34px | Poor restaurant usability | Increase cashier controls to 44–48px | Medium | Small |
-| Printing not fully validated | Chromium HTML printing only | Printer/cutter/margin issues possible | Validate supported printer models | High | Medium |
+Why it matters:
+- Passing build is necessary but not enough for a restaurant launch.
+- Corrupted strings reduce trust immediately and can confuse staff.
+- Lack of automated workflow tests means regressions can return quietly.
 
----
+Recommended change:
+- Add a small MVP verification command that runs:
+  - typecheck,
+  - build,
+  - phase checks,
+  - text scan for mojibake markers,
+  - database schema/collection health check.
+- Treat corrupted visible text as a launch blocker.
 
-# 4. Launch Blockers
+Priority: High
+Effort: Medium
 
-Do not deploy until these are fixed:
+## Launch Blockers
 
-| # | Blocker |
-|---|---|
-| 1 | Total/tax/service calculation mismatch |
-| 2 | Delivery payment recording |
-| 3 | Duplicate and incorrect split payment handling |
-| 4 | Refund and cancellation accounting |
-| 5 | Inventory migration correctness |
-| 6 | Password storage security |
-| 7 | Reliable database restore |
-| 8 | Automated tests for financial workflows |
+These must be fixed before installing in a real restaurant:
 
----
+1. Corrupted Arabic text risk
+   Current implementation: several UI/service files contain visible mojibake-style strings in source.
+   Why it matters: if any of these render in production, users see broken Arabic in errors, modals, reports, or audit logs.
+   Recommended change: scan and fix all user-facing strings containing mojibake markers such as `Ã˜`, `Ã™`, `Ã¢`, or broken punctuation.
+   Priority: Critical
+   Effort: Medium
 
-# 5. Prioritized Roadmap
+2. No documented end-to-end restaurant-day validation
+   Current implementation: build/typecheck passes, but there is no complete cashier-day acceptance run recorded.
+   Why it matters: MVP risk is in combined flows, not isolated screens.
+   Recommended change: run and document the restaurant-day scenario listed above.
+   Priority: Critical
+   Effort: Medium
 
-## Before First Deployment
+3. Printer behavior not certified on target hardware
+   Current implementation: printer selection, default printers, test print, receipt/report/kitchen flows exist.
+   Why it matters: failed printing during service is a real launch failure.
+   Recommended change: test customer receipt, kitchen ticket, report print, missing-printer warning, and printer reconnect on the actual printer models.
+   Priority: Critical
+   Effort: Small
 
-| Task | Priority |
-|---|---|
-| Fix payment, delivery, total, cancellation, and refund issues | Critical |
-| Rebuild inventory balances through migration | Critical |
-| Add tests for order totals, payments, refunds, stock reversal, and shifts | Critical |
-| Rotate exposed credentials | Critical |
-| Require manager authorization for refunds/voids | High |
-| Block closing shifts with unresolved orders | High |
-| Test backup/restore on production-sized data | High |
-| Test receipt and kitchen printers | High |
-| Deploy standalone mode only | High |
+4. Backup/restore not proven on target machine
+   Current implementation: backup and restore APIs exist with configurable backup behavior.
+   Why it matters: the first customer must have a recovery path before going live.
+   Recommended change: perform backup, delete/replace test DB, restore, and verify orders/settings/users are intact.
+   Priority: Critical
+   Effort: Small
 
----
+5. Data integrity checks are not formalized
+   Current implementation: many operations are batched atomically, but JSON-document storage does not enforce relational constraints.
+   Why it matters: one inconsistent record can break reports, shift closure, or inventory counts.
+   Recommended change: add a pre-launch health check for orphaned records, duplicate open shifts, invalid payments, and missing user credentials.
+   Priority: High
+   Effort: Medium
 
-## Before First Paying Customer
+## Required Modifications Before MVP
 
-| Task | Priority |
-|---|---|
-| Replace password hashing | Critical |
-| Add schema migrations | High |
-| Make audit entries atomic | High |
-| Remove report limits | High |
-| Include refunds correctly in reports | High |
-| Add crash logging | Medium |
-| Run multi-day restaurant simulation | High |
-| Create rollback and emergency operation procedures | High |
+| Requirement | Current state | Recommended change | Priority | Effort |
+|---|---|---|---|---|
+| Arabic text quality | Many screens are Arabic, but source contains corrupted strings in several modules. | Fix all visible corrupted strings and add a scan to prevent recurrence. | Critical | Medium |
+| First-day workflow validation | Features exist but are not proven together. | Run one complete simulated restaurant day. | Critical | Medium |
+| Printing validation | Feature exists. | Certify real receipt, kitchen, and report printers. | Critical | Small |
+| Backup/recovery | Feature exists. | Run restore drill and document recovery steps. | Critical | Small |
+| Shift reconciliation | Feature exists. | Compare app expected cash against manual cash/card/refund sheet. | High | Small |
+| Data health | Not formalized. | Add health check for JSON collections and key relationships. | High | Medium |
+| Permission verification | Permission system exists. | Verify cashier, supervisor, and manager cannot access unauthorized tabs/actions. | High | Small |
+| Installer/update | Installer and update config exist. | Test clean install, upgrade install, startup registration, and private release update. | High | Small |
+| LAN mode | Implemented. | Treat as pilot-only unless tested with master plus at least one side device for a full shift. | Medium | Medium |
+| Reports | Implemented. | Validate totals against orders/payments/shifts for one test day. | Medium | Small |
 
----
+## Prioritized Roadmap
 
-## After Launch
+### Before First Deployment
 
-| Task | Priority |
-|---|---|
-| Improve action-level permissions | Medium |
-| Harden Electron sandbox, CSP, and IPC validation | Medium |
-| Add database health indicators | Medium |
-| Add backup status monitoring | Medium |
-| Introduce LAN master/side mode | Low |
-| Enable API sync after conflict testing | Low |
+Goal: safe internal pilot on real POS hardware.
 
----
+1. Fix corrupted Arabic strings across visible UI, reports, errors, audit details, and receipts.
+2. Run typecheck, build, and phase checks.
+3. Run a complete restaurant-day scenario on a test database.
+4. Test receipt, kitchen, report, and PDF/CSV export on the real machine.
+5. Test backup and restore on the real machine.
+6. Test clean install and upgrade install.
+7. Verify every login starts fresh and no previous session auto-resumes.
+8. Verify role permissions for cashier, supervisor, and manager.
+9. Confirm the database location and backup folder with the restaurant owner.
 
-# Final Assessment
+### Before First Paying Customer
 
-No code was modified during this assessment.
+Goal: one live pilot day with controlled risk.
 
-## Verified
+1. Create real menu, tables, printer setup, users, and backup schedule.
+2. Train one cashier and one manager on:
+   - opening shift,
+   - creating orders,
+   - editing/cancelling/refunding,
+   - delivery contacts,
+   - printing retry,
+   - closing shift,
+   - backup location.
+3. Run one quiet live shift with paper fallback ready.
+4. Compare app reports with manual cash/card totals at end of shift.
+5. Confirm restore works from the latest backup after the pilot.
+6. Freeze features for the first customer; only fix bugs found in pilot.
 
-- Static type checking passes.
-- Production build succeeds.
+### After Launch Improvements
 
-## Not Yet Validated
+Goal: reduce support load after the first customer is stable.
 
-- Real printer behavior.
-- SQLite recovery.
-- Full restaurant workflow.
-- Long-running production usage.
+1. Add automated workflow tests for order/payment/shift/refund.
+2. Move critical business logic into shared domain services with tests.
+3. Add stronger database integrity checks and optional relational tables for critical entities.
+4. Improve LAN security and observability if side devices become common.
+5. Add structured diagnostic export for support.
+6. Add a visible system health page for database, backup, printer, license, and network status.
 
-The system has enough foundation to become a production POS, but financial correctness, security, and operational reliability must be completed before real deployment.
+## MVP Decision
+
+Current decision: not ready for unsupervised production installation yet.
+
+Recommended next milestone: controlled MVP pilot after the launch blockers are resolved.
+
+Estimated distance from MVP:
+- 2 to 4 focused days for blocker cleanup and validation if no major workflow bugs are found.
+- 1 additional live pilot day before accepting a paying customer.
+
+The product has enough core POS functionality for a first restaurant MVP. The next work should be boring and strict: fix visible text, prove the workflows, prove printing, prove backup/restore, and avoid adding new features until the first live shift is stable.
