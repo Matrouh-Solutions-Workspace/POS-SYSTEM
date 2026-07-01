@@ -67,6 +67,11 @@ const SuppliersPage = lazy(() =>
     default: m.SuppliersPage
   }))
 )
+const ContactsPage = lazy(() =>
+  import('@renderer/features/manager/ContactsPage').then((m) => ({
+    default: m.ContactsPage
+  }))
+)
 const ReportsPage = lazy(() =>
   import('@renderer/features/manager/ReportsPage').then((m) => ({
     default: m.ReportsPage
@@ -353,6 +358,7 @@ export default function App(): React.ReactElement {
             </Route>
             <Route element={<ProtectedRoute permission="manage_settings" />}>
               <Route path="/manager/settings" element={<LazyPage><SettingsPage /></LazyPage>} />
+              <Route path="/manager/contacts" element={<LazyPage><ContactsPage /></LazyPage>} />
               <Route path="/manager/audit" element={<LazyPage><AuditLogPage /></LazyPage>} />
               <Route path="/manager/tables" element={<LazyPage><FloorPlanPage /></LazyPage>} />
             </Route>

@@ -2826,6 +2826,59 @@ textarea {
   margin-bottom: 14px;
 }
 
+.delivery-contact-picker {
+  border: 1px solid var(--color-border-light);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--color-surface-muted, #f8fafc);
+}
+
+.delivery-contact-picker__selected {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 6px;
+  background: var(--color-surface, #fff);
+}
+
+.delivery-contact-picker__results {
+  display: grid;
+  gap: 6px;
+  max-height: 168px;
+  overflow: auto;
+  margin-top: 8px;
+}
+
+.delivery-contact-picker__result {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 6px;
+  background: var(--color-surface, #fff);
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: start;
+}
+
+.delivery-contact-picker__result:hover,
+.delivery-contact-picker__result:focus-visible {
+  border-color: var(--color-primary);
+  outline: none;
+}
+
+.delivery-contact-picker__create {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border-light);
+}
+
 .checkout-modal__label {
   font-weight: 800;
   margin: 0 0 6px;

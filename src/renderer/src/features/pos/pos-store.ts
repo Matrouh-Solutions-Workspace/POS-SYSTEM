@@ -16,6 +16,7 @@ export interface HeldOrder {
   customerName: string
   customerPhone: string
   customerAddress: string
+  contactId?: string
   deliveryFee: string
   discountType: DiscountType
   discountValue: string
@@ -32,6 +33,7 @@ interface PosState {
   customerName: string
   customerPhone: string
   customerAddress: string
+  contactId?: string
   deliveryFee: string
   discountType: DiscountType
   discountValue: string
@@ -48,6 +50,7 @@ interface PosState {
   setCustomerName: (name: string) => void
   setCustomerPhone: (phone: string) => void
   setCustomerAddress: (address: string) => void
+  setContactId: (id?: string) => void
   setDeliveryFee: (fee: string) => void
   setDiscountType: (type: DiscountType) => void
   setDiscountValue: (value: string) => void
@@ -67,6 +70,7 @@ export const usePosStore = create<PosState>((set, get) => ({
   customerName: '',
   customerPhone: '',
   customerAddress: '',
+  contactId: undefined,
   deliveryFee: '',
   discountType: 'percent',
   discountValue: '',
@@ -84,6 +88,7 @@ export const usePosStore = create<PosState>((set, get) => ({
   setCustomerName: (customerName) => set({ customerName }),
   setCustomerPhone: (customerPhone) => set({ customerPhone }),
   setCustomerAddress: (customerAddress) => set({ customerAddress }),
+  setContactId: (contactId) => set({ contactId }),
   setDeliveryFee: (deliveryFee) => set({ deliveryFee }),
   setDiscountType: (discountType) => set({ discountType }),
   setDiscountValue: (discountValue) => set({ discountValue }),
@@ -95,12 +100,13 @@ export const usePosStore = create<PosState>((set, get) => ({
     customerName: '',
     customerPhone: '',
     customerAddress: '',
+    contactId: undefined,
     deliveryFee: '',
     discountValue: ''
   }),
 
   holdCurrentOrder: (label) => {
-    const { cart, heldOrders, orderType, orderNote, selectedTableId, customerName, customerPhone, customerAddress, deliveryFee, discountType, discountValue } = get()
+    const { cart, heldOrders, orderType, orderNote, selectedTableId, customerName, customerPhone, customerAddress, contactId, deliveryFee, discountType, discountValue } = get()
     if (cart.length === 0) return { success: false, message: '' }
     if (heldOrders.length >= 10) {
       return { success: false, message: 'الحد الأقصى للطلبات المعلقة هو 10' }
@@ -115,6 +121,7 @@ export const usePosStore = create<PosState>((set, get) => ({
       customerName,
       customerPhone,
       customerAddress,
+      contactId,
       deliveryFee,
       discountType,
       discountValue,
@@ -145,6 +152,7 @@ export const usePosStore = create<PosState>((set, get) => ({
       customerName: held.customerName,
       customerPhone: held.customerPhone,
       customerAddress: held.customerAddress,
+      contactId: held.contactId,
       deliveryFee: held.deliveryFee,
       discountType: held.discountType,
       discountValue: held.discountValue,

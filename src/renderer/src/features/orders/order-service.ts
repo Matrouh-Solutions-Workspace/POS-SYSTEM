@@ -236,6 +236,7 @@ export async function completeOrder(params: {
   discountType?: DiscountType
   discountValue?: number
   deliveryFee?: number
+  contactId?: string
   customerName?: string
   customerPhone?: string
   customerAddress?: string
@@ -353,6 +354,7 @@ export async function completeOrder(params: {
     cashPaidAmount: cashReceived,
     cashChangeAmount: cashChange,
     noteAr: params.orderNoteAr,
+    contactId: orderType === 'delivery' ? params.contactId : undefined,
     customerName: params.customerName,
     customerPhone: params.customerPhone,
     customerAddress: params.customerAddress,
@@ -454,6 +456,12 @@ export async function completeOrder(params: {
     }] : [])
   ]
   await dbBatch(batchOps)
+
+  if (orderType === 'delivery' && params.contactId) {
+    void import('@renderer/features/contacts/delivery-contact-service').then(({ markContactUsed }) =>
+      markContactUsed(params.contactId, orderId, now)
+    )
+  }
 
   void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
     logAudit({

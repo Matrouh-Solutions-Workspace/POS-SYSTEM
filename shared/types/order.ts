@@ -35,6 +35,7 @@ export interface Order {
   cashChangeAmount?: number
   noteAr?: string
   // Delivery customer info
+  contactId?: string
   customerName?: string
   customerPhone?: string
   customerAddress?: string
@@ -49,6 +50,19 @@ export interface Order {
   cancelInventoryMode?: 'return' | 'waste'
   /** Original order for full or partial refund records. */
   refundOfOrderId?: string
+}
+
+export interface DeliveryContact {
+  id: string
+  name: string
+  phone: string
+  normalizedPhone: string
+  address?: string
+  notes?: string
+  createdAt: number
+  updatedAt: number
+  lastOrderId?: string
+  lastOrderAt?: number
 }
 
 export interface OrderItem {

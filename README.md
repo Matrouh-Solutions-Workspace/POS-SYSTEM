@@ -1,6 +1,23 @@
 # POS MVP Launch Assessment
 
-## Current PR: Shift, payment, discount, rounding, and POS UX fixes
+## Current PR: Delivery contacts management and customer lookup
+
+### Completed
+
+- Added a SQLite-backed `delivery_contacts` collection for saved delivery customers.
+- Added phone/name search in the delivery checkout flow, with fast selection that fills customer name, phone, and address.
+- Added "create new contact" from an empty delivery search while preserving the typed phone number or name.
+- Stored `contactId` plus customer name/phone/address snapshots on delivery orders.
+- Added a manager Contacts page for searching, adding, editing, viewing, and deleting delivery customers.
+- Added audit log support for contact creation, updates, and deletion.
+
+### Remaining manual validation
+
+- Test delivery checkout on a real cashier terminal with phone-first search.
+- Confirm duplicate phone handling against the restaurant's expected customer data format.
+- Confirm deleted contacts do not affect old delivery order snapshots.
+
+## Previous PR: Shift, payment, discount, rounding, and POS UX fixes
 
 ### Completed
 

@@ -4,7 +4,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { listAuditEntries, type AuditDateRange } from '@renderer/features/audit/audit-service'
-import type { AppUser, AuditEntry, AuditAction, Ingredient, InventoryTransaction, ItemAddon, ItemSize, KitchenPrinter, MenuCategory, MenuItem, Order, Supplier, SupplierTransaction } from '@shared/types'
+import type { AppUser, AuditEntry, AuditAction, DeliveryContact, Ingredient, InventoryTransaction, ItemAddon, ItemSize, KitchenPrinter, MenuCategory, MenuItem, Order, Supplier, SupplierTransaction } from '@shared/types'
 import { listAllAccounts } from '@renderer/features/auth/auth-service'
 import { COLLECTIONS } from '@shared/constants/collections'
 import { getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
@@ -69,7 +69,10 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   supplier_transaction_recorded: 'حركة مورد',
   kitchen_printer_created:   'إضافة طابعة تجهيز',
   kitchen_printer_updated:   'تعديل طابعة تجهيز',
-  kitchen_printer_deleted:   'حذف طابعة تجهيز'
+  kitchen_printer_deleted:   'حذف طابعة تجهيز',
+  contact_created:           'إضافة عميل دليفري',
+  contact_updated:           'تعديل عميل دليفري',
+  contact_deleted:           'حذف عميل دليفري'
 }
 
 const TARGET_LABELS: Record<NonNullable<AuditEntry['targetType']>, string> = {
@@ -87,7 +90,8 @@ const TARGET_LABELS: Record<NonNullable<AuditEntry['targetType']>, string> = {
   ingredient: 'مكوّن',
   inventory: 'مخزون',
   supplier: 'مورد',
-  printer: 'طابعة'
+  printer: 'طابعة',
+  contact: 'عميل دليفري'
 }
 
 const ACTION_BADGE: Record<AuditAction, string> = {
@@ -142,7 +146,10 @@ const ACTION_BADGE: Record<AuditAction, string> = {
   supplier_transaction_recorded: 'badge--info',
   kitchen_printer_created:   'badge--success',
   kitchen_printer_updated:   'badge--info',
-  kitchen_printer_deleted:   'badge--danger'
+  kitchen_printer_deleted:   'badge--danger',
+  contact_created:           'badge--success',
+  contact_updated:           'badge--info',
+  contact_deleted:           'badge--danger'
 }
 
 export function AuditLogPage(): React.ReactElement {
@@ -371,7 +378,8 @@ async function buildTargetNameMap(entries: AuditEntry[], users: AppUser[]): Prom
     inventoryTransactions,
     suppliers,
     supplierTransactions,
-    printers
+    printers,
+    contacts
   ] = await Promise.all([
     needs.has('order') ? getCachedDocs<Order>(COLLECTIONS.orders) : Promise.resolve([]),
     needs.has('menu_category') ? getCachedDocs<MenuCategory>(COLLECTIONS.menuCategories) : Promise.resolve([]),
@@ -382,7 +390,8 @@ async function buildTargetNameMap(entries: AuditEntry[], users: AppUser[]): Prom
     needs.has('inventory') ? getCachedDocs<InventoryTransaction>(COLLECTIONS.inventoryTransactions) : Promise.resolve([]),
     needs.has('supplier') ? getCachedDocs<Supplier>(COLLECTIONS.suppliers) : Promise.resolve([]),
     needs.has('supplier') ? getCachedDocs<SupplierTransaction>(COLLECTIONS.supplierTransactions) : Promise.resolve([]),
-    needs.has('printer') ? getCachedDocs<KitchenPrinter>(COLLECTIONS.kitchenPrinters) : Promise.resolve([])
+    needs.has('printer') ? getCachedDocs<KitchenPrinter>(COLLECTIONS.kitchenPrinters) : Promise.resolve([]),
+    needs.has('contact') ? getCachedDocs<DeliveryContact>(COLLECTIONS.deliveryContacts) : Promise.resolve([])
   ])
 
   const usersById = new Map(users.map((user) => [user.id, user.username]))
@@ -394,6 +403,7 @@ async function buildTargetNameMap(entries: AuditEntry[], users: AppUser[]): Prom
   const ingredientsById = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient.nameAr]))
   const suppliersById = new Map(suppliers.map((supplier) => [supplier.id, supplier.nameAr]))
   const printersById = new Map(printers.map((printer) => [printer.id, printer.name]))
+  const contactsById = new Map(contacts.map((contact) => [contact.id, `${contact.name} - ${contact.phone}`]))
   const inventoryById = new Map(inventoryTransactions.map((tx) => [tx.id, ingredientsById.get(tx.ingredientId) ?? 'حركة مخزون']))
   const supplierTxById = new Map(supplierTransactions.map((tx) => [tx.id, suppliersById.get(tx.supplierId) ?? 'حركة مورد']))
 
@@ -412,6 +422,7 @@ async function buildTargetNameMap(entries: AuditEntry[], users: AppUser[]): Prom
       entry.targetType === 'inventory' ? inventoryById.get(entry.targetId) :
       entry.targetType === 'supplier' ? supplierTxById.get(entry.targetId) ?? suppliersById.get(entry.targetId) :
       entry.targetType === 'printer' ? printersById.get(entry.targetId) :
+      entry.targetType === 'contact' ? contactsById.get(entry.targetId) :
       entry.targetType === 'settings' ? 'إعدادات المطعم' :
       undefined
     if (value) map[key] = value

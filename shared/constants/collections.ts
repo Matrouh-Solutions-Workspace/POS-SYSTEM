@@ -13,6 +13,7 @@ export const COLLECTIONS = {
   orders: 'orders',
   orderItems: 'order_items',
   payments: 'payments',
+  deliveryContacts: 'delivery_contacts',
   diningTables: 'dining_tables',
   floors: 'floors',
   shifts: 'shifts',

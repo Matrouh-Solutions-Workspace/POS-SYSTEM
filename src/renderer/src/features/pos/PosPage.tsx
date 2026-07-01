@@ -8,7 +8,8 @@ import type {
   MenuItemAttachment,
   MenuItemSizeOption,
   Order,
-  OrderType
+  OrderType,
+  DeliveryContact
 } from '@shared/types'
 import { getIngredientStocks } from '@renderer/features/inventory/inventory-service'
 import { listCategories, listMenuItems, getRecipeByMenuItem } from '@renderer/features/menu/menu-service'
@@ -25,6 +26,11 @@ import { ConfirmDialog } from '@renderer/components/ui'
 import { printReceipt } from '@renderer/features/receipt/receipt-builder'
 import { printKitchenTickets } from '@renderer/features/printers/kitchen-printing'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
+import {
+  createDeliveryContact,
+  listDeliveryContacts,
+  normalizePhone
+} from '@renderer/features/contacts/delivery-contact-service'
 import {
   orderSubtotal,
   orderTotal,
@@ -120,6 +126,7 @@ export function PosPage(): React.ReactElement {
     customerName, setCustomerName,
     customerPhone, setCustomerPhone,
     customerAddress, setCustomerAddress,
+    contactId, setContactId,
     deliveryFee, setDeliveryFee,
     discountType, setDiscountType,
     discountValue, setDiscountValue,
@@ -133,6 +140,8 @@ export function PosPage(): React.ReactElement {
   // Tables
   const [tables, setTables] = useState<DiningTable[]>([])
   const [unpaidOrders, setUnpaidOrders] = useState<Order[]>([])
+  const [deliveryContacts, setDeliveryContacts] = useState<DeliveryContact[]>([])
+  const [contactSearch, setContactSearch] = useState('')
   const [tablePopupOpen, setTablePopupOpen] = useState(false)
 
   // Item popups
@@ -202,19 +211,21 @@ export function PosPage(): React.ReactElement {
   // ── Load menu & tables ────────────────────────────────────────────────
 
   const load = useCallback(async () => {
-    const [cats, menu, stocks, diningTables, unpaid, settings, access] = await Promise.all([
+    const [cats, menu, stocks, diningTables, unpaid, settings, access, contacts] = await Promise.all([
       listCategories(),
       listMenuItems(true),
       getIngredientStocks(),
       listDiningTables(),
       listUnpaidDineInOrders(),
       getSettings(),
-      getCashRoundingAccess(user)
+      getCashRoundingAccess(user),
+      listDeliveryContacts()
     ])
     setCategories(cats.filter((c) => c.active))
     setItems(menu)
     setTables(diningTables)
     setUnpaidOrders(unpaid)
+    setDeliveryContacts(contacts)
     setPosLogoUrl(settings.receiptLogoDataUrl || settings.receiptLogoProcessedDataUrl || '/image.png')
     setPosSettings(settings)
     setRoundingAccess(access)
@@ -350,6 +361,23 @@ export function PosPage(): React.ReactElement {
     () => tables.find((t) => t.id === selectedTableId),
     [tables, selectedTableId]
   )
+  const contactSearchResults = useMemo(() => {
+    const query = contactSearch.trim()
+    const selected = contactId ? deliveryContacts.find((contact) => contact.id === contactId) : undefined
+    if (!query) {
+      const base = deliveryContacts.slice(0, 8)
+      return selected && !base.some((contact) => contact.id === selected.id) ? [selected, ...base.slice(0, 7)] : base
+    }
+    const normalized = normalizePhone(query)
+    const lower = query.toLowerCase()
+    const matches = deliveryContacts
+      .filter((contact) =>
+        (normalized && contact.normalizedPhone.includes(normalized)) ||
+        contact.name.toLowerCase().includes(lower)
+      )
+      .slice(0, 8)
+    return selected && !matches.some((contact) => contact.id === selected.id) ? [selected, ...matches.slice(0, 7)] : matches
+  }, [contactId, contactSearch, deliveryContacts])
   const groupedTables = useMemo(() => {
     const groups = new Map<string, DiningTable[]>()
     for (const t of tables) {
@@ -454,6 +482,26 @@ export function PosPage(): React.ReactElement {
     })
   }
 
+  function selectDeliveryContact(contact: DeliveryContact): void {
+    setContactId(contact.id)
+    setCustomerName(contact.name)
+    setCustomerPhone(contact.phone)
+    setCustomerAddress(contact.address ?? '')
+    setContactSearch(`${contact.name} - ${contact.phone}`)
+  }
+
+  async function createContactFromCheckout(form: {
+    name: string
+    phone: string
+    address?: string
+    notes?: string
+  }): Promise<DeliveryContact> {
+    const contact = await createDeliveryContact(form, user)
+    setDeliveryContacts(await listDeliveryContacts())
+    selectDeliveryContact(contact)
+    return contact
+  }
+
 
   function handleHoldOrder(): void {
     const label = `${orderType === 'dine_in' ? `صالة ${selectedTable?.nameAr ?? ''}` : orderType === 'delivery' ? `دليفري ${customerName}` : 'تيك أواي'} — ${cart.length} صنف`
@@ -465,6 +513,12 @@ export function PosPage(): React.ReactElement {
     const currentLabel = `${orderType === 'dine_in' ? `صالة ${selectedTable?.nameAr ?? ''}` : orderType === 'delivery' ? `دليفري ${customerName}` : 'تيك أواي'} — ${cart.length} صنف`
     const res = resumeHeldOrder(held, currentLabel)
     if (res.message) setMessage(res.message)
+    if (held.contactId) {
+      const contact = deliveryContacts.find((entry) => entry.id === held.contactId)
+      setContactSearch(contact ? `${contact.name} - ${contact.phone}` : held.customerPhone)
+    } else {
+      setContactSearch('')
+    }
     setHeldPanelOpen(false)
   }
 
@@ -560,6 +614,7 @@ export function PosPage(): React.ReactElement {
         discountType: discountsEnabled && discountValue ? discountType : undefined,
         discountValue: discountsEnabled && discountValue ? Number(discountValue) : undefined,
         deliveryFee: orderType === 'delivery' ? Number(deliveryFee) || 0 : undefined,
+        contactId: orderType === 'delivery' ? contactId : undefined,
         customerName: customerName || undefined,
         customerPhone: customerPhone || undefined,
         customerAddress: customerAddress || undefined,
@@ -571,6 +626,7 @@ export function PosPage(): React.ReactElement {
       setOrderNote('')
       setCheckoutOpen(false)
       resetCheckoutFields()
+      setContactSearch('')
       setMessage(`تم إتمام الطلب #${orderReference(order)}`)
       printReceipt(order, orderItems, settings).catch(() => {})
       printKitchenAfterSave(order, orderItems, settings, 'تم حفظ الطلب')
@@ -607,6 +663,7 @@ export function PosPage(): React.ReactElement {
         discountType: discountsEnabled && discountValue ? discountType : undefined,
         discountValue: discountsEnabled && discountValue ? Number(discountValue) : undefined,
         deliveryFee: Number(deliveryFee) || 0,
+        contactId,
         customerName: customerName || undefined,
         customerPhone: customerPhone || undefined,
         customerAddress: customerAddress || undefined
@@ -616,6 +673,7 @@ export function PosPage(): React.ReactElement {
       setOrderNote('')
       setCheckoutOpen(false)
       resetCheckoutFields()
+      setContactSearch('')
       setMessage(`تم إنشاء طلب دليفري غير مدفوع #${orderReference(order)}`)
       printKitchenAfterSave(order, orderItems, settings, 'تم حفظ الطلب')
     } catch (e) {
@@ -1024,6 +1082,13 @@ export function PosPage(): React.ReactElement {
           discountsEnabled={discountsEnabled}
           discountOverLimit={discountOverLimit}
           maxDiscountPct={maxDiscountPct}
+          deliveryContacts={contactSearchResults}
+          contactSearch={contactSearch}
+          setContactSearch={setContactSearch}
+          selectedContactId={contactId}
+          onSelectContact={selectDeliveryContact}
+          onClearContact={() => setContactId(undefined)}
+          onCreateContact={createContactFromCheckout}
           customerName={customerName}
           setCustomerName={setCustomerName}
           customerPhone={customerPhone}

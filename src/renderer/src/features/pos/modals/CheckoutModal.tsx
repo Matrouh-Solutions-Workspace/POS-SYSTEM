@@ -1,4 +1,5 @@
-import type { DiscountType, OrderType } from '@shared/types'
+import { useMemo, useState } from 'react'
+import type { DeliveryContact, DiscountType, OrderType } from '@shared/types'
 import type { CashRoundingAccess } from '@renderer/features/rounding/cash-rounding-service'
 
 export interface CheckoutModalProps {
@@ -30,6 +31,13 @@ export interface CheckoutModalProps {
   discountsEnabled: boolean
   discountOverLimit: boolean
   maxDiscountPct: number | undefined
+  deliveryContacts: DeliveryContact[]
+  contactSearch: string
+  setContactSearch: (value: string) => void
+  selectedContactId?: string
+  onSelectContact: (contact: DeliveryContact) => void
+  onClearContact: () => void
+  onCreateContact: (form: { name: string; phone: string; address?: string; notes?: string }) => Promise<DeliveryContact>
   customerName: string
   setCustomerName: (value: string) => void
   customerPhone: string
@@ -79,6 +87,13 @@ export function CheckoutModal({
   discountsEnabled,
   discountOverLimit,
   maxDiscountPct,
+  deliveryContacts,
+  contactSearch,
+  setContactSearch,
+  selectedContactId,
+  onSelectContact,
+  onClearContact,
+  onCreateContact,
   customerName,
   setCustomerName,
   customerPhone,
@@ -102,6 +117,34 @@ export function CheckoutModal({
   const roundingDisplay = roundingDifference > 0
     ? `- ${roundingDifference.toFixed(2)}`
     : `+ ${Math.abs(roundingDifference).toFixed(2)}`
+  const [creatingContact, setCreatingContact] = useState(false)
+  const [contactForm, setContactForm] = useState({ name: '', phone: '', address: '', notes: '' })
+  const [contactError, setContactError] = useState('')
+  const contactQuery = contactSearch.trim()
+  const searchLooksLikePhone = useMemo(() => /[\d٠-٩۰-۹+]/.test(contactQuery), [contactQuery])
+  const selectedContact = deliveryContacts.find((contact) => contact.id === selectedContactId)
+
+  function startCreateContact(): void {
+    setContactError('')
+    setContactForm({
+      name: searchLooksLikePhone ? customerName : (contactQuery || customerName),
+      phone: searchLooksLikePhone ? contactQuery : customerPhone,
+      address: customerAddress,
+      notes: ''
+    })
+    setCreatingContact(true)
+  }
+
+  async function submitContact(): Promise<void> {
+    setContactError('')
+    try {
+      const contact = await onCreateContact(contactForm)
+      setCreatingContact(false)
+      setContactSearch(`${contact.name} - ${contact.phone}`)
+    } catch (error) {
+      setContactError(error instanceof Error ? error.message : 'تعذر حفظ العميل')
+    }
+  }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -239,18 +282,79 @@ export function CheckoutModal({
 
         {orderType === 'delivery' && (
           <div className="checkout-modal__section">
+            <div className="delivery-contact-picker">
+              <label className="field">
+                <span>بحث في العملاء</span>
+                <input
+                  value={contactSearch}
+                  onChange={(event) => {
+                    setContactSearch(event.target.value)
+                    if (selectedContactId) onClearContact()
+                  }}
+                  placeholder="ابحث بالاسم أو رقم الهاتف"
+                  dir="auto"
+                />
+              </label>
+              {selectedContact && (
+                <div className="delivery-contact-picker__selected">
+                  <span>العميل المحدد: {selectedContact.name} - {selectedContact.phone}</span>
+                  <button type="button" className="btn btn--secondary btn--sm" onClick={onClearContact}>إلغاء الاختيار</button>
+                </div>
+              )}
+              {contactQuery && deliveryContacts.length > 0 && (
+                <div className="delivery-contact-picker__results">
+                  {deliveryContacts.map((contact) => (
+                    <button key={contact.id} type="button" className="delivery-contact-picker__result" onClick={() => onSelectContact(contact)}>
+                      <strong>{contact.name}</strong>
+                      <span dir="ltr">{contact.phone}</span>
+                      {contact.address && <small>{contact.address}</small>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {contactQuery && deliveryContacts.length === 0 && !creatingContact && (
+                <button type="button" className="btn btn--secondary btn--sm" onClick={startCreateContact}>
+                  {searchLooksLikePhone ? `إنشاء عميل برقم ${contactQuery}` : `إنشاء عميل باسم ${contactQuery}`}
+                </button>
+              )}
+              {creatingContact && (
+                <div className="delivery-contact-picker__create">
+                  {contactError && <p className="form-message form-message--error">{contactError}</p>}
+                  <label className="field">
+                    <span>اسم العميل</span>
+                    <input value={contactForm.name} onChange={(event) => setContactForm((form) => ({ ...form, name: event.target.value }))} />
+                  </label>
+                  <label className="field">
+                    <span>رقم الهاتف</span>
+                    <input dir="ltr" value={contactForm.phone} onChange={(event) => setContactForm((form) => ({ ...form, phone: event.target.value }))} />
+                  </label>
+                  <label className="field">
+                    <span>العنوان</span>
+                    <input value={contactForm.address} onChange={(event) => setContactForm((form) => ({ ...form, address: event.target.value }))} />
+                  </label>
+                  <label className="field">
+                    <span>ملاحظات</span>
+                    <input value={contactForm.notes} onChange={(event) => setContactForm((form) => ({ ...form, notes: event.target.value }))} />
+                  </label>
+                  <div className="form-actions">
+                    <button type="button" className="btn btn--primary btn--sm" onClick={() => void submitContact()}>حفظ العميل</button>
+                    <button type="button" className="btn btn--secondary btn--sm" onClick={() => setCreatingContact(false)}>إلغاء</button>
+                  </div>
+                </div>
+              )}
+            </div>
             <p className="checkout-modal__label">بيانات التوصيل</p>
             <label className="field">
               <span>اسم العميل</span>
-              <input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="اسم العميل" />
+              <input value={customerName} onChange={(event) => { setCustomerName(event.target.value); onClearContact() }} placeholder="اسم العميل" />
             </label>
             <label className="field">
               <span>رقم الهاتف</span>
-              <input value={customerPhone} onChange={(event) => setCustomerPhone(event.target.value)} placeholder="01xxxxxxxxx" dir="ltr" />
+              <input value={customerPhone} onChange={(event) => { setCustomerPhone(event.target.value); onClearContact() }} placeholder="01xxxxxxxxx" dir="ltr" />
             </label>
             <label className="field">
               <span>العنوان</span>
-              <input value={customerAddress} onChange={(event) => setCustomerAddress(event.target.value)} placeholder="العنوان التفصيلي" />
+              <input value={customerAddress} onChange={(event) => { setCustomerAddress(event.target.value); onClearContact() }} placeholder="العنوان التفصيلي" />
             </label>
             <label className="field">
               <span>رسوم التوصيل</span>

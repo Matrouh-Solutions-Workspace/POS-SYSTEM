@@ -53,6 +53,9 @@ export type AuditAction =
   | 'supplier_updated'
   | 'supplier_deleted'
   | 'supplier_transaction_recorded'
+  | 'contact_created'
+  | 'contact_updated'
+  | 'contact_deleted'
   | 'kitchen_printer_created'
   | 'kitchen_printer_updated'
   | 'kitchen_printer_deleted'
@@ -80,6 +83,7 @@ export interface AuditEntry {
     | 'ingredient'
     | 'inventory'
     | 'supplier'
+    | 'contact'
     | 'printer'
   /** Human-readable Arabic description of what happened */
   detailAr: string
