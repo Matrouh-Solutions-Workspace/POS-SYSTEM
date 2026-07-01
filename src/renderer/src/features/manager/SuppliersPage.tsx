@@ -11,6 +11,7 @@ import {
 } from '@renderer/features/suppliers/supplier-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { ConfirmDialog, FormModal, FormField } from '@renderer/components/ui'
+import { formatPaymentMethodAndSource } from '@renderer/lib/arabic-labels'
 import { listIngredients, listInventoryBatches } from '@renderer/features/inventory/inventory-service'
 import {
   createSupplierReturn,
@@ -222,7 +223,7 @@ export function SuppliersPage(): React.ReactElement {
                   <td>{tx.amount.toFixed(2)}</td>
                   <td>{tx.paidAmount != null ? tx.paidAmount.toFixed(2) : '-'}</td>
                   <td>{tx.remainingAmount != null ? tx.remainingAmount.toFixed(2) : '-'}</td>
-                  <td>{tx.paymentMethod ? `${tx.paymentMethod}${tx.paymentSource ? ` / ${tx.paymentSource}` : ''}` : '-'}</td>
+                  <td>{formatPaymentMethodAndSource(tx.paymentMethod, tx.paymentSource)}</td>
                   <td>{tx.paidByName ?? tx.createdByName ?? tx.createdBy}</td>
                   <td>{tx.noteAr ?? '-'}</td>
                 </tr>

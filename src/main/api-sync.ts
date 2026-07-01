@@ -49,17 +49,17 @@ function parsePayload(entry: OutboxEntry): unknown {
 }
 
 function validateResponse(value: unknown): PushResponse {
-  if (!value || typeof value !== 'object') throw new Error('API returned an invalid sync response')
+  if (!value || typeof value !== 'object') throw new Error('استجابة المزامنة من الخادم غير صالحة')
   const response = value as Partial<PushResponse>
   if (!Array.isArray(response.accepted) || !response.accepted.every((id) => typeof id === 'string')) {
-    throw new Error('API response must contain an accepted operation ID array')
+    throw new Error('استجابة الخادم يجب أن تحتوي على قائمة العمليات المقبولة')
   }
   if (
     response.rejected !== undefined &&
     (!Array.isArray(response.rejected) ||
       !response.rejected.every((item) => item && typeof item.id === 'string'))
   ) {
-    throw new Error('API response contains an invalid rejected operation array')
+    throw new Error('استجابة الخادم تحتوي على قائمة عمليات مرفوضة غير صالحة')
   }
   return response as PushResponse
 }

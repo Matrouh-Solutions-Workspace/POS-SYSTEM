@@ -95,7 +95,7 @@ function isValidDevLicense(license: LicenseFile): boolean {
 
 function licensePublicKey(): string {
   const key = __LICENSE_PUBLIC_KEY__.replace(/\\n/g, '\n').trim()
-  if (!key) throw new Error('SHIFT_POS_LICENSE_PUBLIC_KEY is not configured')
+  if (!key) throw new Error('مفتاح التحقق من الرخصة غير مضبوط في إعدادات التشغيل')
   return key
 }
 

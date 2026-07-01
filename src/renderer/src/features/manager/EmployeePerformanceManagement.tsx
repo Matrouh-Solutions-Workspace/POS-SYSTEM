@@ -8,6 +8,8 @@ import type {
 import { MdCheck, MdRefresh } from 'react-icons/md'
 import { listAllAccounts } from '@renderer/features/auth/auth-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
+import { Modal } from '@renderer/components/ui'
+import { formatDeviceLabel, localizeTechnicalText } from '@renderer/lib/arabic-labels'
 import { getSettings, updateSettings } from '@renderer/features/orders/order-service'
 import {
   approveShiftDifference,
@@ -39,6 +41,19 @@ const ACTIVITY_LABELS: Record<string, string> = {
   cash_rounding_applied: 'تقريب دفع نقدي'
 }
 
+function activityActionLabel(actionType: string): string {
+  return ACTIVITY_LABELS[actionType] ?? 'عملية نظام'
+}
+
+function activityDetail(entry: EmployeeActivityLog): string {
+  const localized = localizeTechnicalText(entry.detailAr).trim()
+  if (localized) return localized
+
+  const parts = [activityActionLabel(entry.actionType), `المستخدم: ${entry.username}`]
+  if (entry.referenceId) parts.push(`المرجع: ${entry.referenceId}`)
+  return parts.join(' - ')
+}
+
 function minutesLabel(value: number): string {
   const hours = Math.floor(value / 60)
   const minutes = Math.round(value % 60)
@@ -60,6 +75,7 @@ export function EmployeePerformanceManagement(): React.ReactElement {
   const [to, setTo] = useState('')
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
+  const [detailsEntry, setDetailsEntry] = useState<EmployeeActivityLog | null>(null)
 
   const userMap = useMemo(() => new Map(users.map((user) => [user.id, user])), [users])
 
@@ -203,21 +219,27 @@ export function EmployeePerformanceManagement(): React.ReactElement {
           )}
 
           {tab === 'activity' && (
-            <table className="data-table">
-              <thead><tr><th>المستخدم</th><th>العملية</th><th>الجهاز</th><th>المرجع</th><th>التفاصيل</th><th>الوقت</th></tr></thead>
-              <tbody>
-                {activity.length === 0 ? <tr><td colSpan={6}>لا يوجد نشاط مسجل في الفترة المحددة.</td></tr> : activity.map((entry) => (
-                  <tr key={entry.id}>
-                    <td>{entry.username}</td>
-                    <td>{ACTIVITY_LABELS[entry.actionType] ?? entry.actionType.replaceAll('_', ' ')}</td>
-                    <td>{entry.deviceId}</td>
-                    <td>{entry.referenceId ?? '-'}</td>
-                    <td>{entry.detailAr}</td>
-                    <td>{new Date(entry.createdAt).toLocaleString('ar-EG')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="table-scroll">
+              <table className="data-table employee-activity-table">
+                <thead><tr><th>المستخدم</th><th>العملية</th><th>الجهاز</th><th>المرجع</th><th>التفاصيل</th><th>الوقت</th></tr></thead>
+                <tbody>
+                  {activity.length === 0 ? <tr><td colSpan={6}>لا يوجد نشاط مسجل في الفترة المحددة.</td></tr> : activity.map((entry) => (
+                    <tr key={entry.id}>
+                      <td>{entry.username}</td>
+                      <td>{activityActionLabel(entry.actionType)}</td>
+                      <td>{formatDeviceLabel(entry.deviceId)}</td>
+                      <td dir="ltr">{entry.referenceId ?? '-'}</td>
+                      <td>
+                        <button type="button" className="btn btn--secondary btn--sm" onClick={() => setDetailsEntry(entry)}>
+                          التفاصيل
+                        </button>
+                      </td>
+                      <td>{new Date(entry.createdAt).toLocaleString('ar-EG')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
 
           {tab === 'closures' && (
@@ -249,6 +271,24 @@ export function EmployeePerformanceManagement(): React.ReactElement {
 
         </>
       )}
+
+      <Modal
+        open={!!detailsEntry}
+        onClose={() => setDetailsEntry(null)}
+        title="تفاصيل نشاط الموظف"
+        maxWidth={560}
+      >
+        {detailsEntry && (
+          <div className="order-details__meta">
+            <div className="order-details__meta-row"><span className="order-details__meta-label">المستخدم</span><span>{detailsEntry.username}</span></div>
+            <div className="order-details__meta-row"><span className="order-details__meta-label">العملية</span><span>{activityActionLabel(detailsEntry.actionType)}</span></div>
+            <div className="order-details__meta-row"><span className="order-details__meta-label">الجهاز</span><span>{formatDeviceLabel(detailsEntry.deviceId)}</span></div>
+            <div className="order-details__meta-row"><span className="order-details__meta-label">المرجع</span><span dir="ltr">{detailsEntry.referenceId ?? '-'}</span></div>
+            <div className="order-details__meta-row"><span className="order-details__meta-label">الوقت</span><span>{new Date(detailsEntry.createdAt).toLocaleString('ar-EG')}</span></div>
+            <p style={{ margin: '14px 0 0', lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{activityDetail(detailsEntry)}</p>
+          </div>
+        )}
+      </Modal>
     </section>
   )
 }

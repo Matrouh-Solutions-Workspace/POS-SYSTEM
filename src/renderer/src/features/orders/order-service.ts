@@ -274,10 +274,10 @@ export async function completeOrder(params: {
   let roundingDifference = 0
 
   if (orderType === 'takeaway' && !params.paymentMethod) {
-    throw new Error('Payment method is required for takeaway orders')
+    throw new Error('يرجى اختيار طريقة الدفع لطلبات التيك أواي')
   }
   if (orderType === 'dine_in' && !params.table) {
-    throw new Error('Table is required for dine-in orders')
+    throw new Error('يرجى اختيار ترابيزة لطلبات الصالة')
   }
 
   const shift = await ensureOpenShift({

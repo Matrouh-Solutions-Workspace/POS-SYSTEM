@@ -8,6 +8,7 @@ import type { AppUser, AuditEntry, AuditAction, DeliveryContact, Ingredient, Inv
 import { listAllAccounts } from '@renderer/features/auth/auth-service'
 import { COLLECTIONS } from '@shared/constants/collections'
 import { getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
+import { localizeTechnicalText } from '@renderer/lib/arabic-labels'
 import { orderReference } from '@shared/services/order-reference'
 
 const RANGE_OPTIONS: { value: AuditDateRange; label: string }[] = [
@@ -207,7 +208,7 @@ export function AuditLogPage(): React.ReactElement {
       entry.actorName.includes(q) ||
       actorLabel(entry).includes(q) ||
       targetLabel(entry).includes(q) ||
-      entry.detailAr.includes(q) ||
+      localizeTechnicalText(entry.detailAr).includes(q) ||
       entry.targetId?.includes(q) ||
       ACTION_LABELS[entry.action].includes(q)
     const matchesAction = actionFilter === 'all' || entry.action === actionFilter
@@ -355,7 +356,9 @@ export function AuditLogPage(): React.ReactElement {
                 <div className="order-details__meta-row"><span className="order-details__meta-label">المعرّف</span><code dir="ltr">{detailsEntry.targetId}</code></div>
               )}
             </div>
-            <p style={{ margin: '14px 0 0', lineHeight: 1.8, color: 'var(--color-text)' }}>{detailsEntry.detailAr}</p>
+            <p style={{ margin: '14px 0 0', lineHeight: 1.8, color: 'var(--color-text)', whiteSpace: 'pre-wrap' }}>
+              {localizeTechnicalText(detailsEntry.detailAr) || 'لا توجد تفاصيل إضافية'}
+            </p>
             <div className="modal-actions mt-16">
               <button type="button" className="btn btn--primary btn--sm" onClick={() => setDetailsEntry(null)}>إغلاق</button>
             </div>

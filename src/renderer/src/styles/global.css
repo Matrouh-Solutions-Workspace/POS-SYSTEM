@@ -4966,6 +4966,10 @@ select.inline-edit-input {
   min-width: 0;
 }
 
+.table-scroll .suppliers-page__transactions-table {
+  min-width: 1080px;
+}
+
 .table-scroll .suppliers-page__returns-table {
   min-width: 780px;
 }
@@ -5004,6 +5008,34 @@ select.inline-edit-input {
 .suppliers-page__transactions-table th:nth-child(4),
 .suppliers-page__transactions-table td:nth-child(4) {
   width: 110px;
+}
+
+.suppliers-page__transactions-table th:nth-child(5),
+.suppliers-page__transactions-table td:nth-child(5),
+.suppliers-page__transactions-table th:nth-child(6),
+.suppliers-page__transactions-table td:nth-child(6) {
+  width: 105px;
+}
+
+.suppliers-page__transactions-table th:nth-child(7),
+.suppliers-page__transactions-table td:nth-child(7) {
+  width: 150px;
+}
+
+.suppliers-page__transactions-table th:nth-child(8),
+.suppliers-page__transactions-table td:nth-child(8) {
+  width: 120px;
+}
+
+.suppliers-page__transactions-table th:nth-child(9),
+.suppliers-page__transactions-table td:nth-child(9) {
+  width: 170px;
+}
+
+.employee-activity-table th:nth-child(5),
+.employee-activity-table td:nth-child(5) {
+  width: 120px;
+  text-align: center;
 }
 
 .suppliers-page__table td:last-child,
