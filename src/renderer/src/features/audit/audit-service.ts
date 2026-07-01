@@ -18,7 +18,7 @@ export interface AuditActor {
 }
 
 export function actorAuditName(actor: AuditActor): string {
-  return actor.username?.trim() || actor.displayName?.trim() || actor.id
+  return actor.displayName?.trim() || actor.username?.trim().replace(/^local_/, '') || actor.id.replace(/^local_/, '')
 }
 
 export function describePatch(patch: Record<string, unknown>): string {

@@ -7,6 +7,7 @@ import { cacheDocs, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 import { dbBatch, dbDelete, type DbBatchOp } from '@renderer/lib/db/sqlite-db'
 import { generateId } from '@renderer/lib/utils/id'
 import { actorAuditName, describePatch, type AuditActor } from '@renderer/features/audit/audit-service'
+import { ensureCashDrawerCanPay } from '@renderer/features/cash/cash-service'
 
 function audit(actor: AuditActor | undefined, params: Parameters<typeof import('@renderer/features/audit/audit-service').logAudit>[0]): void {
   if (!actor) return
@@ -95,6 +96,7 @@ export async function recordSupplierTransaction(params: {
   supplierId: string
   type: SupplierTransactionType
   amount: number
+  paidAmount?: number
   paymentMethod?: 'cash' | 'card' | 'bank' | 'other'
   paymentSource?: 'cash_drawer' | 'external'
   noteAr?: string
@@ -106,22 +108,29 @@ export async function recordSupplierTransaction(params: {
   const supplierName = suppliers.find((supplier) => supplier.id === params.supplierId)?.nameAr ?? params.supplierId
   const currentBalance = await getSupplierBalance(params.supplierId)
   const isPayment = params.type === 'payment' || params.type === 'debt_decrease' || params.type === 'settlement'
+  const paidAmount = Math.max(0, Math.round((params.paidAmount ?? (isPayment ? params.amount : 0)) * 100) / 100)
+  if (!isPayment && paidAmount > params.amount + 0.001) {
+    throw new Error('لا يمكن دفع مبلغ أكبر من قيمة التوريد')
+  }
   if (isPayment && params.amount > currentBalance + 0.001) {
     throw new Error(`لا يمكن دفع مبلغ أكبر من مديونية المورد الحالية (${currentBalance.toFixed(2)})`)
   }
+  if (paidAmount > 0 && (params.paymentSource ?? 'cash_drawer') === 'cash_drawer' && (params.paymentMethod ?? 'cash') === 'cash') {
+    await ensureCashDrawerCanPay(params.shiftId, paidAmount)
+  }
   const remainingAmount = isPayment
     ? Math.max(0, Math.round((currentBalance - params.amount) * 100) / 100)
-    : Math.round((currentBalance + params.amount) * 100) / 100
+    : Math.max(0, Math.round((currentBalance + params.amount - paidAmount) * 100) / 100)
   const actorName = params.actor ? actorAuditName(params.actor) : params.createdBy
   const tx: SupplierTransaction = {
     id: generateId(),
     supplierId: params.supplierId,
     type: params.type,
     amount: params.amount,
-    paidAmount: isPayment ? params.amount : undefined,
+    paidAmount: paidAmount > 0 ? paidAmount : undefined,
     remainingAmount,
-    paymentMethod: isPayment ? (params.paymentMethod ?? 'cash') : undefined,
-    paymentSource: isPayment ? (params.paymentSource ?? 'cash_drawer') : undefined,
+    paymentMethod: paidAmount > 0 ? (params.paymentMethod ?? 'cash') : undefined,
+    paymentSource: paidAmount > 0 ? (params.paymentSource ?? 'cash_drawer') : undefined,
     noteAr: params.noteAr,
     shiftId: params.shiftId,
     createdBy: params.createdBy,
@@ -131,11 +140,11 @@ export async function recordSupplierTransaction(params: {
     createdAt: Date.now()
   }
   const ops: DbBatchOp[] = [{ collection: COLLECTIONS.supplierTransactions, id: tx.id, data: tx, op: 'set' }]
-  if (isPayment && tx.paymentSource === 'cash_drawer' && tx.paymentMethod === 'cash') {
+  if (paidAmount > 0 && tx.paymentSource === 'cash_drawer' && tx.paymentMethod === 'cash') {
     const drawerTx: CashDrawerTransaction = {
       id: generateId(),
       type: 'supplier_payment',
-      amount: -Math.abs(params.amount),
+      amount: -Math.abs(paidAmount),
       shiftId: params.shiftId,
       supplierId: params.supplierId,
       noteAr: params.noteAr || 'دفع مورد',
@@ -153,14 +162,14 @@ export async function recordSupplierTransaction(params: {
     targetType: 'supplier',
     detailAr: `حركة مورد — ${supplierName} — ${SUPPLIER_TX_LABELS[params.type]} — المبلغ ${params.amount}${params.noteAr ? ` — ملاحظة: ${params.noteAr}` : ''}`
   })
-  if (isPayment) {
+  if (paidAmount > 0) {
     audit(params.actor, {
       action: 'supplier_transaction_recorded',
       actorId: params.actor?.id ?? params.createdBy,
       actorName,
       targetId: tx.id,
       targetType: 'supplier',
-      detailAr: `${actorName} paid ${params.amount.toFixed(2)} EGP to supplier ${supplierName} from ${tx.paymentSource === 'cash_drawer' ? 'cash drawer' : 'external source'} — remaining ${remainingAmount.toFixed(2)} — method ${tx.paymentMethod ?? 'cash'}`
+      detailAr: `تم دفع ${paidAmount.toFixed(2)} للمورد ${supplierName} نقدًا من الدرج — إجمالي الحركة: ${params.amount.toFixed(2)} — المتبقي: ${remainingAmount.toFixed(2)} — المستخدم: ${actorName}`
     })
   }
   return tx
@@ -179,6 +188,9 @@ export async function getSupplierBalance(supplierId: string): Promise<number> {
   return txs.reduce((sum, tx) => {
     if (tx.type === 'payment' || tx.type === 'debt_decrease' || tx.type === 'settlement') {
       return sum - tx.amount
+    }
+    if (tx.type === 'purchase_credit') {
+      return sum + Math.max(0, tx.amount - (tx.paidAmount ?? 0))
     }
     return sum + tx.amount
   }, 0)

@@ -12,7 +12,8 @@ import type {
   Payment,
   Shift,
   ShiftAccessResult,
-  ShiftClosureRecord
+  ShiftClosureRecord,
+  Supplier
 } from '@shared/types'
 import { COLLECTIONS, SETTINGS_DOC_ID } from '@shared/constants/collections'
 import { cacheDocs, getCachedDoc, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
@@ -44,6 +45,9 @@ export interface ShiftSummary {
   cardRefunds: number
   cashAdditions: number
   cashExpenses: number
+  supplierPaymentsTotal: number
+  pettyCashExpensesTotal: number
+  purchasePaymentsTotal: number
   roundingAdjustments: number
   expenses: number
   itemSummary: Array<{
@@ -57,6 +61,8 @@ export interface ShiftSummary {
   suppliedInventory: Array<InventoryTransaction & { ingredientNameAr: string }>
   usedInventory: Array<InventoryTransaction & { ingredientNameAr: string }>
   cashTransactions: CashDrawerTransaction[]
+  supplierPayments: ShiftCashDetail[]
+  pettyCashExpenses: ShiftCashDetail[]
 }
 
 export interface ShiftClosurePreview {
@@ -69,10 +75,21 @@ export interface ShiftClosurePreview {
   cashRefunds: number
   cardRefunds: number
   cashAdjustments: number
+  supplierPaymentsTotal: number
+  pettyCashExpensesTotal: number
+  purchasePaymentsTotal: number
+  supplierPayments: ShiftCashDetail[]
+  pettyCashExpenses: ShiftCashDetail[]
   roundingAdjustments: number
   expectedCash: number
   ordersCount: number
   totalSales: number
+}
+
+export interface ShiftCashDetail extends CashDrawerTransaction {
+  supplierName?: string
+  userName: string
+  paymentMethod: 'cash'
 }
 
 async function patchCachedShifts(shiftIds: string[], patch: Partial<Shift>): Promise<void> {
@@ -122,6 +139,28 @@ function transactionBelongsToShift(
   if (tx.orderId && orderIds.has(tx.orderId)) return true
   if (tx.referenceId && orderIds.has(tx.referenceId)) return true
   return tx.createdBy === shift.cashierId && isInShiftWindow(tx.createdAt, shift)
+}
+
+function userFriendlyName(user: Pick<AppUser, 'displayName' | 'username' | 'role'> | undefined, fallback: string): string {
+  if (user?.displayName?.trim()) return user.displayName.trim()
+  if (user?.username?.trim()) return user.username.trim().replace(/^local_/, '')
+  if (user?.role) return user.role
+  return fallback.replace(/^local_/, '')
+}
+
+function buildCashDetails(
+  transactions: CashDrawerTransaction[],
+  suppliers: Supplier[],
+  users: AppUser[]
+): ShiftCashDetail[] {
+  const supplierNames = new Map(suppliers.map((supplier) => [supplier.id, supplier.nameAr]))
+  const usersById = new Map(users.map((user) => [user.id, user]))
+  return transactions.map((tx) => ({
+    ...tx,
+    supplierName: tx.supplierId ? supplierNames.get(tx.supplierId) ?? tx.supplierId : undefined,
+    userName: userFriendlyName(usersById.get(tx.createdBy), tx.createdBy),
+    paymentMethod: 'cash'
+  }))
 }
 
 export async function listShifts(includeArchived = false): Promise<Shift[]> {
@@ -191,11 +230,13 @@ export async function ensureOpenShift(params: {
 }
 
 export async function getShiftClosurePreview(shift: Shift): Promise<ShiftClosurePreview> {
-  const [allOrders, payments, cashTransactions, roundingRecords] = await Promise.all([
+  const [allOrders, payments, cashTransactions, roundingRecords, suppliers, users] = await Promise.all([
     getCachedDocs<Order>(COLLECTIONS.orders),
     getCachedDocs<Payment>(COLLECTIONS.payments),
     listCashDrawerTransactions(),
-    getCachedDocs<CashRoundingTransaction>(COLLECTIONS.cashRoundingTransactions)
+    getCachedDocs<CashRoundingTransaction>(COLLECTIONS.cashRoundingTransactions),
+    getCachedDocs<Supplier>(COLLECTIONS.suppliers),
+    getCachedDocs<AppUser>(COLLECTIONS.users)
   ])
   const orders = allOrders.filter((order) => orderBelongsToShift(order, shift))
   const orderIds = new Set(orders.map((order) => order.id))
@@ -251,9 +292,18 @@ export async function getShiftClosurePreview(shift: Shift): Promise<ShiftClosure
       return sum + (refundOrder ? negativeDrawer : (positiveCashPayments || negativeDrawer))
     }, 0)
   const cashRefunds = recordedCashRefunds + legacyCashRefunds
-  const cashAdjustments = cashTransactions
+  const shiftDrawerTransactions = cashTransactions.filter((transaction) =>
+    transactionBelongsToShift(transaction, shift, orderIds) && !transaction.orderId
+  )
+  const supplierPayments = shiftDrawerTransactions.filter((transaction) => transaction.type === 'supplier_payment')
+  const pettyCashExpenses = shiftDrawerTransactions.filter((transaction) => transaction.type === 'expense')
+  const purchasePayments = shiftDrawerTransactions.filter((transaction) => transaction.type === 'purchase_payment')
+  const supplierPaymentsTotal = supplierPayments.reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0)
+  const pettyCashExpensesTotal = pettyCashExpenses.reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0)
+  const purchasePaymentsTotal = purchasePayments.reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0)
+  const cashAdjustments = shiftDrawerTransactions
     .filter((transaction) =>
-      transactionBelongsToShift(transaction, shift, orderIds) && !transaction.orderId
+      transaction.type === 'cash_in' || transaction.type === 'cash_out'
     )
     .reduce((sum, transaction) => sum + transaction.amount, 0)
   const openingCash = shift.openingCash ?? 0
@@ -273,8 +323,13 @@ export async function getShiftClosurePreview(shift: Shift): Promise<ShiftClosure
     cashRefunds,
     cardRefunds,
     cashAdjustments,
+    supplierPaymentsTotal,
+    pettyCashExpensesTotal,
+    purchasePaymentsTotal,
+    supplierPayments: buildCashDetails(supplierPayments, suppliers, users),
+    pettyCashExpenses: buildCashDetails(pettyCashExpenses, suppliers, users),
     roundingAdjustments,
-    expectedCash: openingCash + cashSales - cashRefunds + cashAdjustments + roundingAdjustments,
+    expectedCash: openingCash + cashSales - cashRefunds + cashAdjustments - supplierPaymentsTotal - pettyCashExpensesTotal - purchasePaymentsTotal + roundingAdjustments,
     ordersCount: completed.length,
     totalSales: completed.reduce((sum, order) => sum + order.total, 0) - refundAmount
   }
@@ -402,13 +457,15 @@ export async function getUnarchivedShiftCount(): Promise<number> {
 }
 
 export async function getShiftSummary(shift: Shift): Promise<ShiftSummary> {
-  const [allOrders, allOrderItems, inventoryTransactions, cashTransactions, ingredients, roundingRecords] = await Promise.all([
+  const [allOrders, allOrderItems, inventoryTransactions, cashTransactions, ingredients, roundingRecords, suppliers, users] = await Promise.all([
     listOrders(2000),
     getCachedDocs<OrderItem>(COLLECTIONS.orderItems),
     listInventoryTransactions(),
     listCashDrawerTransactions(),
     listIngredients(),
-    getCachedDocs<CashRoundingTransaction>(COLLECTIONS.cashRoundingTransactions)
+    getCachedDocs<CashRoundingTransaction>(COLLECTIONS.cashRoundingTransactions),
+    getCachedDocs<Supplier>(COLLECTIONS.suppliers),
+    getCachedDocs<AppUser>(COLLECTIONS.users)
   ])
 
   const orders = allOrders
@@ -491,14 +548,23 @@ export async function getShiftSummary(shift: Shift): Promise<ShiftSummary> {
 
   // Cash reconciliation
   const openingCash = shift.openingCash ?? 0
+  const supplierPaymentTxs = shiftCashTransactions.filter((tx) => !tx.orderId && tx.type === 'supplier_payment')
+  const pettyCashExpenseTxs = shiftCashTransactions.filter((tx) => !tx.orderId && tx.type === 'expense')
+  const purchasePaymentTxs = shiftCashTransactions.filter((tx) => !tx.orderId && tx.type === 'purchase_payment')
+  const supplierPaymentsTotal = supplierPaymentTxs.reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
+  const pettyCashExpensesTotal = pettyCashExpenseTxs.reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
+  const purchasePaymentsTotal = purchasePaymentTxs.reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
   const cashExpenses = shiftCashTransactions
-    .filter((tx) => !tx.orderId && tx.amount < 0)
+    .filter((tx) => !tx.orderId && tx.amount < 0 && (tx.type === 'cash_out' || tx.type === 'expense' || tx.type === 'supplier_payment' || tx.type === 'purchase_payment'))
     .reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
   const cashAdditions = shiftCashTransactions
-    .filter((tx) => !tx.orderId && tx.amount > 0)
+    .filter((tx) => !tx.orderId && tx.amount > 0 && tx.type === 'cash_in')
     .reduce((sum, tx) => sum + tx.amount, 0)
   const expenses = cashExpenses
-  const drawerTotal = cashRevenue - cashRefunds - cashExpenses + cashAdditions
+  const cashAdjustmentsOut = shiftCashTransactions
+    .filter((tx) => !tx.orderId && tx.type === 'cash_out')
+    .reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
+  const drawerTotal = cashRevenue - cashRefunds - supplierPaymentsTotal - pettyCashExpensesTotal - purchasePaymentsTotal - cashAdjustmentsOut + cashAdditions
   const expectedCash = openingCash + drawerTotal
   const actualCash = shift.closingCash
   const cashDifference = actualCash !== undefined ? actualCash - expectedCash : undefined
@@ -522,11 +588,16 @@ export async function getShiftSummary(shift: Shift): Promise<ShiftSummary> {
     cardRefunds,
     cashAdditions,
     cashExpenses,
+    supplierPaymentsTotal,
+    pettyCashExpensesTotal,
+    purchasePaymentsTotal,
     roundingAdjustments,
     expenses,
     itemSummary,
     suppliedInventory: suppliedInventory.map(withName),
     usedInventory: usedInventory.map(withName),
-    cashTransactions: shiftCashTransactions
+    cashTransactions: shiftCashTransactions,
+    supplierPayments: buildCashDetails(supplierPaymentTxs, suppliers, users),
+    pettyCashExpenses: buildCashDetails(pettyCashExpenseTxs, suppliers, users)
   }
 }

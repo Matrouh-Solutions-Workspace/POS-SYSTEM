@@ -46,6 +46,23 @@ export function validateCashRounding(
   return difference
 }
 
+export function calculateAutomaticCashRounding(
+  originalAmount: number,
+  access: CashRoundingAccess
+): { finalAmount: number; differenceAmount: number; reason: string } | null {
+  if (!access.allowed || !Number.isFinite(originalAmount) || originalAmount <= 0) return null
+  const finalAmount = Math.floor(originalAmount * 100) / 100
+  const wholeCurrencyAmount = Math.floor(finalAmount)
+  const differenceAmount = Math.round((originalAmount - wholeCurrencyAmount) * 100) / 100
+  if (differenceAmount <= 0.001) return null
+  if (differenceAmount > access.maxDifference + 0.001) return null
+  return {
+    finalAmount: wholeCurrencyAmount,
+    differenceAmount,
+    reason: 'تقريب نقدي تلقائي'
+  }
+}
+
 export async function listCashRoundingTransactions(filters?: {
   userId?: string
   shiftId?: string

@@ -20,6 +20,7 @@ import { orderReference } from '@shared/services/order-reference'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { getOpenShiftForCashier } from '@renderer/features/shifts/shift-service'
 import {
+  calculateAutomaticCashRounding,
   getCashRoundingAccess,
   type CashRoundingAccess
 } from '@renderer/features/rounding/cash-rounding-service'
@@ -277,8 +278,6 @@ export function OrderHistoryPage(): React.ReactElement {
   const [splitCash, setSplitCash] = useState('')
   const [splitCard, setSplitCard] = useState('')
   const [cashPaymentTarget, setCashPaymentTarget] = useState<Order | null>(null)
-  const [cashRoundedTotal, setCashRoundedTotal] = useState('')
-  const [cashRoundingReason, setCashRoundingReason] = useState('')
   const [cashReceived, setCashReceived] = useState('')
   const [cashRoundingAccess, setCashRoundingAccess] = useState<CashRoundingAccess>({
     enabled: false,
@@ -359,33 +358,17 @@ export function OrderHistoryPage(): React.ReactElement {
   async function openCashPayment(order: Order): Promise<void> {
     setCashRoundingAccess(await getCashRoundingAccess(user))
     setCashPaymentTarget(order)
-    setCashRoundedTotal('')
-    setCashRoundingReason('')
     setCashReceived('')
   }
 
   async function confirmCashPayment(): Promise<void> {
     if (!cashPaymentTarget) return
-    const target = cashRoundedTotal.trim() ? Number(cashRoundedTotal) : cashPaymentTarget.total
+    const automaticRounding = calculateAutomaticCashRounding(cashPaymentTarget.total, cashRoundingAccess)
+    const target = automaticRounding?.finalAmount ?? cashPaymentTarget.total
     const received = cashReceived.trim() ? Number(cashReceived) : target
     if (!Number.isFinite(received) || received < target) {
       showMsg('المبلغ المستلم أقل من إجمالي الطلب', 'error')
       return
-    }
-    const difference = Math.round((cashPaymentTarget.total - target) * 100) / 100
-    if (difference > 0) {
-      if (!cashRoundingAccess.allowed) {
-        showMsg(cashRoundingAccess.reason ?? 'غير مصرح باستخدام التقريب', 'error')
-        return
-      }
-      if (difference > cashRoundingAccess.maxDifference + 0.001) {
-        showMsg(`فرق التقريب يتجاوز الحد المسموح (${cashRoundingAccess.maxDifference.toFixed(2)})`, 'error')
-        return
-      }
-      if (!cashRoundingReason.trim()) {
-        showMsg('سبب التقريب مطلوب', 'error')
-        return
-      }
     }
     try {
       const paid = await markOrderPaid({
@@ -393,8 +376,8 @@ export function OrderHistoryPage(): React.ReactElement {
         cashierId: user.id,
         paymentMethod: 'cash',
         cashReceived: received,
-        roundedTotal: difference > 0 ? target : undefined,
-        roundingReason: difference > 0 ? cashRoundingReason.trim() : undefined
+        roundedTotal: automaticRounding ? target : undefined,
+        roundingReason: automaticRounding ? 'تقريب نقدي تلقائي' : undefined
       })
       if (!paid) return
       const [items, settings] = await Promise.all([getOrderItems(paid.id), getSettings()])
@@ -435,6 +418,11 @@ export function OrderHistoryPage(): React.ReactElement {
       showMsg(e instanceof Error ? e.message : 'فشل', 'error')
     }
   }
+
+  const cashPaymentRounding = cashPaymentTarget
+    ? calculateAutomaticCashRounding(cashPaymentTarget.total, cashRoundingAccess)
+    : null
+  const cashPaymentFinalTotal = cashPaymentRounding?.finalAmount ?? cashPaymentTarget?.total ?? 0
 
   async function openEditModal(order: Order): Promise<void> {
     const items = await getOrderItems(order.id)
@@ -846,27 +834,19 @@ export function OrderHistoryPage(): React.ReactElement {
               <span>المبلغ المستلم من العميل</span>
               <input type="number" min="0" step="0.01" value={cashReceived} onChange={(event) => setCashReceived(event.target.value)} placeholder={cashPaymentTarget.total.toFixed(2)} autoFocus />
             </label>
-            {cashReceived && Number(cashReceived) >= (cashRoundedTotal.trim() ? Number(cashRoundedTotal) : cashPaymentTarget.total) && (
+            {cashReceived && Number(cashReceived) >= cashPaymentFinalTotal && (
               <p className="form-message form-message--ok">
-                الباقي للعميل: {(Number(cashReceived) - (cashRoundedTotal.trim() ? Number(cashRoundedTotal) : cashPaymentTarget.total)).toFixed(2)} {currency}
+                الباقي للعميل: {(Number(cashReceived) - cashPaymentFinalTotal).toFixed(2)} {currency}
               </p>
             )}
             {cashRoundingAccess.enabled && (
-              cashRoundingAccess.allowed ? (
-                <>
-                  <label className="field">
-                    <span>الإجمالي بعد التقريب</span>
-                    <input type="number" min="0" max={cashPaymentTarget.total} step="0.01" value={cashRoundedTotal} onChange={(event) => setCashRoundedTotal(event.target.value)} placeholder={cashPaymentTarget.total.toFixed(2)} />
-                  </label>
-                  {cashRoundedTotal && Number(cashRoundedTotal) < cashPaymentTarget.total && (
-                    <label className="field">
-                      <span>سبب التقريب</span>
-                      <input value={cashRoundingReason} onChange={(event) => setCashRoundingReason(event.target.value)} placeholder="مثال: تسوية فكة" />
-                    </label>
-                  )}
-                  <p className="modal-hint">الحد المسموح: {cashRoundingAccess.maxDifference.toFixed(2)}</p>
-                </>
-              ) : <p className="modal-hint">{cashRoundingAccess.reason}</p>
+              cashPaymentRounding ? (
+                <div className="checkout-modal__readonly-summary">
+                  <div><span>Original total</span><strong>{cashPaymentTarget.total.toFixed(2)}</strong></div>
+                  <div><span>Cash rounding</span><strong>- {cashPaymentRounding.differenceAmount.toFixed(2)}</strong></div>
+                  <div><span>Final total</span><strong>{cashPaymentFinalTotal.toFixed(2)}</strong></div>
+                </div>
+              ) : <p className="modal-hint">{cashRoundingAccess.allowed ? `لا يوجد تقريب قابل للتطبيق داخل الحد المسموح (${cashRoundingAccess.maxDifference.toFixed(2)})` : cashRoundingAccess.reason}</p>
             )}
             <div className="modal-actions">
               <button type="button" className="btn btn--primary" onClick={() => void confirmCashPayment()}>تأكيد الدفع</button>

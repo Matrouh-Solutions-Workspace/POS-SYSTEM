@@ -226,7 +226,10 @@ function renderTotals(order: Order, cur: string): string {
     rows.push(`<div><span>رسوم التوصيل</span><span>${fm(order.deliveryFee, cur)}</span></div>`)
   }
   if (order.roundingDifference && order.roundingDifference > 0) {
-    rows.push(`<div><span>تسوية تقريب نقدي</span><span>- ${fm(order.roundingDifference, cur)}</span></div>`)
+    rows.push(`<div><span>Original total</span><span>${fm(order.originalTotal ?? (order.total + order.roundingDifference), cur)}</span></div>`)
+    rows.push(`<div><span>Cash rounding</span><span>- ${fm(order.roundingDifference, cur)}</span></div>`)
+    rows.push(`<div class="grand-total"><strong>Final total</strong><strong>${fm(order.total, cur)}</strong></div>`)
+    return rows.join('')
   }
   rows.push(`<div class="grand-total"><strong>الإجمالي</strong><strong>${fm(order.total, cur)}</strong></div>`)
   return rows.join('')

@@ -43,6 +43,7 @@ import {
 } from '@renderer/features/shifts/shift-service'
 import { FloorMapPicker } from './FloorMapPicker'
 import {
+  calculateAutomaticCashRounding,
   getCashRoundingAccess,
   type CashRoundingAccess
 } from '@renderer/features/rounding/cash-rounding-service'
@@ -296,11 +297,14 @@ export function PosPage(): React.ReactElement {
   }, [categoryChildren, items, selectedCategory, search])
 
   const subtotal = orderSubtotal(cart)
-  const discountAmt = computeDiscount(
-    subtotal,
-    discountValue ? discountType : undefined,
-    discountValue ? Number(discountValue) : undefined
-  )
+  const discountsEnabled = posSettings?.discountsEnabled !== false
+  const discountAmt = discountsEnabled
+    ? computeDiscount(
+      subtotal,
+      discountValue ? discountType : undefined,
+      discountValue ? Number(discountValue) : undefined
+    )
+    : 0
   const effectiveTax = effectiveTaxRate(
     posSettings?.taxRate,
     orderType,
@@ -311,18 +315,14 @@ export function PosPage(): React.ReactElement {
   const serviceAmt = computeService(subtotal - discountAmt, posSettings?.serviceRate ?? 0)
   const deliveryFeeNum = orderType === 'delivery' ? (Number(deliveryFee) || 0) : 0
   const total = orderTotal(subtotal, discountAmt, taxAmt, deliveryFeeNum, serviceAmt)
-  const roundedTotalNum = roundedTotal.trim() === '' ? total : Number(roundedTotal)
-  const roundingDifference = Math.round((total - roundedTotalNum) * 100) / 100
-  const roundingApplied = orderType === 'takeaway' && checkoutMethod === 'cash' && roundedTotal.trim() !== '' && Math.abs(roundingDifference) >= 0.001
-  const roundingInvalid = roundingApplied && (
-    !roundingAccess.allowed ||
-    !Number.isFinite(roundedTotalNum) ||
-    roundedTotalNum < 0 ||
-    roundedTotalNum > total ||
-    roundingDifference > roundingAccess.maxDifference + 0.001 ||
-    !roundingReason.trim()
-  )
-  const checkoutTotal = roundingApplied && !roundingInvalid ? roundedTotalNum : total
+  const automaticRounding = orderType === 'takeaway' && checkoutMethod === 'cash'
+    ? calculateAutomaticCashRounding(total, roundingAccess)
+    : null
+  const roundedTotalNum = automaticRounding?.finalAmount ?? total
+  const roundingDifference = automaticRounding?.differenceAmount ?? 0
+  const roundingApplied = automaticRounding != null
+  const roundingInvalid = false
+  const checkoutTotal = roundingApplied ? roundedTotalNum : total
 
   // REQ-1: change due when cash payment
   const cashReceivedNum = Number(cashReceived) || 0
@@ -330,7 +330,7 @@ export function PosPage(): React.ReactElement {
   const cashInsufficient = checkoutMethod === 'cash' && cashReceived.trim() !== '' && cashReceivedNum < checkoutTotal
 
   // REQ-6: discount over-limit check
-  const isDiscountLimited = user.role === 'cashier' && maxDiscountPct != null && maxDiscountPct < 100
+  const isDiscountLimited = discountsEnabled && user.role === 'cashier' && maxDiscountPct != null && maxDiscountPct < 100
   const appliedDiscountPct = discountType === 'percent'
     ? Number(discountValue) || 0
     : subtotal > 0 ? (discountAmt / subtotal) * 100 : 0
@@ -508,9 +508,14 @@ export function PosPage(): React.ReactElement {
   async function submitCheckout(): Promise<void> {
     if (cart.length === 0) return
 
+    if (!discountsEnabled && discountValue) {
+      setMessage('الخصومات غير مفعلة من إعدادات المدير')
+      return
+    }
+
     // REQ-6: enforce discount limit for cashiers
     if (discountOverLimit) {
-      setMessage(`الخصم يتجاوز الحد المسموح به (${maxDiscountPct}%) — يتطلب موافقة المدير`)
+      setMessage(`Maximum allowed discount is ${maxDiscountPct}%`)
       return
     }
 
@@ -518,18 +523,6 @@ export function PosPage(): React.ReactElement {
     if (checkoutMethod === 'cash') {
       if (cashReceived.trim() !== '' && cashReceivedNum < checkoutTotal) {
         setMessage('المبلغ المستلم أقل من الإجمالي')
-        return
-      }
-      if (orderType === 'takeaway' && roundingInvalid) {
-        setMessage(
-          !roundingAccess.allowed
-            ? (roundingAccess.reason ?? 'غير مصرح باستخدام التقريب')
-            : roundingDifference > roundingAccess.maxDifference
-              ? `فرق التقريب يتجاوز الحد المسموح (${roundingAccess.maxDifference.toFixed(2)})`
-              : !roundingReason.trim()
-                ? 'سبب التقريب مطلوب'
-                : 'قيمة التقريب غير صالحة'
-        )
         return
       }
     }
@@ -558,14 +551,14 @@ export function PosPage(): React.ReactElement {
         cashReceived: checkoutMethod === 'cash'
           ? (cashReceived.trim() ? cashReceivedNum : checkoutTotal)
           : undefined,
-        discountType: discountValue ? discountType : undefined,
-        discountValue: discountValue ? Number(discountValue) : undefined,
+        discountType: discountsEnabled && discountValue ? discountType : undefined,
+        discountValue: discountsEnabled && discountValue ? Number(discountValue) : undefined,
         deliveryFee: orderType === 'delivery' ? Number(deliveryFee) || 0 : undefined,
         customerName: customerName || undefined,
         customerPhone: customerPhone || undefined,
         customerAddress: customerAddress || undefined,
         roundedTotal: orderType === 'takeaway' && roundingApplied ? roundedTotalNum : undefined,
-        roundingReason: orderType === 'takeaway' && roundingApplied ? roundingReason.trim() : undefined
+        roundingReason: orderType === 'takeaway' && roundingApplied ? 'تقريب نقدي تلقائي' : undefined
       })
       const [orderItems, settings] = await Promise.all([getOrderItems(order.id), getSettings()])
       setCart([])
@@ -585,8 +578,13 @@ export function PosPage(): React.ReactElement {
   async function submitDeliveryUnpaid(): Promise<void> {
     if (cart.length === 0 || orderType !== 'delivery') return
 
+    if (!discountsEnabled && discountValue) {
+      setMessage('الخصومات غير مفعلة من إعدادات المدير')
+      return
+    }
+
     if (discountOverLimit) {
-      setMessage(`الخصم يتجاوز الحد المسموح به (${maxDiscountPct}%) — يتطلب موافقة المدير`)
+      setMessage(`Maximum allowed discount is ${maxDiscountPct}%`)
       return
     }
 
@@ -600,8 +598,8 @@ export function PosPage(): React.ReactElement {
         lines: cart,
         orderNoteAr: orderNote || undefined,
         orderType: 'delivery',
-        discountType: discountValue ? discountType : undefined,
-        discountValue: discountValue ? Number(discountValue) : undefined,
+        discountType: discountsEnabled && discountValue ? discountType : undefined,
+        discountValue: discountsEnabled && discountValue ? Number(discountValue) : undefined,
         deliveryFee: Number(deliveryFee) || 0,
         customerName: customerName || undefined,
         customerPhone: customerPhone || undefined,
@@ -1015,6 +1013,7 @@ export function PosPage(): React.ReactElement {
           setDiscountType={setDiscountType}
           discountValue={discountValue}
           setDiscountValue={setDiscountValue}
+          discountsEnabled={discountsEnabled}
           discountOverLimit={discountOverLimit}
           maxDiscountPct={maxDiscountPct}
           customerName={customerName}

@@ -43,24 +43,26 @@ export function CashierInventoryPage(): React.ReactElement {
         shiftId: shift?.id,
         actor: user
       })
-      if (paid > 0) {
+      if (purchase.supplierId) {
+        await recordSupplierTransaction({
+          supplierId: purchase.supplierId,
+          type: 'purchase_credit',
+          amount: totalCost,
+          paidAmount: paid,
+          paymentMethod: paid > 0 ? 'cash' : undefined,
+          paymentSource: paid > 0 ? 'cash_drawer' : undefined,
+          noteAr: purchase.noteAr || 'توريد مخزون',
+          shiftId: shift?.id,
+          createdBy: user.id,
+          actor: user
+        })
+      } else if (paid > 0) {
         await recordCashDrawerTransaction({
           type: 'purchase_payment',
           amount: -paid,
           shiftId: shift?.id,
           supplierId: purchase.supplierId || undefined,
           noteAr: purchase.noteAr || 'توريد مخزون',
-          createdBy: user.id,
-          actor: user
-        })
-      }
-      if (purchase.supplierId && totalCost > paid) {
-        await recordSupplierTransaction({
-          supplierId: purchase.supplierId,
-          type: 'purchase_credit',
-          amount: totalCost - paid,
-          noteAr: purchase.noteAr || 'توريد على الحساب',
-          shiftId: shift?.id,
           createdBy: user.id,
           actor: user
         })

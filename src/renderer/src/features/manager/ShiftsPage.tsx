@@ -40,6 +40,12 @@ function buildShiftReceiptHtml(summary: ShiftSummary, currency: string): string 
       <td>${item.total.toFixed(2)} ${currency}</td>
     </tr>
   `).join('')
+  const supplierRows = summary.supplierPayments.map((tx) => `
+    <tr><td>${tx.supplierName ?? '-'}</td><td>${Math.abs(tx.amount).toFixed(2)} ${currency}</td><td>${tx.paymentMethod}</td><td>${tx.userName}</td><td>${new Date(tx.createdAt).toLocaleTimeString('ar-EG')}</td></tr>
+  `).join('')
+  const pettyRows = summary.pettyCashExpenses.map((tx) => `
+    <tr><td>${Math.abs(tx.amount).toFixed(2)} ${currency}</td><td>${tx.noteAr ?? '-'}</td><td>${tx.userName}</td><td>${tx.amount.toFixed(2)} ${currency}</td><td>${new Date(tx.createdAt).toLocaleTimeString('ar-EG')}</td></tr>
+  `).join('')
   return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8" />
     <style>
       @page { size: 80mm 297mm; margin: 0; }
@@ -56,6 +62,8 @@ function buildShiftReceiptHtml(summary: ShiftSummary, currency: string): string 
       <div class="line"><span>النهاية</span><span>${summary.shift.closedAt ? new Date(summary.shift.closedAt).toLocaleString('ar-EG') : '-'}</span></div>
       <div class="line"><span>المتوقع في الدرج</span><span>${summary.expectedCash.toFixed(2)} ${currency}</span></div>
       <div class="line"><span>دخل البطاقة المتوقع</span><span>${summary.cardRevenue.toFixed(2)} ${currency}</span></div>
+      <div class="line"><span>Supplier Payments</span><span>${summary.supplierPaymentsTotal.toFixed(2)} ${currency}</span></div>
+      <div class="line"><span>Petty Cash Expenses</span><span>${summary.pettyCashExpensesTotal.toFixed(2)} ${currency}</span></div>
       <div class="line"><span>تسويات التقريب</span><span>${summary.roundingAdjustments.toFixed(2)} ${currency}</span></div>
       <div class="line total"><span>إجمالي الإيراد</span><span>${summary.revenue.toFixed(2)} ${currency}</span></div>
       <hr />
@@ -64,6 +72,8 @@ function buildShiftReceiptHtml(summary: ShiftSummary, currency: string): string 
       <div class="line"><span>تيك أواي</span><span>${typeCounts.takeaway}</span></div>
       <h2>الأصناف المباعة</h2>
       <table><thead><tr><th>الصنف</th><th>الكمية</th><th>الإجمالي</th></tr></thead><tbody>${itemRows}</tbody></table>
+      ${supplierRows ? `<h2>Supplier Payments</h2><table><thead><tr><th>المورد</th><th>المبلغ</th><th>طريقة الدفع</th><th>المستخدم</th><th>الوقت</th></tr></thead><tbody>${supplierRows}</tbody></table>` : ''}
+      ${pettyRows ? `<h2>Petty Cash Expenses</h2><table><thead><tr><th>المبلغ</th><th>السبب</th><th>المستخدم</th><th>تأثير الدرج</th><th>الوقت</th></tr></thead><tbody>${pettyRows}</tbody></table>` : ''}
     </body></html>`
 }
 
@@ -280,6 +290,16 @@ export function ShiftsPage(): React.ReactElement {
                 <small>سحب/مصروفات غير مرتبطة بطلب</small>
               </div>
               <div className="shift-breakdown-card">
+                <span>Supplier Payments</span>
+                <strong>{selected.supplierPaymentsTotal.toFixed(2)}</strong>
+                <small>مدفوعات موردين من الدرج</small>
+              </div>
+              <div className="shift-breakdown-card">
+                <span>Petty Cash Expenses</span>
+                <strong>{selected.pettyCashExpensesTotal.toFixed(2)}</strong>
+                <small>مصروفات نثرية مفصلة</small>
+              </div>
+              <div className="shift-breakdown-card">
                 <span>إضافات الدرج</span>
                 <strong>{selected.cashAdditions.toFixed(2)}</strong>
                 <small>إيداع/إضافة نقدية</small>
@@ -395,6 +415,8 @@ export function ShiftsPage(): React.ReactElement {
             <div className="stat-card"><div className="stat-card__label">إيراد بطاقة</div><div className="stat-card__value">{selected.cardRevenue.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">تسويات التقريب</div><div className="stat-card__value">{selected.roundingAdjustments.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">مصروفات الدرج</div><div className="stat-card__value">{selected.cashExpenses.toFixed(2)}</div></div>
+            <div className="stat-card"><div className="stat-card__label">Supplier Payments</div><div className="stat-card__value">{selected.supplierPaymentsTotal.toFixed(2)}</div></div>
+            <div className="stat-card"><div className="stat-card__label">Petty Cash Expenses</div><div className="stat-card__value">{selected.pettyCashExpensesTotal.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">إضافات الدرج</div><div className="stat-card__value">{selected.cashAdditions.toFixed(2)}</div></div>
             <div className="stat-card"><div className="stat-card__label">كل الطلبات</div><div className="stat-card__value">{selected.orders.length}</div></div>
             <div className="stat-card"><div className="stat-card__label">طلبات مكتملة</div><div className="stat-card__value">{selected.completedOrders.length}</div></div>
@@ -443,6 +465,46 @@ export function ShiftsPage(): React.ReactElement {
               )}
             </div>
           </div>
+
+          {selected.supplierPayments.length > 0 && (
+            <>
+              <h3 className="section-title">Supplier Payments</h3>
+              <table className="data-table">
+                <thead><tr><th>المورد</th><th>المبلغ</th><th>طريقة الدفع</th><th>المستخدم</th><th>الوقت</th></tr></thead>
+                <tbody>
+                  {selected.supplierPayments.map((tx) => (
+                    <tr key={tx.id}>
+                      <td>{tx.supplierName ?? '-'}</td>
+                      <td>{Math.abs(tx.amount).toFixed(2)}</td>
+                      <td>{tx.paymentMethod}</td>
+                      <td>{tx.userName}</td>
+                      <td>{new Date(tx.createdAt).toLocaleString('ar-EG')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+
+          {selected.pettyCashExpenses.length > 0 && (
+            <>
+              <h3 className="section-title">Petty Cash Expenses</h3>
+              <table className="data-table">
+                <thead><tr><th>المبلغ</th><th>السبب</th><th>المستخدم</th><th>تأثير الدرج</th><th>الوقت</th></tr></thead>
+                <tbody>
+                  {selected.pettyCashExpenses.map((tx) => (
+                    <tr key={tx.id}>
+                      <td>{Math.abs(tx.amount).toFixed(2)}</td>
+                      <td>{tx.noteAr ?? '-'}</td>
+                      <td>{tx.userName}</td>
+                      <td>{tx.amount.toFixed(2)}</td>
+                      <td>{new Date(tx.createdAt).toLocaleString('ar-EG')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
 
           <h3 className="section-title">الأصناف المباعة في الشيفت</h3>
           <table className="data-table">

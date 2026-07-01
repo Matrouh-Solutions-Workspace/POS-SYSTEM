@@ -86,9 +86,52 @@ export function CloseShiftModal({
           <div className="stat-card"><div className="stat-card__label">مبيعات بطاقة</div><div className="stat-card__value">{preview.cardSales.toFixed(2)}</div></div>
           <div className="stat-card"><div className="stat-card__label">مرتجعات نقدية</div><div className="stat-card__value">{preview.cashRefunds.toFixed(2)}</div></div>
           <div className="stat-card"><div className="stat-card__label">تسويات الكاش</div><div className="stat-card__value">{preview.cashAdjustments.toFixed(2)}</div></div>
+          <div className="stat-card"><div className="stat-card__label">Supplier Payments</div><div className="stat-card__value">{preview.supplierPaymentsTotal.toFixed(2)}</div></div>
+          <div className="stat-card"><div className="stat-card__label">Petty Cash Expenses</div><div className="stat-card__value">{preview.pettyCashExpensesTotal.toFixed(2)}</div></div>
           <div className="stat-card"><div className="stat-card__label">تسويات التقريب</div><div className="stat-card__value">{preview.roundingAdjustments.toFixed(2)}</div></div>
           <div className="stat-card"><div className="stat-card__label">الكاش المتوقع</div><div className="stat-card__value">{preview.expectedCash.toFixed(2)}</div></div>
         </div>
+
+        {(preview.supplierPayments.length > 0 || preview.pettyCashExpenses.length > 0) && (
+          <div className="checkout-modal__section">
+            {preview.supplierPayments.length > 0 && (
+              <>
+                <p className="checkout-modal__label">Supplier Payments</p>
+                <table className="data-table">
+                  <tbody>
+                    {preview.supplierPayments.map((tx) => (
+                      <tr key={tx.id}>
+                        <td>{tx.supplierName ?? '-'}</td>
+                        <td>{Math.abs(tx.amount).toFixed(2)}</td>
+                        <td>{tx.paymentMethod}</td>
+                        <td>{tx.userName}</td>
+                        <td>{new Date(tx.createdAt).toLocaleTimeString('ar-EG')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+            {preview.pettyCashExpenses.length > 0 && (
+              <>
+                <p className="checkout-modal__label">Petty Cash Expenses</p>
+                <table className="data-table">
+                  <tbody>
+                    {preview.pettyCashExpenses.map((tx) => (
+                      <tr key={tx.id}>
+                        <td>{Math.abs(tx.amount).toFixed(2)}</td>
+                        <td>{tx.noteAr ?? '-'}</td>
+                        <td>{tx.userName}</td>
+                        <td>{tx.amount.toFixed(2)}</td>
+                        <td>{new Date(tx.createdAt).toLocaleTimeString('ar-EG')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
+        )}
 
         <label className="field">
           <span>الكاش الفعلي في الدرج عند الإغلاق{performanceEnabled ? ' (مطلوب)' : ' (اختياري)'}</span>

@@ -2828,6 +2828,18 @@ textarea {
   margin-bottom: 10px;
 }
 
+.checkout-modal__readonly-summary {
+  display: grid;
+  gap: 6px;
+}
+
+.checkout-modal__readonly-summary > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 800;
+}
+
 .checkout-modal__hint {
   font-size: 0.82rem;
   color: var(--color-muted);

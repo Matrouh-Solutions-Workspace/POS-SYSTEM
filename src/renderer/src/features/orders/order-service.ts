@@ -78,6 +78,7 @@ export async function getSettings(): Promise<AppSettings> {
     defaultDeliveryFee: 0,
     shiftManagementEnabled: false,
     employeePerformanceTrackingEnabled: false,
+    discountsEnabled: true,
     cashRoundingEnabled: false,
     maxCashRoundingDifference: 5,
     networkMode: 'standalone',
@@ -124,6 +125,7 @@ export async function updateSettings(
       | 'shiftManagementEnabled'
       | 'employeePerformanceTrackingEnabled'
       | 'employeePerformanceTrackingStartedAt'
+      | 'discountsEnabled'
       | 'cashRoundingEnabled'
       | 'maxCashRoundingDifference'
       | 'maxCashierDiscountPct'
@@ -198,6 +200,9 @@ async function enforceDiscountPermission(params: {
   settings: AppSettings
 }): Promise<void> {
   if (!params.discountType || !params.discountValue || params.discountAmount <= 0) return
+  if (params.settings.discountsEnabled === false) {
+    throw new Error('الخصومات غير مفعلة من إعدادات المدير')
+  }
   const cashier = await getCachedDoc<AppUser>(COLLECTIONS.users, params.cashierId)
   if (!cashier || cashier.role !== 'cashier') return
   const maxPct = params.settings.maxCashierDiscountPct
@@ -282,11 +287,14 @@ export async function completeOrder(params: {
     }
     const cashier = await getCachedDoc<AppUser>(COLLECTIONS.users, params.cashierId)
     if (!cashier) throw new Error('تعذر التحقق من صلاحية التقريب')
-    const { getCashRoundingAccess, validateCashRounding } = await import('../rounding/cash-rounding-service')
+    const { calculateAutomaticCashRounding, getCashRoundingAccess } = await import('../rounding/cash-rounding-service')
     const access = await getCashRoundingAccess(cashier)
-    roundingDifference = validateCashRounding(originalTotal, params.roundedTotal, access)
-    if (!params.roundingReason?.trim()) throw new Error('سبب التقريب مطلوب')
-    total = Math.round(params.roundedTotal * 100) / 100
+    const automaticRounding = calculateAutomaticCashRounding(originalTotal, access)
+    if (!automaticRounding || Math.abs(automaticRounding.finalAmount - params.roundedTotal) >= 0.001) {
+      throw new Error('قيمة التقريب يجب أن تكون محسوبة تلقائيًا من النظام')
+    }
+    roundingDifference = automaticRounding.differenceAmount
+    total = automaticRounding.finalAmount
   }
 
   const existingOrders = (await getCachedDocs<Order>(COLLECTIONS.orders)).filter(
@@ -377,7 +385,7 @@ export async function completeOrder(params: {
       originalAmount: originalTotal,
       finalAmount: total,
       differenceAmount: roundingDifference,
-      reason: params.roundingReason!.trim(),
+      reason: params.roundingReason?.trim() || 'تقريب نقدي تلقائي',
       createdAt: now
     }
   }
@@ -477,7 +485,7 @@ export async function completeOrder(params: {
         actorName: params.cashierName,
         targetId: orderId,
         targetType: 'order',
-        detailAr: `تقريب نقدي لطلب #${order.orderCode ?? order.orderNumber}: من ${originalTotal.toFixed(2)} إلى ${total.toFixed(2)} — ${roundingRecord.reason}`
+        detailAr: `تقريب نقدي لطلب #${order.orderCode ?? order.orderNumber}: الإجمالي الأصلي ${originalTotal.toFixed(2)} — التقريب ${roundingRecord.differenceAmount.toFixed(2)} — الإجمالي النهائي ${total.toFixed(2)}`
       })
     )
   }
@@ -597,11 +605,13 @@ export async function markOrderPaid(params: {
     if (params.paymentMethod !== 'cash') throw new Error('تقريب الإجمالي متاح للدفع النقدي الكامل فقط')
     const cashier = await getCachedDoc<AppUser>(COLLECTIONS.users, params.cashierId)
     if (!cashier) throw new Error('تعذر التحقق من صلاحية التقريب')
-    const { getCashRoundingAccess, validateCashRounding } = await import('../rounding/cash-rounding-service')
+    const { calculateAutomaticCashRounding, getCashRoundingAccess } = await import('../rounding/cash-rounding-service')
     const access = await getCashRoundingAccess(cashier)
-    const difference = validateCashRounding(originalTotal, params.roundedTotal, access)
-    if (!params.roundingReason?.trim()) throw new Error('سبب التقريب مطلوب')
-    finalTotal = Math.round(params.roundedTotal * 100) / 100
+    const automaticRounding = calculateAutomaticCashRounding(originalTotal, access)
+    if (!automaticRounding || Math.abs(automaticRounding.finalAmount - params.roundedTotal) >= 0.001) {
+      throw new Error('قيمة التقريب يجب أن تكون محسوبة تلقائيًا من النظام')
+    }
+    finalTotal = automaticRounding.finalAmount
     const shiftId = order.shiftId ?? (await getOpenShiftForCashier(params.cashierId))?.id
     if (!shiftId) throw new Error('لا يوجد شيفت مفتوح لتسجيل التقريب')
     roundingRecord = {
@@ -613,8 +623,8 @@ export async function markOrderPaid(params: {
       deviceId: await getCurrentDeviceId(),
       originalAmount: originalTotal,
       finalAmount: finalTotal,
-      differenceAmount: difference,
-      reason: params.roundingReason.trim(),
+      differenceAmount: automaticRounding.differenceAmount,
+      reason: params.roundingReason?.trim() || 'تقريب نقدي تلقائي',
       createdAt: now
     }
   }
@@ -705,7 +715,7 @@ export async function markOrderPaid(params: {
         actorName: roundingRecord.username,
         targetId: order.id,
         targetType: 'order',
-        detailAr: `تقريب نقدي لطلب #${order.orderCode ?? order.orderNumber}: من ${originalTotal.toFixed(2)} إلى ${finalTotal.toFixed(2)} — ${roundingRecord.reason}`
+        detailAr: `تقريب نقدي لطلب #${order.orderCode ?? order.orderNumber}: الإجمالي الأصلي ${originalTotal.toFixed(2)} — التقريب ${roundingRecord.differenceAmount.toFixed(2)} — الإجمالي النهائي ${finalTotal.toFixed(2)}`
       })
     )
   }

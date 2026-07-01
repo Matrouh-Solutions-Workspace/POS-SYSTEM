@@ -17,6 +17,7 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
     taxOrderTypes: ['takeaway', 'dine_in', 'delivery'] as Array<'takeaway' | 'dine_in' | 'delivery'>,
     serviceRate: '',
     defaultDeliveryFee: '',
+    discountsEnabled: true,
     maxCashierDiscountPct: '',
     cashRoundingEnabled: false,
     maxCashRoundingDifference: '5'
@@ -35,6 +36,7 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
       taxOrderTypes: settings.taxOrderTypes ?? ['takeaway', 'dine_in', 'delivery'],
       serviceRate: settings.serviceRate != null && settings.serviceRate > 0 ? String(settings.serviceRate) : '',
       defaultDeliveryFee: settings.defaultDeliveryFee != null && settings.defaultDeliveryFee > 0 ? String(settings.defaultDeliveryFee) : '',
+      discountsEnabled: settings.discountsEnabled !== false,
       maxCashierDiscountPct: settings.maxCashierDiscountPct != null && settings.maxCashierDiscountPct < 100 ? String(settings.maxCashierDiscountPct) : '',
       cashRoundingEnabled: settings.cashRoundingEnabled === true,
       maxCashRoundingDifference: String(settings.maxCashRoundingDifference ?? 5)
@@ -56,6 +58,7 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
         taxOrderTypes: receiptForm.taxApplicationMode === 'selected' ? receiptForm.taxOrderTypes : ['takeaway', 'dine_in', 'delivery'],
         serviceRate: receiptForm.serviceRate ? Number(receiptForm.serviceRate) : 0,
         defaultDeliveryFee: receiptForm.defaultDeliveryFee ? Number(receiptForm.defaultDeliveryFee) : 0,
+        discountsEnabled: receiptForm.discountsEnabled,
         maxCashierDiscountPct: receiptForm.maxCashierDiscountPct ? Number(receiptForm.maxCashierDiscountPct) : undefined,
         cashRoundingEnabled: receiptForm.cashRoundingEnabled,
         maxCashRoundingDifference: Math.max(0, Number(receiptForm.maxCashRoundingDifference) || 0)
@@ -130,6 +133,10 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
           <label className="field">
             <span>الحد الأقصى لخصم الكاشير % (فارغ = بدون حد)</span>
             <input type="number" min="0" max="100" step="1" value={receiptForm.maxCashierDiscountPct} onChange={(e) => setReceiptForm((f) => ({ ...f, maxCashierDiscountPct: e.target.value }))} placeholder="مثال: 20" />
+          </label>
+          <label className="field field--checkbox">
+            <input type="checkbox" checked={receiptForm.discountsEnabled} onChange={(event) => setReceiptForm((form) => ({ ...form, discountsEnabled: event.target.checked }))} />
+            <span>تفعيل الخصومات في نقطة البيع</span>
           </label>
           <label className="field field--checkbox">
             <input type="checkbox" checked={receiptForm.cashRoundingEnabled} onChange={(event) => setReceiptForm((form) => ({ ...form, cashRoundingEnabled: event.target.checked }))} />

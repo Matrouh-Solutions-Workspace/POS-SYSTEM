@@ -27,6 +27,7 @@ export interface CheckoutModalProps {
   setDiscountType: (type: DiscountType) => void
   discountValue: string
   setDiscountValue: (value: string) => void
+  discountsEnabled: boolean
   discountOverLimit: boolean
   maxDiscountPct: number | undefined
   customerName: string
@@ -75,6 +76,7 @@ export function CheckoutModal({
   setDiscountType,
   discountValue,
   setDiscountValue,
+  discountsEnabled,
   discountOverLimit,
   maxDiscountPct,
   customerName,
@@ -133,39 +135,21 @@ export function CheckoutModal({
 
             {checkoutMethod === 'cash' && (
               <div className="checkout-modal__cash">
-                {orderType === 'takeaway' && roundingAccess.enabled && (
+                {orderType === 'takeaway' && checkoutMethod === 'cash' && roundingAccess.enabled && (
                   <div className="checkout-modal__rounding">
-                    <div className="checkout-modal__label">تقريب الدفع النقدي</div>
-                    {roundingAccess.allowed ? (
-                      <div className="settings-form-grid">
-                        <label className="field">
-                          <span>الإجمالي بعد التقريب</span>
-                          <input
-                            type="number"
-                            min="0"
-                            max={total}
-                            step="0.01"
-                            value={roundedTotal}
-                            onChange={(event) => setRoundedTotal(event.target.value)}
-                            placeholder={total.toFixed(2)}
-                          />
-                        </label>
-                        <label className="field">
-                          <span>السبب</span>
-                          <input
-                            value={roundingReason}
-                            onChange={(event) => setRoundingReason(event.target.value)}
-                            disabled={!roundingApplied}
-                            placeholder="مثال: تسوية فكة"
-                          />
-                        </label>
-                        <div className={`settings-form-grid__full checkout-modal__hint${roundingInvalid ? ' checkout-modal__hint--danger' : ''}`}>
-                          الحد المسموح: {roundingAccess.maxDifference.toFixed(2)}
-                          {roundingApplied && ` - الفرق: ${roundingDifference.toFixed(2)}`}
-                        </div>
+                    <div className="checkout-modal__label">تقريب الدفع النقدي التلقائي</div>
+                    {roundingApplied ? (
+                      <div className="checkout-modal__readonly-summary">
+                        <div><span>Original total</span><strong>{total.toFixed(2)}</strong></div>
+                        <div><span>Cash rounding</span><strong>- {roundingDifference.toFixed(2)}</strong></div>
+                        <div><span>Final total</span><strong>{checkoutTotal.toFixed(2)}</strong></div>
                       </div>
                     ) : (
-                      <p className="modal-hint m-0">{roundingAccess.reason}</p>
+                      <p className="modal-hint m-0">
+                        {roundingAccess.allowed
+                          ? `لا يوجد تقريب قابل للتطبيق داخل الحد المسموح (${roundingAccess.maxDifference.toFixed(2)})`
+                          : roundingAccess.reason}
+                      </p>
                     )}
                   </div>
                 )}
@@ -224,29 +208,31 @@ export function CheckoutModal({
           </div>
         )}
 
-        <div className="checkout-modal__section">
-          <p className="checkout-modal__label">خصم (اختياري)</p>
-          <div className="checkout-modal__discount">
-            <select value={discountType} onChange={(event) => setDiscountType(event.target.value as DiscountType)}>
-              <option value="percent">نسبة %</option>
-              <option value="fixed">مبلغ ثابت</option>
-            </select>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={discountValue}
-              onChange={(event) => setDiscountValue(event.target.value)}
-              placeholder={discountType === 'percent' ? '10' : '5.00'}
-              className={discountOverLimit ? 'input-danger' : undefined}
-            />
-          </div>
-          {discountOverLimit && (
-            <div className="checkout-modal__warning">
-              الخصم يتجاوز الحد المسموح به ({maxDiscountPct}%). يتطلب موافقة المدير.
+        {discountsEnabled && (
+          <div className="checkout-modal__section">
+            <p className="checkout-modal__label">خصم (اختياري)</p>
+            <div className="checkout-modal__discount">
+              <select value={discountType} onChange={(event) => setDiscountType(event.target.value as DiscountType)}>
+                <option value="percent">نسبة %</option>
+                <option value="fixed">مبلغ ثابت</option>
+              </select>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={discountValue}
+                onChange={(event) => setDiscountValue(event.target.value)}
+                placeholder={discountType === 'percent' ? '10' : '5.00'}
+                className={discountOverLimit ? 'input-danger' : undefined}
+              />
             </div>
-          )}
-        </div>
+            {discountOverLimit && (
+              <div className="checkout-modal__warning">
+                Maximum allowed discount is {maxDiscountPct}%
+              </div>
+            )}
+          </div>
+        )}
 
         {orderType === 'delivery' && (
           <div className="checkout-modal__section">

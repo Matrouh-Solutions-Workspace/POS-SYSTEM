@@ -22,6 +22,8 @@ export interface AppSettings {
   employeePerformanceTrackingEnabled?: boolean
   /** Earliest timestamp included in performance collection after enabling. */
   employeePerformanceTrackingStartedAt?: number
+  /** Enables discounts in POS checkout. When false, no user can apply discounts. */
+  discountsEnabled?: boolean
   /** Allow controlled reductions to cash transaction totals. */
   cashRoundingEnabled?: boolean
   /** Global maximum amount that may be removed from a cash total. */
