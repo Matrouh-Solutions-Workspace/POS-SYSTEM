@@ -339,7 +339,7 @@ export async function closeShift(
   shiftId: string,
   closedBy: string,
   closingCash?: number,
-  options?: { differenceReason?: string; approvedBy?: string; overrideReason?: string }
+  options?: { differenceReason?: string; approvedBy?: string; overrideReason?: string; hardOverride?: boolean }
 ): Promise<void> {
   const now = Date.now()
   const current = await getCachedDoc<Shift>(COLLECTIONS.shifts, shiftId)
@@ -347,10 +347,14 @@ export async function closeShift(
   const settings = await getCachedDoc<AppSettings>(COLLECTIONS.settings, SETTINGS_DOC_ID)
   const closer = await getCachedDoc<AppUser>(COLLECTIONS.users, closedBy)
   const canOverrideCloseIssues = closer?.role === 'manager' || closer?.role === 'supervisor'
+  const hardOverride = options?.hardOverride === true
+  if (hardOverride && closer?.role !== 'manager') {
+    throw new Error('الإغلاق الإداري السريع متاح للمدير فقط.')
+  }
   const performanceEnabled = settings?.employeePerformanceTrackingEnabled === true
   const closure = await getShiftClosurePreview(current)
   const closeIssueCount = closure.pendingOrders.length + closure.incompletePaymentOrders.length
-  if (performanceEnabled) {
+  if (performanceEnabled && !hardOverride) {
     if (closure.pendingOrders.length && !canOverrideCloseIssues) {
       throw new Error(`لا يمكن إغلاق الشيفت: يوجد ${closure.pendingOrders.length} طلب معلق أو غير مدفوع.`)
     }
@@ -361,14 +365,14 @@ export async function closeShift(
       throw new Error('يجب إدخال مبلغ الكاش الفعلي قبل إغلاق الشيفت.')
     }
   }
-  if (performanceEnabled && closeIssueCount > 0 && canOverrideCloseIssues && !options?.overrideReason?.trim()) {
+  if (performanceEnabled && !hardOverride && closeIssueCount > 0 && canOverrideCloseIssues && !options?.overrideReason?.trim()) {
     throw new Error('اكتب سبب تجاوز تحذيرات إغلاق الشيفت قبل التأكيد.')
   }
   const overtimeMinutes = current?.scheduledEndAt
     ? Math.max(0, Math.ceil((now - current.scheduledEndAt) / 60_000))
     : undefined
   const cashDifference = closingCash !== undefined ? closingCash - closure.expectedCash : undefined
-  if (performanceEnabled && cashDifference && Math.abs(cashDifference) >= 0.01 && !options?.differenceReason?.trim()) {
+  if (performanceEnabled && !hardOverride && cashDifference && Math.abs(cashDifference) >= 0.01 && !options?.differenceReason?.trim()) {
     throw new Error('اكتب سبب فرق الكاش قبل تأكيد إغلاق الشيفت.')
   }
   const closedShift: Shift = {
@@ -448,7 +452,9 @@ export async function closeShift(
       actorName: closer?.username ?? closedBy,
       targetId: shiftId,
       targetType: 'shift',
-      detailAr: `إغلاق شيفت — رصيد الإغلاق: ${closingCash?.toFixed(2) ?? '—'}`
+      detailAr: hardOverride
+        ? 'إغلاق شيفت إداري سريع بدون جرد كاش'
+        : `إغلاق شيفت — رصيد الإغلاق: ${closingCash?.toFixed(2) ?? '—'}`
     })
   )
 }

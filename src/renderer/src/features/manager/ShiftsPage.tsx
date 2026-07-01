@@ -155,6 +155,24 @@ export function ShiftsPage(): React.ReactElement {
     }
   }
 
+  async function confirmHardCloseShift(): Promise<void> {
+    if (!closeTarget) return
+    try {
+      await closeShift(closeTarget.id, user.id, undefined, {
+        approvedBy: user.id,
+        hardOverride: true,
+        overrideReason: 'إغلاق إداري سريع بدون جرد الكاش'
+      })
+      setMessage('تم تقفيل الشيفت بإغلاق إداري سريع بدون جرد الكاش')
+      setCloseTarget(null)
+      setClosePreview(null)
+      setSelected(null)
+      await load()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'تعذر تقفيل الشيفت')
+    }
+  }
+
   async function handleArchive(shift: Shift): Promise<void> {
     await archiveShifts([shift.id])
     setMessage('تمت أرشفة الشيفت')
@@ -186,6 +204,7 @@ export function ShiftsPage(): React.ReactElement {
           performanceEnabled={performanceEnabled}
           userRole={user.role}
           onConfirm={(cash, reason, overrideReason) => void confirmCloseShift(cash, reason, overrideReason)}
+          onHardOverride={user.role === 'manager' ? () => void confirmHardCloseShift() : undefined}
           onCancel={() => {
             setCloseTarget(null)
             setClosePreview(null)

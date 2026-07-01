@@ -49,12 +49,14 @@ export function CloseShiftModal({
   performanceEnabled,
   userRole,
   onConfirm,
+  onHardOverride,
   onCancel
 }: {
   preview: ShiftClosurePreview
   performanceEnabled: boolean
   userRole: 'manager' | 'supervisor' | 'cashier'
   onConfirm: (closingCash: number | undefined, differenceReason?: string, overrideReason?: string) => void
+  onHardOverride?: () => void
   onCancel: () => void
 }): React.ReactElement {
   const [cashValue, setCashValue] = useState('')
@@ -179,6 +181,16 @@ export function CloseShiftModal({
         )}
 
         <div className="modal-actions">
+          {userRole === 'manager' && onHardOverride && (
+            <button
+              type="button"
+              className="btn btn--danger"
+              onClick={onHardOverride}
+              title="إغلاق الشيفت فورًا بدون إدخال كاش فعلي أو أسباب تسوية"
+            >
+              إغلاق إداري سريع بدون جرد
+            </button>
+          )}
           <button
             type="button"
             className="btn btn--primary"
