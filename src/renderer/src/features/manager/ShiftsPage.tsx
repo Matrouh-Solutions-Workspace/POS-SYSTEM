@@ -3,9 +3,11 @@ import type { Shift } from '@shared/types'
 import {
   archiveShifts,
   closeShift,
+  getShiftClosurePreview,
   getShiftSummary,
   listShifts,
   unarchiveShifts,
+  type ShiftClosurePreview,
   type ShiftSummary
 } from '@renderer/features/shifts/shift-service'
 import { getSettings } from '@renderer/features/orders/order-service'
@@ -14,6 +16,7 @@ import { MdArchive, MdLock, MdPrint, MdUnarchive, MdVisibility, MdVisibilityOff 
 import { WorkShiftManagement } from './WorkShiftManagement'
 import { EmployeePerformanceManagement } from './EmployeePerformanceManagement'
 import { CashRoundingReport } from './CashRoundingReport'
+import { CloseShiftModal } from '@renderer/features/pos/modals/ShiftModals'
 
 type ShiftViewMode = 'active' | 'archived'
 type ShiftsSection = 'setup' | 'sessions' | 'reports'
@@ -83,6 +86,8 @@ export function ShiftsPage(): React.ReactElement {
   const [viewMode, setViewMode] = useState<ShiftViewMode>('active')
   const [section, setSection] = useState<ShiftsSection>('setup')
   const [selected, setSelected] = useState<ShiftSummary | null>(null)
+  const [closeTarget, setCloseTarget] = useState<Shift | null>(null)
+  const [closePreview, setClosePreview] = useState<ShiftClosurePreview | null>(null)
   const [performanceEnabled, setPerformanceEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
@@ -127,13 +132,27 @@ export function ShiftsPage(): React.ReactElement {
   }
 
   async function handleClose(shift: Shift): Promise<void> {
-    if (performanceEnabled) {
-      setMessage('عند تفعيل تتبع الأداء يجب إغلاق الشيفت من واجهة الكاشير بعد إدخال الكاش الفعلي والتسوية.')
-      return
+    setMessage('')
+    setCloseTarget(shift)
+    setClosePreview(await getShiftClosurePreview(shift))
+  }
+
+  async function confirmCloseShift(closingCash: number | undefined, differenceReason?: string, overrideReason?: string): Promise<void> {
+    if (!closeTarget) return
+    try {
+      await closeShift(closeTarget.id, user.id, closingCash, {
+        differenceReason,
+        overrideReason,
+        approvedBy: user.id
+      })
+      setMessage('تم تقفيل الشيفت')
+      setCloseTarget(null)
+      setClosePreview(null)
+      setSelected(null)
+      await load()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'تعذر تقفيل الشيفت')
     }
-    await closeShift(shift.id, user.id)
-    setMessage('تم تقفيل الشيفت')
-    await load()
   }
 
   async function handleArchive(shift: Shift): Promise<void> {
@@ -161,6 +180,18 @@ export function ShiftsPage(): React.ReactElement {
 
   return (
     <div className="shifts-page">
+      {closeTarget && closePreview && (
+        <CloseShiftModal
+          preview={closePreview}
+          performanceEnabled={performanceEnabled}
+          userRole={user.role}
+          onConfirm={(cash, reason, overrideReason) => void confirmCloseShift(cash, reason, overrideReason)}
+          onCancel={() => {
+            setCloseTarget(null)
+            setClosePreview(null)
+          }}
+        />
+      )}
       <section className="shifts-shell" aria-labelledby="shifts-page-title">
         <div className="shifts-hero__copy">
           <span className="shifts-hero__eyebrow">إدارة التشغيل والكاشيرات</span>
@@ -369,7 +400,7 @@ export function ShiftsPage(): React.ReactElement {
                       {selected?.shift.id === shift.id ? <MdVisibilityOff /> : <MdVisibility />}
                       {selected?.shift.id === shift.id ? ' إخفاء' : ' عرض'}
                     </button>
-                    {shift.status === 'open' && viewMode === 'active' && !performanceEnabled && (
+                    {shift.status === 'open' && viewMode === 'active' && (
                       <button type="button" className="btn btn--secondary btn--sm" onClick={() => void handleClose(shift)}>
                         <MdLock /> تقفيل
                       </button>
