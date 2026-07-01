@@ -94,24 +94,33 @@ export function CloseShiftModal({
           <div className="stat-card"><div className="stat-card__label">مبيعات بطاقة</div><div className="stat-card__value">{preview.cardSales.toFixed(2)}</div></div>
           <div className="stat-card"><div className="stat-card__label">مرتجعات نقدية</div><div className="stat-card__value">{preview.cashRefunds.toFixed(2)}</div></div>
           <div className="stat-card"><div className="stat-card__label">تسويات الكاش</div><div className="stat-card__value">{preview.cashAdjustments.toFixed(2)}</div></div>
-          <div className="stat-card"><div className="stat-card__label">Supplier Payments</div><div className="stat-card__value">{preview.supplierPaymentsTotal.toFixed(2)}</div></div>
-          <div className="stat-card"><div className="stat-card__label">Petty Cash Expenses</div><div className="stat-card__value">{preview.pettyCashExpensesTotal.toFixed(2)}</div></div>
+          <div className="stat-card"><div className="stat-card__label">مدفوعات الموردين</div><div className="stat-card__value">{preview.supplierPaymentsTotal.toFixed(2)}</div></div>
+          <div className="stat-card"><div className="stat-card__label">مصروفات نثرية</div><div className="stat-card__value">{preview.pettyCashExpensesTotal.toFixed(2)}</div></div>
           <div className="stat-card"><div className="stat-card__label">تسويات التقريب</div><div className="stat-card__value">{preview.roundingAdjustments.toFixed(2)}</div></div>
           <div className="stat-card"><div className="stat-card__label">الكاش المتوقع</div><div className="stat-card__value">{preview.expectedCash.toFixed(2)}</div></div>
         </div>
 
-        {(preview.supplierPayments.length > 0 || preview.pettyCashExpenses.length > 0) && (
+        {(preview.supplierPayments.length > 0 || preview.pettyCashExpenses.length > 0 || preview.suppliedInventory.length > 0) && (
           <div className="checkout-modal__section">
             {preview.supplierPayments.length > 0 && (
               <>
-                <p className="checkout-modal__label">Supplier Payments</p>
+                <p className="checkout-modal__label">مدفوعات الموردين</p>
                 <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>المورد</th>
+                      <th>المبلغ</th>
+                      <th>طريقة الدفع</th>
+                      <th>المستخدم</th>
+                      <th>الوقت</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     {preview.supplierPayments.map((tx) => (
                       <tr key={tx.id}>
                         <td>{tx.supplierName ?? '-'}</td>
                         <td>{Math.abs(tx.amount).toFixed(2)}</td>
-                        <td>{tx.paymentMethod}</td>
+                        <td>نقدي</td>
                         <td>{tx.userName}</td>
                         <td>{new Date(tx.createdAt).toLocaleTimeString('ar-EG')}</td>
                       </tr>
@@ -122,8 +131,17 @@ export function CloseShiftModal({
             )}
             {preview.pettyCashExpenses.length > 0 && (
               <>
-                <p className="checkout-modal__label">Petty Cash Expenses</p>
+                <p className="checkout-modal__label">مصروفات نثرية</p>
                 <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>المبلغ</th>
+                      <th>السبب</th>
+                      <th>المستخدم</th>
+                      <th>تأثير الدرج</th>
+                      <th>الوقت</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     {preview.pettyCashExpenses.map((tx) => (
                       <tr key={tx.id}>
@@ -131,6 +149,35 @@ export function CloseShiftModal({
                         <td>{tx.noteAr ?? '-'}</td>
                         <td>{tx.userName}</td>
                         <td>{tx.amount.toFixed(2)}</td>
+                        <td>{new Date(tx.createdAt).toLocaleTimeString('ar-EG')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+            {preview.suppliedInventory.length > 0 && (
+              <>
+                <p className="checkout-modal__label">عمليات توريد المخزون</p>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>الصنف</th>
+                      <th>الكمية</th>
+                      <th>التكلفة</th>
+                      <th>المورد</th>
+                      <th>المستخدم</th>
+                      <th>الوقت</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.suppliedInventory.map((tx) => (
+                      <tr key={tx.id}>
+                        <td>{tx.ingredientNameAr}</td>
+                        <td>{Math.abs(tx.quantity).toFixed(3).replace(/0+$/g, '').replace(/\.$/g, '')} {tx.unit}</td>
+                        <td>{(tx.totalCost ?? 0).toFixed(2)}</td>
+                        <td>{tx.supplierName ?? '-'}</td>
+                        <td>{tx.userName}</td>
                         <td>{new Date(tx.createdAt).toLocaleTimeString('ar-EG')}</td>
                       </tr>
                     ))}
