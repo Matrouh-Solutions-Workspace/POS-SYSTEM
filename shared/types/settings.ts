@@ -28,6 +28,8 @@ export interface AppSettings {
   cashRoundingEnabled?: boolean
   /** Global maximum amount that may be removed from a cash total. */
   maxCashRoundingDifference?: number
+  /** Nearest cash step used by automatic cash rounding, e.g. 1, 5, or 10. */
+  cashRoundingIncrement?: number
   /**
    * Maximum discount % a cashier can apply without manager override.
    * undefined or 100 means no limit.

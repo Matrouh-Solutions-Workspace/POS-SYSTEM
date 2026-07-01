@@ -65,6 +65,8 @@ export interface PendingCartSelection {
   anchor: DOMRect
 }
 
+const ALL_CATEGORY_ID = '__all__'
+
 
 
 // ── Confirm dine-in occupied table modal ──────────────────────────────────
@@ -174,7 +176,8 @@ export function PosPage(): React.ReactElement {
   const [roundingAccess, setRoundingAccess] = useState<CashRoundingAccess>({
     enabled: false,
     allowed: false,
-    maxDifference: 0
+    maxDifference: 0,
+    increment: 1
   })
   const [roundedTotal, setRoundedTotal] = useState('')
   const [roundingReason, setRoundingReason] = useState('')
@@ -276,7 +279,7 @@ export function PosPage(): React.ReactElement {
 
   const filteredItems = useMemo(() => {
     let list = items
-    if (selectedCategory) {
+    if (selectedCategory && selectedCategory !== ALL_CATEGORY_ID) {
       const visibleIds = new Set<string>([selectedCategory])
       const collectChildren = (categoryId: string): void => {
         for (const child of categoryChildren.get(categoryId) ?? []) {
@@ -286,7 +289,7 @@ export function PosPage(): React.ReactElement {
       }
       collectChildren(selectedCategory)
       list = list.filter((item) => visibleIds.has(item.categoryId))
-    } else if (!search.trim()) {
+    } else if (!search.trim() && selectedCategory !== ALL_CATEGORY_ID) {
       return []
     }
     if (search.trim()) {
@@ -321,6 +324,9 @@ export function PosPage(): React.ReactElement {
   const roundedTotalNum = automaticRounding?.finalAmount ?? total
   const roundingDifference = automaticRounding?.differenceAmount ?? 0
   const roundingApplied = automaticRounding != null
+  const roundingDisplay = roundingDifference > 0
+    ? `- ${roundingDifference.toFixed(2)}`
+    : `+ ${Math.abs(roundingDifference).toFixed(2)}`
   const roundingInvalid = false
   const checkoutTotal = roundingApplied ? roundedTotalNum : total
 
@@ -790,11 +796,11 @@ export function PosPage(): React.ReactElement {
     setCloseShiftModal(true)
   }
 
-  async function confirmCloseShift(closingCash: number | undefined, differenceReason?: string): Promise<void> {
+  async function confirmCloseShift(closingCash: number | undefined, differenceReason?: string, overrideReason?: string): Promise<void> {
     const shift = await getOpenShiftForCashier(user.id)
     if (!shift) return
     try {
-      await closeShift(shift.id, user.id, closingCash, { differenceReason })
+      await closeShift(shift.id, user.id, closingCash, { differenceReason, overrideReason })
       setCloseShiftModal(false)
       setCloseShiftPreview(null)
       setMessage('تمت تسوية وإغلاق الشيفت')
@@ -824,7 +830,8 @@ export function PosPage(): React.ReactElement {
         <CloseShiftModal
           preview={closeShiftPreview}
           performanceEnabled={performanceTrackingEnabled}
-          onConfirm={(cash, reason) => void confirmCloseShift(cash, reason)}
+          userRole={user.role}
+          onConfirm={(cash, reason, overrideReason) => void confirmCloseShift(cash, reason, overrideReason)}
           onCancel={() => { setCloseShiftModal(false); setCloseShiftPreview(null) }}
         />
       )}
@@ -870,6 +877,7 @@ export function PosPage(): React.ReactElement {
           categoryChildren={categoryChildren}
           items={items}
           selectedCategory={selectedCategory}
+          allCategoryId={ALL_CATEGORY_ID}
           onSelectCategory={setSelectedCategory}
         />
 
@@ -1107,7 +1115,7 @@ export function PosPage(): React.ReactElement {
                             </label>
                             <div className="settings-form-grid__full" style={{ fontSize: '0.82rem', color: roundingInvalid ? 'var(--color-danger)' : 'var(--color-muted)' }}>
                               الحد المسموح: {roundingAccess.maxDifference.toFixed(2)}
-                              {roundingApplied && ` — الفرق: ${roundingDifference.toFixed(2)}`}
+                              {roundingApplied && ` — الفرق: ${roundingDisplay}`}
                             </div>
                           </div>
                         ) : (
@@ -1299,7 +1307,7 @@ export function PosPage(): React.ReactElement {
               )}
               {roundingApplied && !roundingInvalid && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--color-danger)' }}>
-                  <span>تسوية تقريب نقدي</span><span>- {roundingDifference.toFixed(2)}</span>
+                  <span>تسوية تقريب نقدي</span><span>{roundingDisplay}</span>
                 </div>
               )}
               <div style={{

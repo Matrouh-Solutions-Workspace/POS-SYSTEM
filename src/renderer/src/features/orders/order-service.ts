@@ -81,6 +81,7 @@ export async function getSettings(): Promise<AppSettings> {
     discountsEnabled: true,
     cashRoundingEnabled: false,
     maxCashRoundingDifference: 5,
+    cashRoundingIncrement: 1,
     networkMode: 'standalone',
     masterServerPort: 47831,
     sideDisconnectPolicy: 'block_actions',
@@ -128,6 +129,7 @@ export async function updateSettings(
       | 'discountsEnabled'
       | 'cashRoundingEnabled'
       | 'maxCashRoundingDifference'
+      | 'cashRoundingIncrement'
       | 'maxCashierDiscountPct'
       | 'keyboardShortcuts'
       | 'networkMode'
@@ -345,9 +347,9 @@ export async function completeOrder(params: {
     serviceAmount: serviceAmount > 0 ? serviceAmount : undefined,
     deliveryFee: deliveryFee > 0 ? deliveryFee : undefined,
     total,
-    originalTotal: roundingDifference > 0 ? originalTotal : undefined,
-    roundingDifference: roundingDifference > 0 ? roundingDifference : undefined,
-    roundingReason: roundingDifference > 0 ? params.roundingReason?.trim() : undefined,
+    originalTotal: Math.abs(roundingDifference) > 0.001 ? originalTotal : undefined,
+    roundingDifference: Math.abs(roundingDifference) > 0.001 ? roundingDifference : undefined,
+    roundingReason: Math.abs(roundingDifference) > 0.001 ? params.roundingReason?.trim() : undefined,
     cashPaidAmount: cashReceived,
     cashChangeAmount: cashChange,
     noteAr: params.orderNoteAr,
@@ -374,7 +376,7 @@ export async function completeOrder(params: {
     lineTotal: lineTotal(line.unitPrice, line.quantity),
     noteAr: line.noteAr
   }))
-  if (roundingDifference > 0) {
+  if (Math.abs(roundingDifference) > 0.001) {
     roundingRecord = {
       id: generateId(),
       orderId,
@@ -476,6 +478,23 @@ export async function completeOrder(params: {
         detailAr: `خصم ${params.discountType === 'percent' ? `${params.discountValue}%` : `${discountAmount.toFixed(2)} ثابت`} على طلب — إجمالي: ${total.toFixed(2)}`
       })
     )
+    const actor = await getCachedDoc<AppUser>(COLLECTIONS.users, params.cashierId)
+    const maxPct = settings.maxCashierDiscountPct
+    const appliedPct = params.discountType === 'percent'
+      ? (params.discountValue ?? 0)
+      : subtotal > 0 ? (discountAmount / subtotal) * 100 : 0
+    if ((actor?.role === 'manager' || actor?.role === 'supervisor') && maxPct != null && maxPct < 100 && appliedPct > maxPct + 0.001) {
+      void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+        logAudit({
+          action: 'manager_override_discount',
+          actorId: params.cashierId,
+          actorName: actor.username,
+          targetId: orderId,
+          targetType: 'order',
+          detailAr: `تجاوز خصم المدير على طلب #${order.orderCode ?? order.orderNumber}: الخصم ${appliedPct.toFixed(2)}% والحد ${maxPct}%`
+        })
+      )
+    }
   }
   if (roundingRecord) {
     void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
@@ -902,7 +921,7 @@ export async function cancelOrder(params: {
       }
     : null
   const roundingReversal: CashRoundingTransaction | null =
-    shouldReverseCash && order.shiftId && (order.roundingDifference ?? 0) > 0
+    shouldReverseCash && order.shiftId && Math.abs(order.roundingDifference ?? 0) > 0.001
       ? {
           id: generateId(),
           orderId: order.id,
@@ -1189,7 +1208,7 @@ export async function refundOrder(params: {
     }] : [])
   ]
   const roundingReversal: CashRoundingTransaction | null =
-    original.shiftId && refundRoundingShare > 0
+    original.shiftId && Math.abs(refundRoundingShare) > 0.001
       ? {
           id: generateId(),
           orderId: refundId,

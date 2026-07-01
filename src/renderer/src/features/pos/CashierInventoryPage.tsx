@@ -22,6 +22,12 @@ export function CashierInventoryPage(): React.ReactElement {
 
   useEffect(() => { void load() }, [load])
 
+  useEffect(() => {
+    if (!message) return undefined
+    const timeout = window.setTimeout(() => setMessage(''), 4500)
+    return () => window.clearTimeout(timeout)
+  }, [message])
+
   async function handlePurchase(e: FormEvent): Promise<void> {
     e.preventDefault()
     try {
@@ -95,7 +101,12 @@ export function CashierInventoryPage(): React.ReactElement {
 
   return (
     <div className="settings-page">
-      {message && <p className={`form-message pos-floating-message ${message.includes('فشل') || message.includes('لا يمكن') ? 'form-message--error' : 'form-message--ok'}`}>{message}</p>}
+      {message && (
+        <div className={`form-message pos-floating-message ${message.includes('فشل') || message.includes('لا يمكن') ? 'form-message--error' : 'form-message--ok'}`}>
+          <span>{message}</span>
+          <button type="button" className="pos-floating-message__close" onClick={() => setMessage('')} aria-label="إغلاق">×</button>
+        </div>
+      )}
       <div className="card">
         <h2 className="card__title">توريد مخزون</h2>
         <form onSubmit={(e) => void handlePurchase(e)}>

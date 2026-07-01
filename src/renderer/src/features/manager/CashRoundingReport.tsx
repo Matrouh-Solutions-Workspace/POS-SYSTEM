@@ -74,11 +74,14 @@ export function CashRoundingReport(): React.ReactElement {
         <tbody>
           {records.length === 0 ? <tr><td colSpan={9}>لا توجد عمليات تقريب في الفترة المحددة.</td></tr> : records.map((record) => {
             const order = orderMap.get(record.orderId)
-            const type = record.differenceAmount < 0
+            const isReversal = record.reason.includes('عكس')
+            const type = isReversal
               ? 'عكس'
-              : order?.status === 'cancelled'
-                ? 'مطبق على طلب ملغي'
-                : 'تطبيق'
+              : record.finalAmount > record.originalAmount
+                ? 'تقريب لأعلى'
+                : order?.status === 'cancelled'
+                  ? 'مطبق على طلب ملغي'
+                  : 'تقريب لأسفل'
             return (
               <tr key={record.id}>
                 <td>{order ? `#${orderReference(order)}` : record.orderId}</td>

@@ -1,5 +1,23 @@
 # POS MVP Launch Assessment
 
+## Current PR: Shift, payment, discount, rounding, and POS UX fixes
+
+### Completed
+
+- Added configurable automatic cash rounding to the nearest manager-selected cash step, with signed rounding differences for rounding down or up.
+- Kept cash rounding server-side controlled: POS submits the system-calculated total only, and order/payment records store the original total, final total, and adjustment.
+- Updated receipts, checkout, order history cash payment, refunds, cancellations, and shift reconciliation to handle signed rounding correctly.
+- Added manager/supervisor shift-close override flow for pending or incomplete orders, with a required override reason stored on the closure record.
+- Logged manager/supervisor discount overrides when the applied discount exceeds the cashier discount limit.
+- Added an "All" POS category entry so cashiers can show all active items without drilling into a category first.
+- Improved cashier inventory notifications with lower floating placement, auto-dismiss, and manual close.
+
+### Remaining manual validation
+
+- Validate cash rounding with step values 1, 5, and 10 against real cash drawer expectations.
+- Confirm manager/supervisor shift-close override wording and closure records in a real shift.
+- Confirm printer receipt output for rounding up and rounding down cases.
+
 ## Current PR: POS accounting, permissions, and UX fixes
 
 ### Completed

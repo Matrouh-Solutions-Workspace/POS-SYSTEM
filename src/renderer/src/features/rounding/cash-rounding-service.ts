@@ -11,23 +11,53 @@ export interface CashRoundingAccess {
   enabled: boolean
   allowed: boolean
   maxDifference: number
+  increment: number
   reason?: string
+}
+
+function money(value: number): number {
+  return Math.round(value * 100) / 100
 }
 
 export async function getCashRoundingAccess(user: AppUser): Promise<CashRoundingAccess> {
   const settings = await getCachedDoc<AppSettings>(COLLECTIONS.settings, SETTINGS_DOC_ID)
   const enabled = settings?.cashRoundingEnabled === true
   const globalMax = Math.max(0, settings?.maxCashRoundingDifference ?? 0)
+  const increment = Math.max(0.01, settings?.cashRoundingIncrement ?? 1)
   const employeeAllowed = user.role === 'manager' || user.allowCashRounding === true
   const employeeMax = user.maxCashRoundingDifference
   const maxDifference = employeeMax != null
     ? Math.min(globalMax, Math.max(0, employeeMax))
     : globalMax
 
-  if (!enabled) return { enabled: false, allowed: false, maxDifference: 0, reason: 'تقريب الدفع النقدي غير مفعّل.' }
-  if (!employeeAllowed) return { enabled: true, allowed: false, maxDifference: 0, reason: 'هذا الحساب غير مصرح له باستخدام تقريب النقدي.' }
-  if (maxDifference <= 0) return { enabled: true, allowed: false, maxDifference: 0, reason: 'حد التقريب المسموح يساوي صفرًا.' }
-  return { enabled: true, allowed: true, maxDifference }
+  if (!enabled) {
+    return {
+      enabled: false,
+      allowed: false,
+      maxDifference: 0,
+      increment,
+      reason: 'تقريب الدفع النقدي غير مفعل.'
+    }
+  }
+  if (!employeeAllowed) {
+    return {
+      enabled: true,
+      allowed: false,
+      maxDifference: 0,
+      increment,
+      reason: 'هذا الحساب غير مصرح له باستخدام تقريب الدفع النقدي.'
+    }
+  }
+  if (maxDifference <= 0) {
+    return {
+      enabled: true,
+      allowed: false,
+      maxDifference: 0,
+      increment,
+      reason: 'حد التقريب المسموح يساوي صفرًا.'
+    }
+  }
+  return { enabled: true, allowed: true, maxDifference, increment }
 }
 
 export function validateCashRounding(
@@ -35,12 +65,11 @@ export function validateCashRounding(
   finalAmount: number,
   access: CashRoundingAccess
 ): number {
-  if (!access.allowed) throw new Error(access.reason ?? 'غير مصرح باستخدام تقريب النقدي')
+  if (!access.allowed) throw new Error(access.reason ?? 'غير مصرح باستخدام تقريب الدفع النقدي')
   if (!Number.isFinite(finalAmount) || finalAmount < 0) throw new Error('المبلغ النهائي غير صالح')
-  if (finalAmount > originalAmount) throw new Error('التقريب لا يمكنه زيادة إجمالي الطلب')
-  const difference = Math.round((originalAmount - finalAmount) * 100) / 100
-  if (difference <= 0) throw new Error('المبلغ المقرب يجب أن يكون أقل من الإجمالي الأصلي')
-  if (difference > access.maxDifference + 0.001) {
+  const difference = money(originalAmount - finalAmount)
+  if (Math.abs(difference) <= 0.001) throw new Error('التقريب غير مؤثر')
+  if (Math.abs(difference) > access.maxDifference + 0.001) {
     throw new Error(`فرق التقريب يتجاوز الحد المسموح (${access.maxDifference.toFixed(2)})`)
   }
   return difference
@@ -51,13 +80,14 @@ export function calculateAutomaticCashRounding(
   access: CashRoundingAccess
 ): { finalAmount: number; differenceAmount: number; reason: string } | null {
   if (!access.allowed || !Number.isFinite(originalAmount) || originalAmount <= 0) return null
-  const finalAmount = Math.floor(originalAmount * 100) / 100
-  const wholeCurrencyAmount = Math.floor(finalAmount)
-  const differenceAmount = Math.round((originalAmount - wholeCurrencyAmount) * 100) / 100
-  if (differenceAmount <= 0.001) return null
-  if (differenceAmount > access.maxDifference + 0.001) return null
+  const increment = Math.max(0.01, access.increment || 1)
+  const finalAmount = money(Math.round(originalAmount / increment) * increment)
+  if (finalAmount < 0) return null
+  const differenceAmount = money(originalAmount - finalAmount)
+  if (Math.abs(differenceAmount) <= 0.001) return null
+  if (Math.abs(differenceAmount) > access.maxDifference + 0.001) return null
   return {
-    finalAmount: wholeCurrencyAmount,
+    finalAmount,
     differenceAmount,
     reason: 'تقريب نقدي تلقائي'
   }

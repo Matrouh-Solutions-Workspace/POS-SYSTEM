@@ -99,6 +99,9 @@ export function CheckoutModal({
   onClose
 }: CheckoutModalProps): React.ReactElement {
   const canSubmitPaid = !loading && !cashInsufficient && !discountOverLimit && !roundingInvalid
+  const roundingDisplay = roundingDifference > 0
+    ? `- ${roundingDifference.toFixed(2)}`
+    : `+ ${Math.abs(roundingDifference).toFixed(2)}`
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -141,7 +144,7 @@ export function CheckoutModal({
                     {roundingApplied ? (
                       <div className="checkout-modal__readonly-summary">
                         <div><span>Original total</span><strong>{total.toFixed(2)}</strong></div>
-                        <div><span>Cash rounding</span><strong>- {roundingDifference.toFixed(2)}</strong></div>
+                        <div><span>Cash rounding</span><strong>{roundingDisplay}</strong></div>
                         <div><span>Final total</span><strong>{checkoutTotal.toFixed(2)}</strong></div>
                       </div>
                     ) : (
@@ -273,7 +276,7 @@ export function CheckoutModal({
             <div><span>الخدمة</span><span>{serviceAmt.toFixed(2)}</span></div>
           )}
           {roundingApplied && !roundingInvalid && (
-            <div className="checkout-modal__summary-danger"><span>تسوية تقريب نقدي</span><span>- {roundingDifference.toFixed(2)}</span></div>
+            <div className="checkout-modal__summary-danger"><span>تسوية تقريب نقدي</span><span>{roundingDisplay}</span></div>
           )}
           <div className="checkout-modal__summary-total">
             <span>الإجمالي</span>

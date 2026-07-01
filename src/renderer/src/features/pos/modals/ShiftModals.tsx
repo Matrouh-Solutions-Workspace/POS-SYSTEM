@@ -47,21 +47,27 @@ export function OpeningCashModal({
 export function CloseShiftModal({
   preview,
   performanceEnabled,
+  userRole,
   onConfirm,
   onCancel
 }: {
   preview: ShiftClosurePreview
   performanceEnabled: boolean
-  onConfirm: (closingCash: number | undefined, differenceReason?: string) => void
+  userRole: 'manager' | 'supervisor' | 'cashier'
+  onConfirm: (closingCash: number | undefined, differenceReason?: string, overrideReason?: string) => void
   onCancel: () => void
 }): React.ReactElement {
   const [cashValue, setCashValue] = useState('')
   const [differenceReason, setDifferenceReason] = useState('')
+  const [overrideReason, setOverrideReason] = useState('')
   const parsedCash = cashValue.trim() === '' ? undefined : Number(cashValue)
   const difference = parsedCash === undefined || !Number.isFinite(parsedCash)
     ? undefined
     : parsedCash - preview.expectedCash
-  const blocked = preview.pendingOrders.length > 0 || preview.incompletePaymentOrders.length > 0
+  const hasCloseIssues = preview.pendingOrders.length > 0 || preview.incompletePaymentOrders.length > 0
+  const canOverrideCloseIssues = userRole === 'manager' || userRole === 'supervisor'
+  const blocked = hasCloseIssues && !canOverrideCloseIssues
+  const overrideRequired = performanceEnabled && hasCloseIssues && canOverrideCloseIssues
   const reasonRequired = performanceEnabled && difference !== undefined && Math.abs(difference) >= 0.01
 
   return (
@@ -158,6 +164,20 @@ export function CloseShiftModal({
           </label>
         )}
 
+        {hasCloseIssues && (
+          <div className="p-8 mt-12 mb-12 rounded-6 border-2 border-[#ef4444] bg-[#fef2f2] text-[#991b1b] font-bold text-sm">
+            {blocked ? 'لا يمكن إغلاق الشيفت قبل معالجة التحذيرات:' : 'تحذير قبل إغلاق الشيفت:'}
+            {preview.pendingOrders.length > 0 && ` ${preview.pendingOrders.length} طلب معلق أو غير مدفوع.`}
+            {preview.incompletePaymentOrders.length > 0 && ` ${preview.incompletePaymentOrders.length} طلب بمدفوعات ناقصة.`}
+          </div>
+        )}
+        {overrideRequired && (
+          <label className="field">
+            <span>سبب تجاوز تحذيرات الإغلاق (مطلوب)</span>
+            <textarea value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="مثال: تمت مراجعة الطلبات يدويًا بواسطة المدير" />
+          </label>
+        )}
+
         <div className="modal-actions">
           <button
             type="button"
@@ -166,9 +186,10 @@ export function CloseShiftModal({
               blocked ||
               (performanceEnabled && parsedCash === undefined) ||
               (parsedCash !== undefined && (!Number.isFinite(parsedCash) || parsedCash < 0)) ||
-              (reasonRequired && !differenceReason.trim())
+              (reasonRequired && !differenceReason.trim()) ||
+              (overrideRequired && !overrideReason.trim())
             }
-            onClick={() => onConfirm(parsedCash, differenceReason.trim() || undefined)}
+            onClick={() => onConfirm(parsedCash, differenceReason.trim() || undefined, overrideReason.trim() || undefined)}
           >
             تأكيد التسوية والإغلاق
           </button>

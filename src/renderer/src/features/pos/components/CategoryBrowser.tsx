@@ -5,16 +5,20 @@ export function CategoryBrowser({
   categoryChildren,
   items,
   selectedCategory,
+  allCategoryId,
   onSelectCategory
 }: {
   categories: MenuCategory[]
   categoryChildren: Map<string, MenuCategory[]>
   items: MenuItem[]
   selectedCategory: string | null
+  allCategoryId?: string
   onSelectCategory: (id: string | null) => void
 }): React.ReactElement {
   const categoriesById = new Map(categories.map((category) => [category.id, category]))
-  const selected = selectedCategory ? categoriesById.get(selectedCategory) : undefined
+  const selected = selectedCategory && selectedCategory !== allCategoryId
+    ? categoriesById.get(selectedCategory)
+    : undefined
   const roots = categories.filter(
     (category) => !category.parentId || !categoriesById.has(category.parentId)
   )
@@ -48,6 +52,16 @@ export function CategoryBrowser({
           </div>
         </div>
         <div className="pos-category-grid">
+          {allCategoryId && (
+            <button
+              type="button"
+              className="pos-category-card pos-category-card--all"
+              onClick={() => onSelectCategory(allCategoryId)}
+            >
+              <span className="pos-category-card__name">الكل</span>
+              <span className="pos-category-card__meta">{items.length} صنف</span>
+            </button>
+          )}
           {roots.map((category) => {
             const childrenCount = categoryChildren.get(category.id)?.length ?? 0
             const itemCount = countItemsInCategory(category.id)

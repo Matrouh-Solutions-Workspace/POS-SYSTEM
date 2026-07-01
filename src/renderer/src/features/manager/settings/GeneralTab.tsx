@@ -20,7 +20,8 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
     discountsEnabled: true,
     maxCashierDiscountPct: '',
     cashRoundingEnabled: false,
-    maxCashRoundingDifference: '5'
+    maxCashRoundingDifference: '5',
+    cashRoundingIncrement: '1'
   })
   const [receiptSaving, setReceiptSaving] = useState(false)
   const [receiptMsg, setReceiptMsg] = useState<string | null>(null)
@@ -39,7 +40,8 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
       discountsEnabled: settings.discountsEnabled !== false,
       maxCashierDiscountPct: settings.maxCashierDiscountPct != null && settings.maxCashierDiscountPct < 100 ? String(settings.maxCashierDiscountPct) : '',
       cashRoundingEnabled: settings.cashRoundingEnabled === true,
-      maxCashRoundingDifference: String(settings.maxCashRoundingDifference ?? 5)
+      maxCashRoundingDifference: String(settings.maxCashRoundingDifference ?? 5),
+      cashRoundingIncrement: String(settings.cashRoundingIncrement ?? 1)
     })
   }, [settings])
 
@@ -61,7 +63,8 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
         discountsEnabled: receiptForm.discountsEnabled,
         maxCashierDiscountPct: receiptForm.maxCashierDiscountPct ? Number(receiptForm.maxCashierDiscountPct) : undefined,
         cashRoundingEnabled: receiptForm.cashRoundingEnabled,
-        maxCashRoundingDifference: Math.max(0, Number(receiptForm.maxCashRoundingDifference) || 0)
+        maxCashRoundingDifference: Math.max(0, Number(receiptForm.maxCashRoundingDifference) || 0),
+        cashRoundingIncrement: Math.max(0.01, Number(receiptForm.cashRoundingIncrement) || 1)
       }
       await updateSettings(patch, user)
       onSettingsSaved({ ...settings, ...patch, updatedAt: Date.now() })
@@ -145,6 +148,14 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
           <label className="field">
             <span>أقصى فرق تقريب مسموح</span>
             <input type="number" min="0" step="0.01" disabled={!receiptForm.cashRoundingEnabled} value={receiptForm.maxCashRoundingDifference} onChange={(event) => setReceiptForm((form) => ({ ...form, maxCashRoundingDifference: event.target.value }))} placeholder="5.00" />
+          </label>
+          <label className="field">
+            <span>خطوة التقريب النقدي</span>
+            <select disabled={!receiptForm.cashRoundingEnabled} value={receiptForm.cashRoundingIncrement} onChange={(event) => setReceiptForm((form) => ({ ...form, cashRoundingIncrement: event.target.value }))}>
+              <option value="1">1</option>
+              <option value="5">5</option>
+              <option value="10">10</option>
+            </select>
           </label>
         </div>
         <div className="form-actions">

@@ -52,6 +52,10 @@ export interface ShiftClosureRecord {
   differenceReason?: string
   approvedBy?: string
   approvedAt?: number
+  overrideReason?: string
+  overrideBy?: string
+  overrideRole?: string
+  overrideAt?: number
   ordersCount: number
   closedAt: number
   createdAt: number

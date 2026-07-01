@@ -339,24 +339,30 @@ export async function closeShift(
   shiftId: string,
   closedBy: string,
   closingCash?: number,
-  options?: { differenceReason?: string; approvedBy?: string }
+  options?: { differenceReason?: string; approvedBy?: string; overrideReason?: string }
 ): Promise<void> {
   const now = Date.now()
   const current = await getCachedDoc<Shift>(COLLECTIONS.shifts, shiftId)
   if (!current || current.status === 'closed') return
   const settings = await getCachedDoc<AppSettings>(COLLECTIONS.settings, SETTINGS_DOC_ID)
+  const closer = await getCachedDoc<AppUser>(COLLECTIONS.users, closedBy)
+  const canOverrideCloseIssues = closer?.role === 'manager' || closer?.role === 'supervisor'
   const performanceEnabled = settings?.employeePerformanceTrackingEnabled === true
   const closure = await getShiftClosurePreview(current)
+  const closeIssueCount = closure.pendingOrders.length + closure.incompletePaymentOrders.length
   if (performanceEnabled) {
-    if (closure.pendingOrders.length) {
+    if (closure.pendingOrders.length && !canOverrideCloseIssues) {
       throw new Error(`لا يمكن إغلاق الشيفت: يوجد ${closure.pendingOrders.length} طلب معلق أو غير مدفوع.`)
     }
-    if (closure.incompletePaymentOrders.length) {
+    if (closure.incompletePaymentOrders.length && !canOverrideCloseIssues) {
       throw new Error(`لا يمكن إغلاق الشيفت: يوجد ${closure.incompletePaymentOrders.length} طلب بمدفوعات غير مكتملة.`)
     }
     if (closingCash === undefined || !Number.isFinite(closingCash) || closingCash < 0) {
       throw new Error('يجب إدخال مبلغ الكاش الفعلي قبل إغلاق الشيفت.')
     }
+  }
+  if (performanceEnabled && closeIssueCount > 0 && canOverrideCloseIssues && !options?.overrideReason?.trim()) {
+    throw new Error('اكتب سبب تجاوز تحذيرات إغلاق الشيفت قبل التأكيد.')
   }
   const overtimeMinutes = current?.scheduledEndAt
     ? Math.max(0, Math.ceil((now - current.scheduledEndAt) / 60_000))
@@ -398,6 +404,10 @@ export async function closeShift(
     differenceReason: options?.differenceReason?.trim() || undefined,
     approvedBy: options?.approvedBy,
     approvedAt: options?.approvedBy ? now : undefined,
+    overrideReason: closeIssueCount > 0 ? options?.overrideReason?.trim() : undefined,
+    overrideBy: closeIssueCount > 0 ? closedBy : undefined,
+    overrideRole: closeIssueCount > 0 ? closer?.role : undefined,
+    overrideAt: closeIssueCount > 0 ? now : undefined,
     ordersCount: closure.ordersCount,
     closedAt: now,
     createdAt: now,
@@ -435,7 +445,7 @@ export async function closeShift(
     logAudit({
       action: 'shift_closed',
       actorId: closedBy,
-      actorName: closedBy,
+      actorName: closer?.username ?? closedBy,
       targetId: shiftId,
       targetType: 'shift',
       detailAr: `إغلاق شيفت — رصيد الإغلاق: ${closingCash?.toFixed(2) ?? '—'}`
