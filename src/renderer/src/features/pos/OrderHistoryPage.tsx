@@ -843,9 +843,9 @@ export function OrderHistoryPage(): React.ReactElement {
             {cashRoundingAccess.enabled && (
               cashPaymentRounding ? (
                 <div className="checkout-modal__readonly-summary">
-                  <div><span>Original total</span><strong>{cashPaymentTarget.total.toFixed(2)}</strong></div>
-                  <div><span>Cash rounding</span><strong>{cashPaymentRounding.differenceAmount > 0 ? '-' : '+'} {Math.abs(cashPaymentRounding.differenceAmount).toFixed(2)}</strong></div>
-                  <div><span>Final total</span><strong>{cashPaymentFinalTotal.toFixed(2)}</strong></div>
+                  <div><span>الإجمالي قبل التقريب</span><strong>{cashPaymentTarget.total.toFixed(2)}</strong></div>
+                  <div><span>تقريب النقدية</span><strong>{cashPaymentRounding.differenceAmount > 0 ? '-' : '+'} {Math.abs(cashPaymentRounding.differenceAmount).toFixed(2)}</strong></div>
+                  <div><span>الإجمالي النهائي</span><strong>{cashPaymentFinalTotal.toFixed(2)}</strong></div>
                 </div>
               ) : <p className="modal-hint">{cashRoundingAccess.allowed ? `لا يوجد تقريب قابل للتطبيق داخل الحد المسموح (${cashRoundingAccess.maxDifference.toFixed(2)})` : cashRoundingAccess.reason}</p>
             )}

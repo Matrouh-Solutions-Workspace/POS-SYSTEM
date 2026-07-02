@@ -387,7 +387,7 @@ export function ReceiptDesigner({
                 <MdPrint /> اختبار طباعة المعاينة
               </button>
             </div>
-            <iframe title="POS receipt preview" srcDoc={previewHtml} />
+            <iframe title="معاينة إيصال نقطة البيع" srcDoc={previewHtml} />
           </div>
 
           <div className="receipt-designer-panel">
@@ -418,10 +418,10 @@ export function ReceiptDesigner({
                       <span>{receiptSectionLabel(section)}</span>
                     </label>
                     <div className="table-actions">
-                      <button type="button" className="btn btn--secondary btn--sm" disabled={index === 0} onClick={() => moveSection(section, -1)} aria-label="Move up">
+                      <button type="button" className="btn btn--secondary btn--sm" disabled={index === 0} onClick={() => moveSection(section, -1)} aria-label="تحريك لأعلى">
                         <MdArrowUpward />
                       </button>
-                      <button type="button" className="btn btn--secondary btn--sm" disabled={index === sectionOrder.length - 1} onClick={() => moveSection(section, 1)} aria-label="Move down">
+                      <button type="button" className="btn btn--secondary btn--sm" disabled={index === sectionOrder.length - 1} onClick={() => moveSection(section, 1)} aria-label="تحريك لأسفل">
                         <MdArrowDownward />
                       </button>
                     </div>
@@ -523,7 +523,7 @@ export function ReceiptDesigner({
                 ) : (
                   <img
                     src={logoMode === 'mono' ? logoProcessedDataUrl || logoDataUrl : logoDataUrl}
-                    alt="Receipt logo print preview"
+                    alt="معاينة طباعة شعار الإيصال"
                     style={logoPreviewBlockStyle(logoAlign, logoMaxWidthPercent)}
                   />
                 )}

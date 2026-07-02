@@ -180,9 +180,9 @@ export function CheckoutModal({
                     <div className="checkout-modal__label">تقريب الدفع النقدي التلقائي</div>
                     {roundingApplied ? (
                       <div className="checkout-modal__readonly-summary">
-                        <div><span>Original total</span><strong>{total.toFixed(2)}</strong></div>
-                        <div><span>Cash rounding</span><strong>{roundingDisplay}</strong></div>
-                        <div><span>Final total</span><strong>{checkoutTotal.toFixed(2)}</strong></div>
+                        <div><span>الإجمالي قبل التقريب</span><strong>{total.toFixed(2)}</strong></div>
+                        <div><span>تقريب النقدية</span><strong>{roundingDisplay}</strong></div>
+                        <div><span>الإجمالي النهائي</span><strong>{checkoutTotal.toFixed(2)}</strong></div>
                       </div>
                     ) : (
                       <p className="modal-hint m-0">

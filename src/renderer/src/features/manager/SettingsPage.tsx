@@ -30,7 +30,7 @@ export function SettingsPage(): React.ReactElement {
     { key: 'printers',  labelAr: 'الطابعات',      icon: <MdPrint /> },
     { key: 'backup',    labelAr: 'نسخ احتياطي',   icon: <MdBackup /> },
     { key: 'shortcuts', labelAr: 'الاختصارات',    icon: <MdKeyboard /> },
-    { key: 'network', labelAr: 'Network', icon: <MdDevices /> },
+    { key: 'network', labelAr: 'الشبكة', icon: <MdDevices /> },
   ]
 
   function handleSettingsTabKeyDown(e: React.KeyboardEvent<HTMLDivElement>): void {

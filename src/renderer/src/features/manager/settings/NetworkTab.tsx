@@ -63,18 +63,18 @@ export function NetworkTab({ settings, onSettingsSaved }: { settings: AppSetting
 
   return (
     <div className="card">
-      <h2 className="card__title"><MdDevices style={{ verticalAlign: 'middle', marginLeft: 6 }} />Network terminals</h2>
+      <h2 className="card__title"><MdDevices style={{ verticalAlign: 'middle', marginLeft: 6 }} />أجهزة الشبكة</h2>
       {networkMsg && <p className={`form-message ${networkMsg.includes('فشل') ? 'form-message--error' : 'form-message--ok'}`}>{networkMsg}</p>}
       <div className="settings-form-grid">
         <label className="field">
           <span>وضع الجهاز</span>
           <select value={networkMode} onChange={(e) => setNetworkMode(e.target.value as typeof networkMode)}>
-            <option value="standalone">Standalone</option>
-            <option value="master">Master</option>
+            <option value="standalone">جهاز منفرد</option>
+            <option value="master">ماستر</option>
           </select>
         </label>
         <label className="field">
-          <span>Master port</span>
+          <span>منفذ الماستر</span>
           <input type="number" min="1024" max="65535" value={masterServerPort} onChange={(e) => setMasterServerPort(Number(e.target.value) || 47831)} />
         </label>
         <label className="field">
@@ -98,14 +98,14 @@ export function NetworkTab({ settings, onSettingsSaved }: { settings: AppSetting
       </div>
       <div className="license-panel__meta mt-16">
         <span>الحالة</span>
-        <code dir="ltr">{masterStatus?.running ? `Running on ${masterStatus.port}` : 'Stopped'}</code>
+        <code dir="ltr">{masterStatus?.running ? `يعمل على ${masterStatus.port}` : 'متوقف'}</code>
       </div>
       <div className="license-panel__meta">
-        <span>IPs</span>
+        <span>عناوين IP</span>
         <code dir="ltr">{masterStatus?.addresses?.join(', ') || '-'}</code>
       </div>
       <div className="license-panel__meta">
-        <span>Pairing code</span>
+        <span>كود الربط</span>
         <code dir="ltr">{masterStatus?.pairingCode ?? '-'}</code>
       </div>
       {masterStatus?.lastError && <p className="form-message form-message--error">{masterStatus.lastError}</p>}

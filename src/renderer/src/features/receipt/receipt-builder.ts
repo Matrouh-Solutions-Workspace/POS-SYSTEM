@@ -229,9 +229,9 @@ function renderTotals(order: Order, cur: string): string {
     const roundingDisplay = order.roundingDifference > 0
       ? `- ${fm(order.roundingDifference, cur)}`
       : `+ ${fm(Math.abs(order.roundingDifference), cur)}`
-    rows.push(`<div><span>Original total</span><span>${fm(order.originalTotal ?? (order.total + order.roundingDifference), cur)}</span></div>`)
-    rows.push(`<div><span>Cash rounding</span><span>${roundingDisplay}</span></div>`)
-    rows.push(`<div class="grand-total"><strong>Final total</strong><strong>${fm(order.total, cur)}</strong></div>`)
+    rows.push(`<div><span>الإجمالي قبل التقريب</span><span>${fm(order.originalTotal ?? (order.total + order.roundingDifference), cur)}</span></div>`)
+    rows.push(`<div><span>تقريب النقدية</span><span>${roundingDisplay}</span></div>`)
+    rows.push(`<div class="grand-total"><strong>الإجمالي النهائي</strong><strong>${fm(order.total, cur)}</strong></div>`)
     return rows.join('')
   }
   rows.push(`<div class="grand-total"><strong>الإجمالي</strong><strong>${fm(order.total, cur)}</strong></div>`)

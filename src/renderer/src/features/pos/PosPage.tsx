@@ -114,7 +114,7 @@ export function PosPage(): React.ReactElement {
   const [unavailableItems, setUnavailableItems] = useState<Map<string, string>>(new Map())
   const [lowStockItems, setLowStockItems] = useState<Set<string>>(new Set())
   const [posLogoUrl, setPosLogoUrl] = useState('/image.png')
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(ALL_CATEGORY_ID)
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
   // Pos Store
@@ -277,6 +277,14 @@ export function PosPage(): React.ReactElement {
   }, [user])
 
   useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    setSelectedCategory((current) => {
+      if (!current) return current
+      if (current === ALL_CATEGORY_ID) return current
+      return categories.some((category) => category.id === current) ? current : null
+    })
+  }, [categories])
 
   // ── Derived values ────────────────────────────────────────────────────
 
