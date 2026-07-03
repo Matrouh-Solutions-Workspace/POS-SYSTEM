@@ -18,6 +18,7 @@ service-account.json
 license-private-key.pem
 license-public-key.pem.tmp
 build/updater-token.generated.nsh
+build/updater-auth.generated.json
 activation_request.dat
 license.dat
 

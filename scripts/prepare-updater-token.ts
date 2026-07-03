@@ -28,12 +28,14 @@ function escapeNsisDefine(value: string): string {
     .replace(/\r?\n/g, '')
 }
 
-const outputPath = resolve(process.cwd(), 'build/updater-token.generated.nsh')
-mkdirSync(dirname(outputPath), { recursive: true })
+const nsisPath = resolve(process.cwd(), 'build/updater-token.generated.nsh')
+const resourceTokenPath = resolve(process.cwd(), 'build/updater-auth.generated.json')
+mkdirSync(dirname(nsisPath), { recursive: true })
 writeFileSync(
-  outputPath,
+  nsisPath,
   `!define SHIFT_POS_INSTALL_UPDATE_TOKEN "${escapeNsisDefine(token)}"\n`,
   'utf8'
 )
+writeFileSync(resourceTokenPath, `${JSON.stringify({ token })}\n`, 'utf8')
 
 console.log('Prepared installer updater token include.')

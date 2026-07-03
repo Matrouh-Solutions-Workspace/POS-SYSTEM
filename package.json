@@ -1,6 +1,6 @@
 {
   "name": "shift-pos",
-  "version": "2.2.9",
+  "version": "2.2.10",
   "description": "Restaurant Management and POS - Arabic RTL",
   "main": "./out/main/index.js",
   "private": true,
@@ -63,6 +63,12 @@
       "!**/.env*",
       "!service-account.json",
       "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "build/updater-auth.generated.json",
+        "to": "updater-auth.json"
+      }
     ],
     "asar": true,
     "compression": "maximum",

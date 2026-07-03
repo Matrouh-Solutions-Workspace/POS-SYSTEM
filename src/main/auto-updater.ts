@@ -56,6 +56,7 @@ function readPrivateUpdateToken(): string | undefined {
   }
 
   const candidates = [
+    join(process.resourcesPath, 'updater-auth.json'),
     join(app.getPath('userData'), 'updater-auth.json'),
     join(app.getPath('userData'), 'update-token.txt'),
     join(app.getPath('userData'), '.env'),
