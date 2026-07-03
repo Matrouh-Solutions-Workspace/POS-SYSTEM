@@ -217,7 +217,7 @@ const PRODUCT_TYPE_LABELS: Record<ProductType, string> = {
 function needsRecipe(itemType: MenuItemType, productType: ProductType): boolean {
   if (itemType === 'service') return false
   if (itemType === 'raw_material') return false
-  return productType === 'recipe'
+  return productType === 'recipe' || productType === 'manufactured'
 }
 
 function needsLinkedStock(itemType: MenuItemType, productType: ProductType): boolean {
@@ -862,7 +862,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
                   <td>
                     <div className="table-actions">
                       <button type="button" className="btn btn--secondary btn--sm" onClick={()=>startEditItem(item)}><MdEdit/> تعديل</button>
-                      {(item.itemType == null || item.itemType === 'product') && item.productType !== 'no_inventory' && item.productType !== 'ready_made' && item.productType !== 'manufactured' && (
+                      {(item.itemType == null || item.itemType === 'product') && item.productType !== 'no_inventory' && item.productType !== 'ready_made' && (
                         <button type="button" className="btn btn--secondary btn--sm" onClick={()=>void openRecipe(item)}>الوصفة</button>
                       )}
                       <ConfirmDialog

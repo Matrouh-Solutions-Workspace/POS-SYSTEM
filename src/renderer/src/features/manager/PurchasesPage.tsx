@@ -11,7 +11,7 @@
  * This mirrors how Square, Toast, and Lightspeed structure their inventory.
  */
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import type { Ingredient, IngredientStock, Supplier } from '@shared/types'
+import type { Ingredient, IngredientStock, MenuItem, Supplier } from '@shared/types'
 import {
   listIngredients,
   createIngredient,
@@ -20,7 +20,8 @@ import {
   getIngredientStocks,
   recordPurchase,
   recordWaste,
-  recordAdjustment
+  recordAdjustment,
+  produceManufacturedProduct
 } from '@renderer/features/inventory/inventory-service'
 import { ConfirmDeleteButton } from '@renderer/components/ConfirmDeleteButton'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
@@ -29,15 +30,17 @@ import { MdAdd, MdEdit, MdCheck, MdClose, MdInventory, MdKitchen, MdRemove, MdSw
 import { usePageState } from '@renderer/features/tabs/page-state-store'
 import { FormField, FormModal } from '@renderer/components/ui'
 import { listSuppliers, recordSupplierTransaction } from '@renderer/features/suppliers/supplier-service'
+import { listMenuItems } from '@renderer/features/menu/menu-service'
 
 const UNITS = ['جرام', 'كيلوجرام', 'قطعة', 'مل', 'لتر']
 
 // ── Stock tab ───────────────────────────────────────────────────────────────
 
-function StockTab({ stocks, ingredients, suppliers, onRefresh, setMessage }: {
+function StockTab({ stocks, ingredients, suppliers, menuItems, onRefresh, setMessage }: {
   stocks: IngredientStock[]
   ingredients: Ingredient[]
   suppliers: Supplier[]
+  menuItems: MenuItem[]
   onRefresh: () => Promise<void>
   setMessage: (m: string | null) => void
 }): React.ReactElement {
@@ -48,10 +51,19 @@ function StockTab({ stocks, ingredients, suppliers, onRefresh, setMessage }: {
   const [totalCost, setTotalCost] = useState('')
   const [debtAmount, setDebtAmount] = useState('')
   const [note, setNote] = useState('')
+  const [productionItemId, setProductionItemId] = useState('')
+  const [productionQty, setProductionQty] = useState('')
+  const [productionNote, setProductionNote] = useState('')
   const [modal, setModal] = useState<{ stock: IngredientStock; action: InventoryActionType } | null>(null)
 
   const activeIngredients = ingredients.filter((i) => i.active)
   const activeSuppliers = suppliers.filter((s) => s.active)
+  const manufacturedItems = menuItems.filter((item) =>
+    item.active &&
+    item.itemType === 'product' &&
+    item.productType === 'manufactured' &&
+    !!item.linkedIngredientId
+  )
   const lowStockCount = stocks.filter((s) => s.lowStockThreshold != null && s.quantity <= s.lowStockThreshold).length
 
   async function handlePurchase(e: FormEvent): Promise<void> {
@@ -73,6 +85,25 @@ function StockTab({ stocks, ingredients, suppliers, onRefresh, setMessage }: {
     setQty(''); setTotalCost(''); setDebtAmount(''); setNote('')
     setMessage('تم تسجيل الشراء')
     await onRefresh()
+  }
+
+  async function handleProduction(e: FormEvent): Promise<void> {
+    e.preventDefault()
+    try {
+      await produceManufacturedProduct({
+        menuItemId: productionItemId,
+        quantity: Number(productionQty),
+        noteAr: productionNote || undefined,
+        createdBy: user.id,
+        actor: user
+      })
+      setProductionQty('')
+      setProductionNote('')
+      setMessage('تم تسجيل الإنتاج وتحديث المخزون')
+      await onRefresh()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'تعذر تسجيل الإنتاج')
+    }
   }
 
   async function handleModalSubmit(quantity: number, noteAr: string): Promise<void> {
@@ -144,6 +175,39 @@ function StockTab({ stocks, ingredients, suppliers, onRefresh, setMessage }: {
           <div style={{ alignSelf: 'flex-end' }}>
             <button type="submit" className="btn btn--primary">تسجيل شراء</button>
           </div>
+        </form>
+      </div>
+
+      <div className="card">
+        <h2 className="card__title">إنتاج منتج مصنع</h2>
+        <form onSubmit={(e) => void handleProduction(e)} className="settings-form-grid">
+          <label className="field">
+            <span>المنتج المصنع</span>
+            <select value={productionItemId} onChange={(e) => setProductionItemId(e.target.value)} required>
+              <option value="">اختر...</option>
+              {manufacturedItems.map((item) => (
+                <option key={item.id} value={item.id}>{item.nameAr}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>كمية الإنتاج</span>
+            <input type="number" min="0.01" step="any" value={productionQty} onChange={(e) => setProductionQty(e.target.value)} placeholder="مثال: 10" required />
+          </label>
+          <label className="field">
+            <span>ملاحظة (اختياري)</span>
+            <input value={productionNote} onChange={(e) => setProductionNote(e.target.value)} placeholder="مثال: تحضير وردية المساء" />
+          </label>
+          <div style={{ alignSelf: 'flex-end' }}>
+            <button type="submit" className="btn btn--primary" disabled={manufacturedItems.length === 0}>
+              تسجيل إنتاج
+            </button>
+          </div>
+          {manufacturedItems.length === 0 && (
+            <p className="modal-hint settings-form-grid__full">
+              أنشئ صنفًا من نوع منتج مصنع واربطه بمخزون، ثم أضف وصفة التصنيع من صفحة الأصناف.
+            </p>
+          )}
         </form>
       </div>
 
@@ -319,6 +383,7 @@ export function PurchasesPage(): React.ReactElement {
   const [stocks, setStocks] = useState<IngredientStock[]>([])
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const tabListRef = useRef<HTMLDivElement>(null)
   const stockTabRef = useRef<HTMLDivElement>(null)
@@ -327,10 +392,11 @@ export function PurchasesPage(): React.ReactElement {
   useEffect(() => { save({ activeTab }) }, [activeTab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async () => {
-    const [s, ing, supplierList] = await Promise.all([getIngredientStocks(), listIngredients(), listSuppliers()])
+    const [s, ing, supplierList, menu] = await Promise.all([getIngredientStocks(), listIngredients(), listSuppliers(), listMenuItems()])
     setStocks(s)
     setIngredients(ing)
     setSuppliers(supplierList)
+    setMenuItems(menu)
   }, [])
 
   useEffect(() => { void load() }, [load])
@@ -412,7 +478,7 @@ export function PurchasesPage(): React.ReactElement {
 
       {activeTab === 'stock' && (
         <div ref={stockTabRef} className="unified-page__panel">
-          <StockTab stocks={stocks} ingredients={ingredients} suppliers={suppliers} onRefresh={load} setMessage={setMessage} />
+          <StockTab stocks={stocks} ingredients={ingredients} suppliers={suppliers} menuItems={menuItems} onRefresh={load} setMessage={setMessage} />
         </div>
       )}
       {activeTab === 'ingredients' && (

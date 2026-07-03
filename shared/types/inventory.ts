@@ -4,6 +4,7 @@ export type InventoryTransactionType =
   | 'waste'
   | 'sale_reversal'
   | 'supplier_return'
+  | 'production'
   | 'adjustment'
 
 export interface Ingredient {
@@ -28,7 +29,7 @@ export interface InventoryTransaction {
   /** Signed quantity in base unit (positive = in, negative = out) */
   quantity: number
   unit: string
-  referenceType?: 'order' | 'purchase' | 'manual' | 'shift' | 'supplier'
+  referenceType?: 'order' | 'purchase' | 'manual' | 'shift' | 'supplier' | 'production'
   referenceId?: string
   shiftId?: string
   supplierId?: string

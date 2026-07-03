@@ -135,7 +135,7 @@ export const PRODUCT_TYPE_LABELS: Record<ProductType, string> = {
 export function needsRecipe(itemType: MenuItemType, productType: ProductType): boolean {
   if (itemType === 'service') return false
   if (itemType === 'raw_material') return false
-  return productType === 'recipe'
+  return productType === 'recipe' || productType === 'manufactured'
 }
 
 export function needsLinkedStock(itemType: MenuItemType, productType: ProductType): boolean {

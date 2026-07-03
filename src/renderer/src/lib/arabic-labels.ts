@@ -69,6 +69,7 @@ export function localizeTechnicalText(value?: string | null): string {
     .replace(/\bbank\b/g, 'تحويل بنكي')
     .replace(/\bsplit\b/g, 'نقدي + بطاقة')
     .replace(/\bexternal\b/g, 'مصدر خارجي')
+    .replace(/\bproduction\b/g, 'إنتاج مخزون')
     .replace(/\bSupplier Payments\b/g, 'مدفوعات الموردين')
     .replace(/\bPetty Cash Expenses\b/g, 'مصروفات نثرية')
 }

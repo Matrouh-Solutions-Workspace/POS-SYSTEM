@@ -38,7 +38,8 @@ import {
   computeDiscount,
   computeTax,
   computeService,
-  effectiveTaxRate
+  effectiveTaxRate,
+  effectiveServiceRate
 } from '@shared/services/order-calculator'
 import { orderReference } from '@shared/services/order-reference'
 import {
@@ -339,7 +340,13 @@ export function PosPage(): React.ReactElement {
     posSettings?.taxOrderTypes
   )
   const taxAmt = computeTax(subtotal - discountAmt, effectiveTax)
-  const serviceAmt = computeService(subtotal - discountAmt, posSettings?.serviceRate ?? 0)
+  const effectiveService = effectiveServiceRate(
+    posSettings?.serviceRate,
+    orderType,
+    posSettings?.serviceApplicationMode,
+    posSettings?.serviceOrderTypes
+  )
+  const serviceAmt = computeService(subtotal - discountAmt, effectiveService)
   const deliveryFeeNum = orderType === 'delivery' ? (Number(deliveryFee) || 0) : 0
   const total = orderTotal(subtotal, discountAmt, taxAmt, deliveryFeeNum, serviceAmt)
   const automaticRounding = orderType === 'takeaway' && checkoutMethod === 'cash'

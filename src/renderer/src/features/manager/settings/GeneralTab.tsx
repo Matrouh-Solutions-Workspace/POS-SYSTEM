@@ -5,6 +5,9 @@ import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { ReceiptDesigner } from './ReceiptDesigner'
 import { MdSave } from 'react-icons/md'
 
+type ChargeOrderType = 'takeaway' | 'dine_in' | 'delivery'
+const ALL_CHARGE_ORDER_TYPES: ChargeOrderType[] = ['dine_in', 'takeaway', 'delivery']
+
 export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSettings, onSettingsSaved: (s: AppSettings) => void }): React.ReactElement {
   const user = useAuthStore((s) => s.user)!
   const [receiptForm, setReceiptForm] = useState({
@@ -13,9 +16,9 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
     phoneNumber: '',
     receiptFooterAr: '',
     taxRate: '',
-    taxApplicationMode: 'all' as 'all' | 'selected',
-    taxOrderTypes: ['takeaway', 'dine_in', 'delivery'] as Array<'takeaway' | 'dine_in' | 'delivery'>,
+    taxOrderTypes: ALL_CHARGE_ORDER_TYPES,
     serviceRate: '',
+    serviceOrderTypes: ALL_CHARGE_ORDER_TYPES,
     defaultDeliveryFee: '',
     discountsEnabled: true,
     maxCashierDiscountPct: '',
@@ -33,9 +36,13 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
       phoneNumber: settings.phoneNumber ?? '',
       receiptFooterAr: settings.receiptFooterAr ?? '',
       taxRate: settings.taxRate != null && settings.taxRate > 0 ? String(settings.taxRate) : '',
-      taxApplicationMode: settings.taxApplicationMode ?? 'all',
-      taxOrderTypes: settings.taxOrderTypes ?? ['takeaway', 'dine_in', 'delivery'],
+      taxOrderTypes: settings.taxApplicationMode === 'selected'
+        ? (settings.taxOrderTypes ?? ALL_CHARGE_ORDER_TYPES)
+        : ALL_CHARGE_ORDER_TYPES,
       serviceRate: settings.serviceRate != null && settings.serviceRate > 0 ? String(settings.serviceRate) : '',
+      serviceOrderTypes: settings.serviceApplicationMode === 'selected'
+        ? (settings.serviceOrderTypes ?? ALL_CHARGE_ORDER_TYPES)
+        : ALL_CHARGE_ORDER_TYPES,
       defaultDeliveryFee: settings.defaultDeliveryFee != null && settings.defaultDeliveryFee > 0 ? String(settings.defaultDeliveryFee) : '',
       discountsEnabled: settings.discountsEnabled !== false,
       maxCashierDiscountPct: settings.maxCashierDiscountPct != null && settings.maxCashierDiscountPct < 100 ? String(settings.maxCashierDiscountPct) : '',
@@ -56,9 +63,11 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
         phoneNumber: receiptForm.phoneNumber.trim() || undefined,
         receiptFooterAr: receiptForm.receiptFooterAr.trim() || undefined,
         taxRate: receiptForm.taxRate ? Number(receiptForm.taxRate) : 0,
-        taxApplicationMode: receiptForm.taxApplicationMode,
-        taxOrderTypes: receiptForm.taxApplicationMode === 'selected' ? receiptForm.taxOrderTypes : ['takeaway', 'dine_in', 'delivery'],
+        taxApplicationMode: 'selected',
+        taxOrderTypes: receiptForm.taxOrderTypes,
         serviceRate: receiptForm.serviceRate ? Number(receiptForm.serviceRate) : 0,
+        serviceApplicationMode: 'selected',
+        serviceOrderTypes: receiptForm.serviceOrderTypes,
         defaultDeliveryFee: receiptForm.defaultDeliveryFee ? Number(receiptForm.defaultDeliveryFee) : 0,
         discountsEnabled: receiptForm.discountsEnabled,
         maxCashierDiscountPct: receiptForm.maxCashierDiscountPct ? Number(receiptForm.maxCashierDiscountPct) : undefined,
@@ -73,13 +82,23 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
     finally { setReceiptSaving(false) }
   }
 
-  function toggleTaxOrderType(type: 'takeaway' | 'dine_in' | 'delivery'): void {
+  function toggleChargeOrderType(field: 'taxOrderTypes' | 'serviceOrderTypes', type: ChargeOrderType): void {
     setReceiptForm((form) => ({
       ...form,
-      taxOrderTypes: form.taxOrderTypes.includes(type)
-        ? form.taxOrderTypes.filter((item) => item !== type)
-        : [...form.taxOrderTypes, type]
+      [field]: form[field].includes(type)
+        ? form[field].filter((item) => item !== type)
+        : [...form[field], type]
     }))
+  }
+
+  function chargeCheckboxes(field: 'taxOrderTypes' | 'serviceOrderTypes'): React.ReactElement {
+    return (
+      <div className="inline-options">
+        <label><input type="checkbox" checked={receiptForm[field].includes('dine_in')} onChange={() => toggleChargeOrderType(field, 'dine_in')} /> صالة</label>
+        <label><input type="checkbox" checked={receiptForm[field].includes('takeaway')} onChange={() => toggleChargeOrderType(field, 'takeaway')} /> تيك أواي</label>
+        <label><input type="checkbox" checked={receiptForm[field].includes('delivery')} onChange={() => toggleChargeOrderType(field, 'delivery')} /> دليفري</label>
+      </div>
+    )
   }
 
   return (
@@ -108,27 +127,18 @@ export function GeneralTab({ settings, onSettingsSaved }: { settings: AppSetting
             <span>ضريبة القيمة المضافة % (0 = بدون ضريبة)</span>
             <input type="number" min="0" max="100" step="0.1" value={receiptForm.taxRate} onChange={(e) => setReceiptForm((f) => ({ ...f, taxRate: e.target.value }))} placeholder="0" />
           </label>
-          <label className="field">
-            <span>تطبيق الضريبة</span>
-            <select value={receiptForm.taxApplicationMode} onChange={(e) => setReceiptForm((f) => ({ ...f, taxApplicationMode: e.target.value as 'all' | 'selected' }))}>
-              <option value="all">كل أنواع الطلبات تخضع للضريبة</option>
-              <option value="selected">تحديد أنواع الطلبات الخاضعة للضريبة</option>
-            </select>
-          </label>
-            {receiptForm.taxApplicationMode === 'selected' && (
-            <div className="field settings-form-grid__full">
-              <span>أنواع الطلبات الخاضعة للضريبة</span>
-              <div className="inline-options">
-                <label><input type="checkbox" checked={receiptForm.taxOrderTypes.includes('dine_in')} onChange={() => toggleTaxOrderType('dine_in')} /> صالة</label>
-                <label><input type="checkbox" checked={receiptForm.taxOrderTypes.includes('takeaway')} onChange={() => toggleTaxOrderType('takeaway')} /> تيك أواي</label>
-                <label><input type="checkbox" checked={receiptForm.taxOrderTypes.includes('delivery')} onChange={() => toggleTaxOrderType('delivery')} /> دليفري</label>
-              </div>
-            </div>
-            )}
+          <div className="field">
+            <span>أنواع الطلبات الخاضعة للضريبة</span>
+            {chargeCheckboxes('taxOrderTypes')}
+          </div>
           <label className="field">
             <span>نسبة الخدمة % (0 = بدون خدمة)</span>
             <input type="number" min="0" max="100" step="0.1" value={receiptForm.serviceRate} onChange={(e) => setReceiptForm((f) => ({ ...f, serviceRate: e.target.value }))} placeholder="0" />
           </label>
+          <div className="field">
+            <span>أنواع الطلبات الخاضعة للخدمة</span>
+            {chargeCheckboxes('serviceOrderTypes')}
+          </div>
           <label className="field">
             <span>رسوم التوصيل الافتراضية</span>
             <input type="number" min="0" step="0.01" value={receiptForm.defaultDeliveryFee} onChange={(e) => setReceiptForm((f) => ({ ...f, defaultDeliveryFee: e.target.value }))} placeholder="0.00" />

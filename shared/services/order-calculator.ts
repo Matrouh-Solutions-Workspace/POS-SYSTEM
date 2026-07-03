@@ -57,6 +57,25 @@ export function effectiveTaxRate(
   return taxAppliesToOrderType(orderType, taxApplicationMode, taxOrderTypes) ? taxRate : 0
 }
 
+export function serviceAppliesToOrderType(
+  orderType: OrderType,
+  serviceApplicationMode?: 'all' | 'selected',
+  serviceOrderTypes?: OrderType[]
+): boolean {
+  if (serviceApplicationMode !== 'selected') return true
+  return (serviceOrderTypes ?? []).includes(orderType)
+}
+
+export function effectiveServiceRate(
+  serviceRate: number | undefined,
+  orderType: OrderType,
+  serviceApplicationMode?: 'all' | 'selected',
+  serviceOrderTypes?: OrderType[]
+): number {
+  if (!serviceRate || serviceRate <= 0) return 0
+  return serviceAppliesToOrderType(orderType, serviceApplicationMode, serviceOrderTypes) ? serviceRate : 0
+}
+
 /** Compute service amount from (subtotal - discount) */
 export function computeService(afterDiscount: number, serviceRate?: number): number {
   if (!serviceRate || serviceRate <= 0) return 0

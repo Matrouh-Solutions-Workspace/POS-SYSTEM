@@ -13,6 +13,7 @@ import type {
   InventoryBatch,
   IngredientStock,
   MenuItem,
+  Recipe,
   Supplier
 } from '@shared/types'
 import { COLLECTIONS } from '@shared/constants/collections'
@@ -312,4 +313,103 @@ export async function recordAdjustment(params: {
     referenceType: 'manual',
     noteAr: params.noteAr ?? 'تسوية مخزون'
   })
+}
+
+export async function produceManufacturedProduct(params: {
+  menuItemId: string
+  quantity: number
+  createdBy: string
+  noteAr?: string
+  actor?: AuditActor
+}): Promise<InventoryTransaction[]> {
+  const producedQuantity = Math.abs(Number(params.quantity) || 0)
+  if (producedQuantity <= 0) throw new Error('كمية الإنتاج يجب أن تكون أكبر من صفر')
+
+  const [menuItems, recipes, ingredients, stocks] = await Promise.all([
+    getCachedDocs<MenuItem>(COLLECTIONS.menuItems),
+    getCachedDocs<Recipe>(COLLECTIONS.recipes),
+    getCachedDocs<Ingredient>(COLLECTIONS.ingredients),
+    getIngredientStocks()
+  ])
+  const item = menuItems.find((entry) => entry.id === params.menuItemId)
+  if (!item || item.itemType !== 'product' || item.productType !== 'manufactured') {
+    throw new Error('اختر منتجًا مصنعًا من القائمة')
+  }
+  if (!item.linkedIngredientId) {
+    throw new Error('المنتج المصنع يجب أن يكون مرتبطًا بمخزون منتج نهائي')
+  }
+  const producedIngredient = ingredients.find((ingredient) => ingredient.id === item.linkedIngredientId)
+  if (!producedIngredient) throw new Error('مخزون المنتج النهائي غير موجود')
+
+  const recipe = recipes.find((entry) => entry.menuItemId === item.id || entry.id === item.recipeId)
+  const lines = (recipe?.lines ?? []).filter((line) => line.ingredientId && Number(line.quantity) > 0)
+  if (!lines.length) throw new Error('وصفة التصنيع غير مكتملة')
+
+  const stockMap = new Map(stocks.map((stock) => [stock.ingredientId, stock.quantity]))
+  const ingredientMap = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]))
+  for (const line of lines) {
+    if (line.ingredientId === item.linkedIngredientId) {
+      throw new Error('لا يمكن أن يحتوي المنتج على نفسه داخل وصفة التصنيع')
+    }
+    const required = Number(line.quantity) * producedQuantity
+    const available = stockMap.get(line.ingredientId) ?? 0
+    const ingredientName = ingredientMap.get(line.ingredientId)?.nameAr ?? line.ingredientId
+    if (available + 0.0001 < required) {
+      throw new Error(`المخزون غير كافٍ من ${ingredientName}. المطلوب ${required} والمتاح ${available}`)
+    }
+  }
+
+  const now = Date.now()
+  const productionId = generateId()
+  const txs: InventoryTransaction[] = [
+    ...lines.map((line) => {
+      const ingredient = ingredientMap.get(line.ingredientId)
+      const required = Number(line.quantity) * producedQuantity
+      return {
+        id: generateId(),
+        ingredientId: line.ingredientId,
+        ingredientNameAr: ingredient?.nameAr,
+        type: 'production' as const,
+        quantity: -Math.abs(required),
+        unit: line.unit || ingredient?.unit || producedIngredient.unit,
+        referenceType: 'production' as const,
+        referenceId: productionId,
+        menuItemId: item.id,
+        noteAr: `تصنيع ${item.nameAr}${params.noteAr ? ` — ${params.noteAr}` : ''}`,
+        createdBy: params.createdBy,
+        createdAt: now
+      }
+    }),
+    {
+      id: generateId(),
+      ingredientId: producedIngredient.id,
+      ingredientNameAr: producedIngredient.nameAr,
+      type: 'production' as const,
+      quantity: producedQuantity,
+      unit: producedIngredient.unit,
+      referenceType: 'production' as const,
+      referenceId: productionId,
+      menuItemId: item.id,
+      noteAr: `إنتاج ${item.nameAr}${params.noteAr ? ` — ${params.noteAr}` : ''}`,
+      createdBy: params.createdBy,
+      createdAt: now
+    }
+  ]
+
+  await dbBatch(txs.map((tx) => ({
+    collection: COLLECTIONS.inventoryTransactions,
+    id: tx.id,
+    data: tx,
+    op: 'set'
+  })))
+
+  audit(params.actor, {
+    action: 'inventory_production',
+    actorId: params.actor?.id ?? params.createdBy,
+    actorName: params.actor ? actorAuditName(params.actor) : params.createdBy,
+    targetId: productionId,
+    targetType: 'inventory',
+    detailAr: `إنتاج ${item.nameAr} — كمية ${producedQuantity} ${producedIngredient.unit} — مكونات ${lines.length}`
+  })
+  return txs
 }

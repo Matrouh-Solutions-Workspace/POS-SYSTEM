@@ -49,6 +49,7 @@ export type AuditAction =
   | 'inventory_purchase'
   | 'inventory_waste'
   | 'inventory_adjustment'
+  | 'inventory_production'
   | 'supplier_created'
   | 'supplier_updated'
   | 'supplier_deleted'

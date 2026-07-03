@@ -14,6 +14,8 @@ export interface AppSettings {
   taxOrderTypes?: Array<'takeaway' | 'dine_in' | 'delivery'>
   /** Service percentage — 0 means disabled. */
   serviceRate?: number
+  serviceApplicationMode?: 'all' | 'selected'
+  serviceOrderTypes?: Array<'takeaway' | 'dine_in' | 'delivery'>
   /** Default delivery fee added to delivery orders */
   defaultDeliveryFee?: number
   /** Enforce employee work schedules for cashier login and POS activity. */

@@ -36,6 +36,7 @@ const ACTIVITY_LABELS: Record<string, string> = {
   inventory_purchase: 'توريد مخزون',
   inventory_waste: 'تسجيل هدر',
   inventory_adjustment: 'تسوية مخزون',
+  inventory_production: 'إنتاج مخزون',
   cash_in: 'إضافة نقدية',
   cash_out: 'سحب نقدي',
   cash_rounding_applied: 'تقريب دفع نقدي'

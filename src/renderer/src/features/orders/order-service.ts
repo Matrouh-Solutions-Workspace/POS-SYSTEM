@@ -28,7 +28,8 @@ import {
   computeDiscount,
   computeTax,
   computeService,
-  effectiveTaxRate
+  effectiveTaxRate,
+  effectiveServiceRate
 } from '@shared/services/order-calculator'
 import { COLLECTIONS } from '@shared/constants/collections'
 import { SETTINGS_DOC_ID } from '@shared/constants/collections'
@@ -75,6 +76,8 @@ export async function getSettings(): Promise<AppSettings> {
     taxApplicationMode: 'all',
     taxOrderTypes: ['takeaway', 'dine_in', 'delivery'],
     serviceRate: 0,
+    serviceApplicationMode: 'all',
+    serviceOrderTypes: ['takeaway', 'dine_in', 'delivery'],
     defaultDeliveryFee: 0,
     shiftManagementEnabled: false,
     employeePerformanceTrackingEnabled: false,
@@ -122,6 +125,8 @@ export async function updateSettings(
       | 'taxApplicationMode'
       | 'taxOrderTypes'
       | 'serviceRate'
+      | 'serviceApplicationMode'
+      | 'serviceOrderTypes'
       | 'defaultDeliveryFee'
       | 'shiftManagementEnabled'
       | 'employeePerformanceTrackingEnabled'
@@ -164,6 +169,16 @@ export async function updateSettings(
   const current = await getSettings()
   await cacheDocs(COLLECTIONS.settings, [{ ...current, ...patch, updatedAt: Date.now() }])
   if (actor) {
+    const fiscalKeys = ['taxRate', 'taxApplicationMode', 'taxOrderTypes', 'serviceRate', 'serviceApplicationMode', 'serviceOrderTypes']
+    const fiscalDetail = fiscalKeys
+      .filter((key) => Object.prototype.hasOwnProperty.call(patch, key))
+      .map((key) => {
+        const before = (current as unknown as Record<string, unknown>)[key]
+        const after = (patch as Record<string, unknown>)[key]
+        const fmt = (value: unknown): string => Array.isArray(value) ? value.join('/') : String(value ?? '-')
+        return `${key}: من ${fmt(before)} إلى ${fmt(after)}`
+      })
+      .join('، ')
     void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
       logAudit({
         action: 'settings_changed',
@@ -171,7 +186,7 @@ export async function updateSettings(
         actorName: actorAuditName(actor),
         targetId: SETTINGS_DOC_ID,
         targetType: 'settings',
-        detailAr: `تغيير إعدادات — ${describePatch(patch)}`
+        detailAr: `تغيير إعدادات — ${fiscalDetail || describePatch(patch)}`
       })
     )
   }
@@ -267,7 +282,12 @@ export async function completeOrder(params: {
     settings.taxOrderTypes
   )
   const taxAmount = computeTax(afterDiscount, taxRate)
-  const serviceRate = settings.serviceRate ?? 0
+  const serviceRate = effectiveServiceRate(
+    settings.serviceRate,
+    orderType,
+    settings.serviceApplicationMode,
+    settings.serviceOrderTypes
+  )
   const serviceAmount = computeService(afterDiscount, serviceRate)
   const originalTotal = orderTotal(subtotal, discountAmount, taxAmount, deliveryFee, serviceAmount)
   let total = originalTotal
@@ -779,7 +799,12 @@ export async function editOrderItems(params: {
     settings.taxOrderTypes
   )
   const taxAmount = computeTax(afterDiscount, taxRate)
-  const serviceRate = settings.serviceRate ?? 0
+  const serviceRate = effectiveServiceRate(
+    settings.serviceRate,
+    order.orderType ?? 'takeaway',
+    settings.serviceApplicationMode,
+    settings.serviceOrderTypes
+  )
   const serviceAmount = computeService(afterDiscount, serviceRate)
   const deliveryFee = order.deliveryFee ?? 0
   const total = orderTotal(subtotal, discountAmount, taxAmount, deliveryFee, serviceAmount)
