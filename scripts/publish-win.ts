@@ -133,5 +133,6 @@ const packageJson = readPackageJson()
 const releaseNotes = buildReleaseNotes(packageJson.version)
 
 await run('npm run build')
+await run('npm run prepare:updater-token')
 await run(`npx electron-builder --win --x64 --publish always -c.releaseInfo.releaseNotesFile=${releaseNotes.filePath}`)
 await updateGitHubReleaseNotes(packageJson, releaseNotes.body)
