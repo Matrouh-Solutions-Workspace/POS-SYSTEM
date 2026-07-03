@@ -9,7 +9,8 @@ import type {
   MenuItemSizeOption,
   Order,
   OrderType,
-  DeliveryContact
+  DeliveryContact,
+  Shift
 } from '@shared/types'
 import { getIngredientStocks } from '@renderer/features/inventory/inventory-service'
 import { listCategories, listMenuItems, getRecipeByMenuItem } from '@renderer/features/menu/menu-service'
@@ -153,6 +154,7 @@ export function PosPage(): React.ReactElement {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const [currentShift, setCurrentShift] = useState<Shift | null>(null)
 
   useEffect(() => {
     function handlePosNotification(event: Event): void {
@@ -211,7 +213,7 @@ export function PosPage(): React.ReactElement {
   // ── Load menu & tables ────────────────────────────────────────────────
 
   const load = useCallback(async () => {
-    const [cats, menu, stocks, diningTables, unpaid, settings, access, contacts] = await Promise.all([
+    const [cats, menu, stocks, diningTables, unpaid, settings, access, contacts, openShift] = await Promise.all([
       listCategories(),
       listMenuItems(true),
       getIngredientStocks(),
@@ -219,7 +221,8 @@ export function PosPage(): React.ReactElement {
       listUnpaidDineInOrders(),
       getSettings(),
       getCashRoundingAccess(user),
-      listDeliveryContacts()
+      listDeliveryContacts(),
+      getOpenShiftForCashier(user.id)
     ])
     setCategories(cats.filter((c) => c.active))
     setItems(menu)
@@ -230,6 +233,7 @@ export function PosPage(): React.ReactElement {
     setPosSettings(settings)
     setMaxDiscountPct(settings.maxCashierDiscountPct)
     setRoundingAccess(access)
+    setCurrentShift(openShift)
     if (diningTables.length > 0) setSelectedTableId((prev) => prev || diningTables[0]!.id)
 
     const outOfStock = new Map<string, string>()
@@ -554,17 +558,20 @@ export function PosPage(): React.ReactElement {
   async function handleOpeningCashConfirm(amount: number): Promise<void> {
     setOpeningCashModal(false)
     // Open the shift with the given opening cash
-    await ensureOpenShift({
+    const shift = await ensureOpenShift({
       cashierId: user.id,
       cashierName: user.displayName,
       cashierCode: user.cashierCode,
       openingCash: amount
     })
+    setCurrentShift(shift)
     // Now run the pending checkout action
     if (pendingCheckoutAfterShift) {
       const fn = pendingCheckoutAfterShift
       setPendingCheckoutAfterShift(null)
       await fn()
+    } else {
+      setMessage('تم بدء الشيفت')
     }
   }
 
@@ -860,7 +867,12 @@ export function PosPage(): React.ReactElement {
 
   async function handleCloseShift(): Promise<void> {
     const shift = await getOpenShiftForCashier(user.id)
-    if (!shift) { setMessage('لا يوجد شيفت مفتوح'); return }
+    setCurrentShift(shift)
+    if (!shift) {
+      setPendingCheckoutAfterShift(null)
+      setOpeningCashModal(true)
+      return
+    }
     const [preview, settings] = await Promise.all([getShiftClosurePreview(shift), getSettings()])
     setCloseShiftPreview(preview)
     setPerformanceTrackingEnabled(settings.employeePerformanceTrackingEnabled === true)
@@ -872,6 +884,7 @@ export function PosPage(): React.ReactElement {
     if (!shift) return
     try {
       await closeShift(shift.id, user.id, closingCash, { differenceReason, overrideReason })
+      setCurrentShift(null)
       setCloseShiftModal(false)
       setCloseShiftPreview(null)
       setMessage('تمت تسوية وإغلاق الشيفت')
@@ -1048,6 +1061,7 @@ export function PosPage(): React.ReactElement {
         occupiedTableIds={occupiedTableIds}
         selectedTable={selectedTable}
         setTablePopupOpen={setTablePopupOpen}
+        hasOpenShift={!!currentShift}
         handleCloseShift={() => void handleCloseShift()}
         changeQty={changeQty}
         discountAmt={discountAmt}

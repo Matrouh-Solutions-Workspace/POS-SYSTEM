@@ -3,12 +3,13 @@
  *
  * All user data and credentials are stored locally.
  */
-import type { AppUser, AppUserCreate, UserRole } from '@shared/types'
+import type { AppUser, AppUserCreate, ShiftAccessResult, UserRole } from '@shared/types'
 import { usernameToEmail } from '@shared/types/user'
 import { COLLECTIONS } from '@shared/constants/collections'
 import { cacheDocs, getCachedDoc, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 import { dbDelete } from '@renderer/lib/db/sqlite-db'
 import { actorAuditName, describePatch, type AuditActor } from '@renderer/features/audit/audit-service'
+import { ensureOpenShift } from '@renderer/features/shifts/shift-service'
 
 // ---------------------------------------------------------------------------
 // Session guard
@@ -28,13 +29,24 @@ function normalizeUsername(username: string): string {
   return username.toLowerCase().trim()
 }
 
-async function enforceCashierWorkShift(user: AppUser): Promise<void> {
-  if (user.role !== 'cashier') return
+async function enforceCashierWorkShift(user: AppUser): Promise<ShiftAccessResult | null> {
+  if (user.role !== 'cashier') return null
   const { validateUserShiftAccess } = await import('@renderer/features/shifts/work-shift-service')
   const access = await validateUserShiftAccess(user.id)
   if (!access.allowed) {
     throw new Error(access.reason ?? 'لا يمكن تسجيل الدخول خارج وقت وردية العمل')
   }
+  return access
+}
+
+async function openScheduledShiftOnLogin(user: AppUser, access: ShiftAccessResult | null): Promise<void> {
+  if (user.role !== 'cashier' || !access?.workShift) return
+  await ensureOpenShift({
+    cashierId: user.id,
+    cashierName: user.displayName,
+    cashierCode: user.cashierCode,
+    openingCash: 0
+  })
 }
 
 async function isLanSideDevice(): Promise<boolean> {
@@ -70,7 +82,8 @@ export async function loginAndLoadUser(username: string, password: string): Prom
   const mainAuth = await window.electronAPI.authLoginLocal(normalized, password).catch(() => null)
   if (mainAuth?.ok && mainAuth.user) {
     const user = mainAuth.user as AppUser
-    await enforceCashierWorkShift(user)
+    const shiftAccess = await enforceCashierWorkShift(user)
+    await openScheduledShiftOnLogin(user, shiftAccess)
     clearSession()
     void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
       logAudit({ action: 'login', actorId: user.id, actorName: actorAuditName(user), detailAr: `تسجيل دخول: ${user.displayName}` })
@@ -92,7 +105,8 @@ export async function loginAndLoadUser(username: string, password: string): Prom
   if (!user.active) {
     throw new Error('الحساب غير نشط')
   }
-  await enforceCashierWorkShift(user)
+  const shiftAccess = await enforceCashierWorkShift(user)
+  await openScheduledShiftOnLogin(user, shiftAccess)
   clearSession()
   // Audit: login
   void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>

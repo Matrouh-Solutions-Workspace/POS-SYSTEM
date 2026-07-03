@@ -9,6 +9,7 @@ export interface CartPanelProps {
   occupiedTableIds: Set<string>
   selectedTable: DiningTable | undefined
   setTablePopupOpen: (open: boolean) => void
+  hasOpenShift: boolean
   handleCloseShift: () => void
   changeQty: (key: string, delta: number) => void
   discountAmt: number
@@ -32,6 +33,7 @@ export function CartPanel({
   occupiedTableIds,
   selectedTable,
   setTablePopupOpen,
+  hasOpenShift,
   handleCloseShift,
   changeQty,
   discountAmt,
@@ -87,10 +89,10 @@ export function CartPanel({
           )}
           <button
             type="button"
-            className="btn btn--secondary btn--sm pos-cart__shift-btn"
+            className={`btn btn--sm pos-cart__shift-btn ${hasOpenShift ? 'btn--danger' : 'pos-cart__shift-btn--start'}`}
             onClick={handleCloseShift}
           >
-            تقفيل الشيفت
+            {hasOpenShift ? 'تقفيل شيفت' : 'بدء شيفت'}
           </button>
         </div>
       </div>

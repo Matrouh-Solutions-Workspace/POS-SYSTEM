@@ -150,6 +150,12 @@ textarea {
     border-color: #991b1b;
     box-shadow: 4px 4px 0 #7f1d1d;
   }
+
+  .pos-cart__shift-btn--start:hover:not(:disabled) {
+    background: #166534;
+    border-color: #166534;
+    box-shadow: 4px 4px 0 #14532d;
+  }
 }
 
 .btn:active:not(:disabled) {
@@ -2489,6 +2495,12 @@ textarea {
   font-size: 0.78rem;
   padding: 0 10px;
   flex-shrink: 0;
+}
+
+.pos-cart__shift-btn--start {
+  background: var(--color-success);
+  color: #fff;
+  border-color: var(--color-success);
 }
 
 .order-service-panel {
