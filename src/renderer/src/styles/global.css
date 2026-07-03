@@ -1952,6 +1952,31 @@ textarea {
   font-weight: 800;
 }
 
+.shift-cash-activity {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 2px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.shifts-card__header--compact {
+  margin-bottom: 0;
+}
+
+.shift-cash-activity__block {
+  min-width: 0;
+}
+
+.shift-cash-activity__block .section-title {
+  margin-top: 0;
+}
+
+.shift-cash-activity .shift-detail-table-scroll {
+  margin-bottom: 0;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;

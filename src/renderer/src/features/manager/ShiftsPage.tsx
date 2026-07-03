@@ -35,6 +35,83 @@ function formatQty(qty: number): string {
   return Number.isInteger(qty) ? String(qty) : qty.toFixed(3).replace(/0+$/g, '').replace(/\.$/g, '')
 }
 
+function ShiftCashActivityTables({ summary }: { summary: ShiftSummary }): React.ReactElement | null {
+  const hasSupplierPayments = summary.supplierPayments.length > 0
+  const hasPettyExpenses = summary.pettyCashExpenses.length > 0
+  if (!hasSupplierPayments && !hasPettyExpenses) return null
+
+  return (
+    <div className="shift-cash-activity">
+      <div className="shifts-card__header shifts-card__header--compact">
+        <div>
+          <span className="shifts-card__eyebrow">حركات نقدية أثناء الشيفت</span>
+          <h3 className="card__title">معاملات الموردين والمصروفات النثرية</h3>
+        </div>
+      </div>
+
+      {hasSupplierPayments && (
+        <div className="shift-cash-activity__block">
+          <h4 className="section-title">مدفوعات الموردين</h4>
+          <div className="table-scroll shift-detail-table-scroll">
+            <table className="data-table shift-detail-table">
+              <thead>
+                <tr>
+                  <th>المورد</th>
+                  <th>المبلغ</th>
+                  <th>طريقة الدفع</th>
+                  <th>المستخدم</th>
+                  <th>الوقت</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.supplierPayments.map((tx) => (
+                  <tr key={tx.id}>
+                    <td>{tx.supplierName ?? '-'}</td>
+                    <td>{Math.abs(tx.amount).toFixed(2)}</td>
+                    <td>{formatPaymentMethod(tx.paymentMethod)}</td>
+                    <td>{tx.userName}</td>
+                    <td>{new Date(tx.createdAt).toLocaleString('ar-EG')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {hasPettyExpenses && (
+        <div className="shift-cash-activity__block">
+          <h4 className="section-title">مصروفات نثرية</h4>
+          <div className="table-scroll shift-detail-table-scroll">
+            <table className="data-table shift-detail-table">
+              <thead>
+                <tr>
+                  <th>المبلغ</th>
+                  <th>السبب</th>
+                  <th>المستخدم</th>
+                  <th>تأثير الدرج</th>
+                  <th>الوقت</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.pettyCashExpenses.map((tx) => (
+                  <tr key={tx.id}>
+                    <td>{Math.abs(tx.amount).toFixed(2)}</td>
+                    <td>{tx.noteAr ?? '-'}</td>
+                    <td>{tx.userName}</td>
+                    <td>{tx.amount.toFixed(2)}</td>
+                    <td>{new Date(tx.createdAt).toLocaleString('ar-EG')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function buildShiftReceiptHtml(summary: ShiftSummary, currency: string): string {
   const typeCounts = shiftOrderTypeSummary(summary)
   const itemRows = summary.itemSummary.map((item) => `
@@ -368,6 +445,8 @@ export function ShiftsPage(): React.ReactElement {
               <span>مكتملة: {selected.completedOrders.length}</span>
               <span>ملغية/مرتجع: {selected.cancelledOrders.length}</span>
             </div>
+
+            <ShiftCashActivityTables summary={selected} />
           </div>
         )}
 
@@ -487,6 +566,8 @@ export function ShiftsPage(): React.ReactElement {
             )
           })()}
 
+          <ShiftCashActivityTables summary={selected} />
+
           {/* Cash reconciliation */}
           <div className="card" style={{ background: '#f0fdf4', borderColor: '#22c55e', marginBottom: 12 }}>
             <h3 className="card__title" style={{ borderColor: '#22c55e' }}>تسوية الكاش</h3>
@@ -516,50 +597,6 @@ export function ShiftsPage(): React.ReactElement {
               )}
             </div>
           </div>
-
-          {selected.supplierPayments.length > 0 && (
-            <>
-              <h3 className="section-title">مدفوعات الموردين</h3>
-              <div className="table-scroll shift-detail-table-scroll">
-                <table className="data-table shift-detail-table">
-                  <thead><tr><th>المورد</th><th>المبلغ</th><th>طريقة الدفع</th><th>المستخدم</th><th>الوقت</th></tr></thead>
-                  <tbody>
-                    {selected.supplierPayments.map((tx) => (
-                      <tr key={tx.id}>
-                        <td>{tx.supplierName ?? '-'}</td>
-                        <td>{Math.abs(tx.amount).toFixed(2)}</td>
-                        <td>{formatPaymentMethod(tx.paymentMethod)}</td>
-                        <td>{tx.userName}</td>
-                        <td>{new Date(tx.createdAt).toLocaleString('ar-EG')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-
-          {selected.pettyCashExpenses.length > 0 && (
-            <>
-              <h3 className="section-title">مصروفات نثرية</h3>
-              <div className="table-scroll shift-detail-table-scroll">
-                <table className="data-table shift-detail-table">
-                  <thead><tr><th>المبلغ</th><th>السبب</th><th>المستخدم</th><th>تأثير الدرج</th><th>الوقت</th></tr></thead>
-                  <tbody>
-                    {selected.pettyCashExpenses.map((tx) => (
-                      <tr key={tx.id}>
-                        <td>{Math.abs(tx.amount).toFixed(2)}</td>
-                        <td>{tx.noteAr ?? '-'}</td>
-                        <td>{tx.userName}</td>
-                        <td>{tx.amount.toFixed(2)}</td>
-                        <td>{new Date(tx.createdAt).toLocaleString('ar-EG')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
 
           <h3 className="section-title">الأصناف المباعة في الشيفت</h3>
           <div className="table-scroll shift-detail-table-scroll">
