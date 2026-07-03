@@ -149,7 +149,7 @@ export function EmployeePerformanceManagement(): React.ReactElement {
   }
 
   return (
-    <section className="card" aria-labelledby="employee-performance-title">
+    <section className="card employee-performance-card" aria-labelledby="employee-performance-title">
       <div className="page-toolbar" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 id="employee-performance-title" className="card__title m-0">أداء الموظفين ودقة إغلاق الشيفت</h2>

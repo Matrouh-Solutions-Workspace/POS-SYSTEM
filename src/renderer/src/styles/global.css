@@ -1618,6 +1618,9 @@ textarea {
 .shifts-page {
   display: grid;
   gap: 16px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .shifts-hero {
@@ -1762,6 +1765,8 @@ textarea {
   display: grid;
   gap: 16px;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .work-shift-card,
@@ -1791,7 +1796,10 @@ textarea {
 
 .table-scroll {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
   border: 2px solid var(--color-border);
 }
 
@@ -1802,8 +1810,38 @@ textarea {
 
 .shifts-report-table-scroll,
 .shift-detail-table-scroll {
+  display: block;
+  min-width: 0;
   max-width: 100%;
   margin-bottom: 16px;
+}
+
+.employee-performance-card,
+.employee-performance-card > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.employee-performance-card {
+  overflow: hidden;
+}
+
+.employee-performance-card .inner-tabs,
+.employee-performance-card .settings-form-grid {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.employee-performance-card .shifts-report-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+}
+
+.employee-performance-card .shifts-report-table {
+  width: max-content;
+  min-width: 100%;
 }
 
 .table-scroll .shifts-report-table--wide {
