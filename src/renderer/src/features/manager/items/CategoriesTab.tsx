@@ -1,9 +1,9 @@
-import React, { useState, FormEvent } from 'react'
+import React, { useState, FormEvent, type DragEvent } from 'react'
 import { MenuCategory } from '@shared/types'
 import { createCategory, updateCategory, deleteCategory, reorderCategories } from '@renderer/features/menu/menu-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { ConfirmDialog, FormModal, FormField } from '@renderer/components/ui'
-import { MdArrowUpward, MdArrowDownward, MdEdit, MdClose, MdDelete } from 'react-icons/md'
+import { MdArrowUpward, MdArrowDownward, MdEdit, MdDelete, MdDragIndicator } from 'react-icons/md'
 import { moveItem } from './items-types'
 
 export function CategoriesTab({ categories, onRefresh, setMessage }: {
@@ -20,6 +20,7 @@ export function CategoriesTab({ categories, onRefresh, setMessage }: {
 
   const [itemToDelete, setItemToDelete] = useState<string | null>(null)
   const [savingOrder, setSavingOrder] = useState(false)
+  const [draggingCategoryId, setDraggingCategoryId] = useState<string | null>(null)
 
   const childCategoriesByParent = categories.reduce<Record<string, MenuCategory[]>>((acc, category) => {
     if (!category.parentId) return acc
@@ -62,11 +63,44 @@ export function CategoriesTab({ categories, onRefresh, setMessage }: {
     await onRefresh()
   }
 
-  async function moveCat(idx: number, dir: -1 | 1): Promise<void> {
-    const next = moveItem(categories, idx, dir).map((c, i) => ({ ...c, sortOrder: i }))
+  async function persistCategoryOrder(nextVisibleCategories: MenuCategory[]): Promise<void> {
+    const next = nextVisibleCategories.map((c, i) => ({ ...c, sortOrder: i }))
     setSavingOrder(true)
     try { await reorderCategories(next.map((c) => ({ id: c.id, sortOrder: c.sortOrder }))) }
-    finally { setSavingOrder(false); await onRefresh() }
+    finally {
+      setSavingOrder(false)
+      setDraggingCategoryId(null)
+      await onRefresh()
+    }
+  }
+
+  async function moveCat(idx: number, dir: -1 | 1): Promise<void> {
+    await persistCategoryOrder(moveItem(visibleCategories, idx, dir))
+  }
+
+  async function dropCategory(targetId: string): Promise<void> {
+    if (!draggingCategoryId || draggingCategoryId === targetId) return
+    const fromIdx = visibleCategories.findIndex((category) => category.id === draggingCategoryId)
+    const toIdx = visibleCategories.findIndex((category) => category.id === targetId)
+    if (fromIdx < 0 || toIdx < 0) return
+
+    const next = [...visibleCategories]
+    const [dragged] = next.splice(fromIdx, 1)
+    if (!dragged) return
+    next.splice(toIdx, 0, dragged)
+    await persistCategoryOrder(next)
+  }
+
+  function startCategoryDrag(event: DragEvent<HTMLLIElement>, categoryId: string): void {
+    setDraggingCategoryId(categoryId)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', categoryId)
+  }
+
+  function allowCategoryDrop(event: DragEvent<HTMLLIElement>, categoryId: string): void {
+    if (!draggingCategoryId || draggingCategoryId === categoryId) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
   }
 
   return (
@@ -81,13 +115,23 @@ export function CategoriesTab({ categories, onRefresh, setMessage }: {
       <div className="card">
         {categories.length === 0 && <p className="report-empty">لا توجد تصنيفات بعد</p>}
         <ul className="category-list">
-          {visibleCategories.map((c) => {
-            const idx = categories.findIndex((category) => category.id === c.id)
+          {visibleCategories.map((c, idx) => {
             return (
-              <li key={c.id} className="category-list__item" style={c.parentId ? { marginInlineStart: 28, borderInlineStart: '3px solid var(--color-border)', background: '#f8fafc' } : undefined}>
+              <li
+                key={c.id}
+                className={`category-list__item draggable-row${draggingCategoryId === c.id ? ' draggable-row--dragging' : ''}`}
+                style={c.parentId ? { marginInlineStart: 28, borderInlineStart: '3px solid var(--color-border)', background: '#f8fafc' } : undefined}
+                draggable={!savingOrder}
+                aria-grabbed={draggingCategoryId === c.id}
+                onDragStart={(event) => startCategoryDrag(event, c.id)}
+                onDragOver={(event) => allowCategoryDrop(event, c.id)}
+                onDrop={(event) => { event.preventDefault(); void dropCategory(c.id) }}
+                onDragEnd={() => setDraggingCategoryId(null)}
+              >
+                <span className="drag-handle" title="اسحب لتغيير الترتيب" aria-hidden="true"><MdDragIndicator /></span>
                 <div className="sort-arrows">
                   <button type="button" className="sort-arrow-btn" disabled={idx === 0} onClick={() => void moveCat(idx, -1)} aria-label="أعلى"><MdArrowUpward /></button>
-                  <button type="button" className="sort-arrow-btn" disabled={idx === categories.length - 1} onClick={() => void moveCat(idx, 1)} aria-label="أسفل"><MdArrowDownward /></button>
+                  <button type="button" className="sort-arrow-btn" disabled={idx === visibleCategories.length - 1} onClick={() => void moveCat(idx, 1)} aria-label="أسفل"><MdArrowDownward /></button>
                 </div>
 
                 <span className="flex-1">

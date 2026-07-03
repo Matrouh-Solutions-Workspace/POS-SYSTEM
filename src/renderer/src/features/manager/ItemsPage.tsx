@@ -2,7 +2,7 @@
  * أصناف — unified items page
  * Tabs: الأصناف | التصنيفات | الأحجام | الإضافات | المواد الخام
  */
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react'
 import type {
   MenuCategory,
   MenuItem,
@@ -49,7 +49,7 @@ import { useAuthStore } from '@renderer/features/auth/auth-store'
 import {
   MdArrowUpward, MdArrowDownward, MdEdit, MdCheck,
   MdClose, MdMenuBook, MdStraighten, MdAddBox,
-  MdInventory2, MdPrint, MdDelete
+  MdInventory2, MdPrint, MdDelete, MdDragIndicator
 } from 'react-icons/md'
 import { usePageState } from '@renderer/features/tabs/page-state-store'
 
@@ -246,6 +246,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
   const [recipeLines, setRecipeLines] = useState<RecipeLine[]>([])
   const [itemToDelete, setItemToDelete] = useState<string | null>(null)
   const [savingOrder, setSavingOrder] = useState(false)
+  const [draggingItemId, setDraggingItemId] = useState<string | null>(null)
 
   function validateWeightedPricing(options: WeightedPriceOption[], allowCustom: boolean, customPrice: string): boolean {
     if (options.length === 0) { setMessage('أضف سعر ميزان واحد على الأقل'); return false }
@@ -338,11 +339,44 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
     await onRefresh()
   }
 
-  async function moveMenuItem(idx: number, dir: -1 | 1): Promise<void> {
-    const next = moveItem(items, idx, dir).map((it, i) => ({ ...it, sortOrder: i }))
+  async function persistMenuItemOrder(nextItems: MenuItem[]): Promise<void> {
+    const next = nextItems.map((it, i) => ({ ...it, sortOrder: i }))
     setSavingOrder(true)
     try { await reorderMenuItems(next.map((it) => ({ id: it.id, sortOrder: it.sortOrder }))) }
-    finally { setSavingOrder(false); await onRefresh() }
+    finally {
+      setSavingOrder(false)
+      setDraggingItemId(null)
+      await onRefresh()
+    }
+  }
+
+  async function moveMenuItem(idx: number, dir: -1 | 1): Promise<void> {
+    await persistMenuItemOrder(moveItem(items, idx, dir))
+  }
+
+  async function dropMenuItem(targetId: string): Promise<void> {
+    if (!draggingItemId || draggingItemId === targetId) return
+    const fromIdx = items.findIndex((item) => item.id === draggingItemId)
+    const toIdx = items.findIndex((item) => item.id === targetId)
+    if (fromIdx < 0 || toIdx < 0) return
+
+    const next = [...items]
+    const [dragged] = next.splice(fromIdx, 1)
+    if (!dragged) return
+    next.splice(toIdx, 0, dragged)
+    await persistMenuItemOrder(next)
+  }
+
+  function startMenuItemDrag(event: DragEvent<HTMLTableRowElement>, itemId: string): void {
+    setDraggingItemId(itemId)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', itemId)
+  }
+
+  function allowMenuItemDrop(event: DragEvent<HTMLTableRowElement>, itemId: string): void {
+    if (!draggingItemId || draggingItemId === itemId) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
   }
 
   async function openRecipe(item: MenuItem): Promise<void> {
@@ -773,11 +807,23 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
                 .map((id) => printers.find((printer) => printer.id === id)?.name)
                 .filter(Boolean)
               return (
-                <tr key={item.id}>
+                <tr
+                  key={item.id}
+                  className={`draggable-row${draggingItemId === item.id ? ' draggable-row--dragging' : ''}`}
+                  draggable={!savingOrder}
+                  aria-grabbed={draggingItemId === item.id}
+                  onDragStart={(event) => startMenuItemDrag(event, item.id)}
+                  onDragOver={(event) => allowMenuItemDrop(event, item.id)}
+                  onDrop={(event) => { event.preventDefault(); void dropMenuItem(item.id) }}
+                  onDragEnd={() => setDraggingItemId(null)}
+                >
                   <td>
-                    <div className="sort-arrows">
-                      <button type="button" className="sort-arrow-btn" disabled={idx === 0} onClick={() => void moveMenuItem(idx, -1)}><MdArrowUpward /></button>
-                      <button type="button" className="sort-arrow-btn" disabled={idx === items.length - 1} onClick={() => void moveMenuItem(idx, 1)}><MdArrowDownward /></button>
+                    <div className="sort-controls">
+                      <span className="drag-handle" title="اسحب لتغيير الترتيب" aria-hidden="true"><MdDragIndicator /></span>
+                      <div className="sort-arrows">
+                        <button type="button" className="sort-arrow-btn" disabled={idx === 0} onClick={() => void moveMenuItem(idx, -1)}><MdArrowUpward /></button>
+                        <button type="button" className="sort-arrow-btn" disabled={idx === items.length - 1} onClick={() => void moveMenuItem(idx, 1)}><MdArrowDownward /></button>
+                      </div>
                     </div>
                   </td>
                   <td>

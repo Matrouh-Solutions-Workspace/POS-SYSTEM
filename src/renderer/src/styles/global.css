@@ -3231,7 +3231,7 @@ textarea {
   border-bottom: none;
 }
 
-.category-list__item > span {
+.category-list__item > span:not(.drag-handle) {
   font-size: 1rem;
   font-weight: 800;
   flex: 1;
@@ -3648,6 +3648,41 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.sort-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.draggable-row {
+  cursor: grab;
+}
+
+.draggable-row:active {
+  cursor: grabbing;
+}
+
+.draggable-row--dragging {
+  opacity: 0.56;
+  outline: 2px dashed var(--color-primary);
+  outline-offset: -2px;
+}
+
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  color: var(--color-muted);
+  cursor: grab;
+}
+
+.drag-handle svg {
+  font-size: 1.25rem;
 }
 
 .sort-arrow-btn {
