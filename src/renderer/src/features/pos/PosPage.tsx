@@ -4,6 +4,7 @@ import type {
   DiningTable,
   DiscountType,
   MenuCategory,
+  ItemAddon,
   MenuItem,
   MenuItemAttachment,
   MenuItemSizeOption,
@@ -14,6 +15,7 @@ import type {
 } from '@shared/types'
 import { getIngredientStocks } from '@renderer/features/inventory/inventory-service'
 import { listCategories, listMenuItems, getRecipeByMenuItem } from '@renderer/features/menu/menu-service'
+import { listAddons } from '@renderer/features/menu/addons-service'
 import {
   completeOrder,
   editOrderItems,
@@ -113,8 +115,11 @@ export function PosPage(): React.ReactElement {
   // Menu data
   const [categories, setCategories] = useState<MenuCategory[]>([])
   const [items, setItems] = useState<MenuItem[]>([])
+  const [addons, setAddons] = useState<ItemAddon[]>([])
   const [unavailableItems, setUnavailableItems] = useState<Map<string, string>>(new Map())
+  const [unavailableAddons, setUnavailableAddons] = useState<Map<string, string>>(new Map())
   const [lowStockItems, setLowStockItems] = useState<Set<string>>(new Set())
+  const [lowStockAddons, setLowStockAddons] = useState<Set<string>>(new Set())
   const [posLogoUrl, setPosLogoUrl] = useState('/image.png')
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -214,9 +219,10 @@ export function PosPage(): React.ReactElement {
   // ── Load menu & tables ────────────────────────────────────────────────
 
   const load = useCallback(async () => {
-    const [cats, menu, stocks, diningTables, unpaid, settings, access, contacts, openShift] = await Promise.all([
+    const [cats, menu, itemAddons, stocks, diningTables, unpaid, settings, access, contacts, openShift] = await Promise.all([
       listCategories(),
       listMenuItems(true),
+      listAddons(),
       getIngredientStocks(),
       listDiningTables(),
       listUnpaidDineInOrders(),
@@ -227,6 +233,7 @@ export function PosPage(): React.ReactElement {
     ])
     setCategories(cats.filter((c) => c.active))
     setItems(menu)
+    setAddons(itemAddons.filter((addon) => addon.active))
     setTables(diningTables)
     setUnpaidOrders(unpaid)
     setDeliveryContacts(contacts)
@@ -248,6 +255,8 @@ export function PosPage(): React.ReactElement {
 
     const unavailable = new Map<string, string>()
     const lowItems = new Set<string>()
+    const unavailableAddonMap = new Map<string, string>()
+    const lowAddonSet = new Set<string>()
     const stockByIngredientId = new Map(stocks.map((stock) => [stock.ingredientId, stock]))
     await Promise.all(
       menu.map(async (item) => {
@@ -277,8 +286,22 @@ export function PosPage(): React.ReactElement {
         }
       })
     )
+    for (const addon of itemAddons) {
+      if (!addon.active || !addon.linkedIngredientId) continue
+      const linkedStock = stockByIngredientId.get(addon.linkedIngredientId)
+      if (!linkedStock) continue
+      if (linkedStock.quantity <= 0) unavailableAddonMap.set(addon.id, linkedStock.nameAr)
+      else if (
+        linkedStock.lowStockThreshold != null &&
+        linkedStock.quantity <= linkedStock.lowStockThreshold
+      ) {
+        lowAddonSet.add(addon.id)
+      }
+    }
     setUnavailableItems(unavailable)
     setLowStockItems(lowItems)
+    setUnavailableAddons(unavailableAddonMap)
+    setLowStockAddons(lowAddonSet)
   }, [user])
 
   useEffect(() => { void load() }, [load])
@@ -323,6 +346,15 @@ export function PosPage(): React.ReactElement {
     }
     return list
   }, [categoryChildren, items, selectedCategory, search])
+
+  const filteredAddons = useMemo(() => {
+    let list = addons
+    if (search.trim()) {
+      const q = search.trim().toLowerCase()
+      list = list.filter((addon) => addon.nameAr.toLowerCase().includes(q))
+    }
+    return list
+  }, [addons, search])
 
   const subtotal = orderSubtotal(cart)
   const discountsEnabled = posSettings?.discountsEnabled !== false
@@ -462,7 +494,7 @@ export function PosPage(): React.ReactElement {
     const attachmentLines: LocalCartLine[] = selectedAttachments.map((att) => ({
       key: `${key}:att:${att.id}`,
       parentKey: key,
-      menuItemId: `${item.id}:attachment:${att.id}`,
+      menuItemId: `${item.id}:attachment:${att.masterAddonId ?? att.id}`,
       attachmentForMenuItemId: item.id,
       nameAr: `+ ${att.nameAr}`,
       unitPrice: att.price,
@@ -485,6 +517,30 @@ export function PosPage(): React.ReactElement {
         })
       }
       return [...prev, mainLine, ...attachmentLines]
+    })
+  }
+
+  function addAddonToCart(addon: ItemAddon): void {
+    if (unavailableAddons.has(addon.id)) return
+    const key = `addon:${addon.id}`
+    const line: LocalCartLine = {
+      key,
+      menuItemId: key,
+      nameAr: addon.nameAr,
+      unitPrice: addon.defaultPrice,
+      quantity: 1
+    }
+
+    setCart((prev) => {
+      const existing = prev.find((cartLine) => cartLine.key === key)
+      if (existing) {
+        return prev.map((cartLine) => (
+          cartLine.key === key
+            ? { ...cartLine, quantity: cartLine.quantity + 1 }
+            : cartLine
+        ))
+      }
+      return [...prev, line]
     })
   }
 
@@ -973,17 +1029,48 @@ export function PosPage(): React.ReactElement {
         />
 
         {(selectedCategory || search.trim()) && (
-          <ItemGrid
-            items={filteredItems}
-            unavailableItems={unavailableItems}
-            lowStockItems={lowStockItems}
-            onItemClick={(item, rect, isUnavailable, hasSizes) => {
-              if (isUnavailable) return
-              if (item.isWeighted) setWeightPopup({ item, rect })
-              else if (hasSizes) setSizePopup({ item, rect })
-              else openAddonsOrAddToCart({ item, quantity: 1, unitPrice: item.price, anchor: rect })
-            }}
-          />
+          <>
+            <ItemGrid
+              items={filteredItems}
+              unavailableItems={unavailableItems}
+              lowStockItems={lowStockItems}
+              onItemClick={(item, rect, isUnavailable, hasSizes) => {
+                if (isUnavailable) return
+                if (item.isWeighted) setWeightPopup({ item, rect })
+                else if (hasSizes) setSizePopup({ item, rect })
+                else openAddonsOrAddToCart({ item, quantity: 1, unitPrice: item.price, anchor: rect })
+              }}
+            />
+            {filteredAddons.length > 0 && (
+              <section className="pos-addon-section" aria-label="الإضافات">
+                <div className="pos-addon-section__header">
+                  <h3>الإضافات</h3>
+                  <span>{filteredAddons.length} إضافة</span>
+                </div>
+                <div className="pos-addon-grid">
+                  {filteredAddons.map((addon) => {
+                    const outReason = unavailableAddons.get(addon.id)
+                    const isUnavailable = !!outReason
+                    const isLow = !isUnavailable && lowStockAddons.has(addon.id)
+                    return (
+                      <button
+                        key={addon.id}
+                        type="button"
+                        className={`pos-addon-btn${isUnavailable ? ' pos-addon-btn--unavailable' : ''}${isLow ? ' pos-addon-btn--low' : ''}`}
+                        disabled={isUnavailable}
+                        onClick={() => addAddonToCart(addon)}
+                      >
+                        <span>{addon.nameAr}</span>
+                        <strong>{addon.defaultPrice.toFixed(2)}</strong>
+                        {isLow && <em>قرب النفاد</em>}
+                        {isUnavailable && <em>نفذ: {outReason}</em>}
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
+          </>
         )}
       </section>
 

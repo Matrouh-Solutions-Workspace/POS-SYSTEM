@@ -268,6 +268,13 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
     const attachOpts = normalizeAttachments(itemForm.attachments, activeAddons)
     if (itemForm.isWeighted && !validateWeightedPricing(weightedOpts, itemForm.allowCustomWeight, itemForm.customWeightUnitPrice)) return
     try {
+      const linkedIngredientId = await ensureLinkedStockIngredient({
+        itemName: itemForm.nameAr.trim(),
+        itemType: itemForm.itemType,
+        productType: itemForm.productType,
+        linkedIngredientId: itemForm.linkedIngredientId
+      })
+      if (!validateRecipeDoesNotUseOwnStock(recipeLines, linkedIngredientId)) return
       await createMenuItemWithRecipe({
         categoryId: itemForm.categoryId,
         nameAr: itemForm.nameAr.trim(),
@@ -278,9 +285,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
           : Number(itemForm.price),
         itemType: itemForm.itemType,
         productType: itemForm.itemType === 'product' ? itemForm.productType : undefined,
-        linkedIngredientId: needsLinkedStock(itemForm.itemType, itemForm.productType)
-          ? (itemForm.linkedIngredientId || undefined)
-          : undefined,
+        linkedIngredientId,
         sizeOptions: itemForm.isWeighted ? [] : sizeOpts,
         attachments: attachOpts,
         isWeighted: itemForm.isWeighted,
@@ -311,6 +316,12 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
     const sizeOpts = normalizeSizeOptions(editingItem.sizeOptions, activeSizes)
     const attachOpts = normalizeAttachments(editingItem.attachments, activeAddons)
     if (editingItem.isWeighted && !validateWeightedPricing(weightedOpts, editingItem.allowCustomWeight, editingItem.customWeightUnitPrice)) return
+    const linkedIngredientId = await ensureLinkedStockIngredient({
+      itemName: editingItem.nameAr.trim(),
+      itemType: editingItem.itemType,
+      productType: editingItem.productType,
+      linkedIngredientId: editingItem.linkedIngredientId
+    })
     await updateMenuItem(editingItem.id, {
       nameAr: editingItem.nameAr.trim(),
       price: editingItem.isWeighted
@@ -321,9 +332,7 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
       categoryId: editingItem.categoryId,
       itemType: editingItem.itemType,
       productType: editingItem.itemType === 'product' ? editingItem.productType : undefined,
-      linkedIngredientId: needsLinkedStock(editingItem.itemType, editingItem.productType)
-        ? (editingItem.linkedIngredientId || undefined)
-        : undefined,
+      linkedIngredientId,
       sizeOptions: editingItem.isWeighted ? [] : sizeOpts,
       attachments: attachOpts,
       isWeighted: editingItem.isWeighted,
@@ -386,6 +395,8 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
 
   async function saveRecipe(): Promise<void> {
     if (!editingRecipeId) return
+    const recipeItem = items.find((item) => item.recipeId === editingRecipeId)
+    if (!validateRecipeDoesNotUseOwnStock(recipeLines, recipeItem?.linkedIngredientId)) return
     await updateRecipe(editingRecipeId, recipeLines, undefined, user)
     setEditingRecipeId(null)
     setMessage('تم تعديل الوصفة')
@@ -455,6 +466,44 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
   const activeSizes = sizes.filter((s) => s.active)
   const activeAddons = addons.filter((a) => a.active)
   const activePrinters = printers.filter((printer) => printer.active)
+  const producedIngredientIds = new Map(
+    items
+      .filter((item) => item.itemType === 'product' && item.productType === 'manufactured' && item.linkedIngredientId)
+      .map((item) => [item.linkedIngredientId!, item.nameAr])
+  )
+
+  function ingredientOptionLabel(ingredient: Ingredient): string {
+    const producedBy = producedIngredientIds.get(ingredient.id)
+    return producedBy ? `${ingredient.nameAr} — إنتاج: ${producedBy}` : `${ingredient.nameAr} (${ingredient.unit})`
+  }
+
+  async function ensureLinkedStockIngredient(params: {
+    itemName: string
+    itemType: MenuItemType
+    productType: ProductType
+    linkedIngredientId: string
+  }): Promise<string | undefined> {
+    if (!needsLinkedStock(params.itemType, params.productType)) return undefined
+    if (params.linkedIngredientId) return params.linkedIngredientId
+
+    const created = await createIngredient({
+      nameAr: params.itemName,
+      unit: 'وحدة',
+      active: true
+    }, user)
+    setMessage('تم إنشاء مخزون مرتبط للصنف ويمكن استخدامه كمكوّن في وصفات أخرى')
+    return created.id
+  }
+
+  function validateRecipeDoesNotUseOwnStock(
+    recipeLines: RecipeLine[],
+    linkedIngredientId: string | undefined
+  ): boolean {
+    if (!linkedIngredientId) return true
+    if (!recipeLines.some((line) => line.ingredientId === linkedIngredientId)) return true
+    setMessage('لا يمكن أن تحتوي وصفة التصنيع على مخزون نفس المنتج')
+    return false
+  }
 
   function renderImageField(imageUrl: string, isForm: boolean): React.ReactElement {
     const update = (value: string): void => {
@@ -706,9 +755,10 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
               <label className="field">
                 <span>رصيد المخزون المرتبط</span>
                 <select value={itemForm.linkedIngredientId} onChange={(e) => setItemForm((f) => ({ ...f, linkedIngredientId: e.target.value }))}>
-                  <option value="">بدون ربط</option>
-                  {ingredients.filter((i) => i.active).map((i) => <option key={i.id} value={i.id}>{i.nameAr} ({i.unit})</option>)}
+                  <option value="">إنشاء مخزون تلقائياً باسم الصنف</option>
+                  {ingredients.filter((i) => i.active).map((i) => <option key={i.id} value={i.id}>{ingredientOptionLabel(i)}</option>)}
                 </select>
+                <small className="field-hint">هذا المخزون يمكن استخدامه لاحقاً كمكوّن في وصفات أصناف أخرى.</small>
               </label>
             )}
             {!itemForm.isWeighted && (
@@ -776,7 +826,9 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
                     setItemForm((f) => ({ ...f, lines }))
                   }}>
                     <option value="">مكوّن...</option>
-                    {ingredients.map((i) => <option key={i.id} value={i.id}>{i.nameAr}</option>)}
+                    {ingredients
+                      .filter((i) => i.id !== itemForm.linkedIngredientId)
+                      .map((i) => <option key={i.id} value={i.id}>{ingredientOptionLabel(i)}</option>)}
                   </select>
                   <input type="number" placeholder="الكمية" value={line.quantity} onChange={(e) => { const lines=[...itemForm.lines]; lines[idx]={...lines[idx]!,quantity:e.target.value}; setItemForm((f)=>({...f,lines})) }} style={{ width: 80 }} />
                   <span style={{ fontSize: '0.85rem', color: 'var(--color-muted)' }}>{line.unit}</span>
@@ -927,9 +979,10 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
                 <label className="field">
                   <span>رصيد المخزون المرتبط</span>
                   <select value={editingItem.linkedIngredientId} onChange={(e) => setEditingItem({ ...editingItem, linkedIngredientId: e.target.value })}>
-                    <option value="">بدون ربط مخزون</option>
-                    {ingredients.filter((i) => i.active).map((i) => <option key={i.id} value={i.id}>{i.nameAr} ({i.unit})</option>)}
+                    <option value="">إنشاء مخزون تلقائياً باسم الصنف</option>
+                    {ingredients.filter((i) => i.active).map((i) => <option key={i.id} value={i.id}>{ingredientOptionLabel(i)}</option>)}
                   </select>
+                  <small className="field-hint">هذا المخزون يمكن استخدامه لاحقاً كمكوّن في وصفات أصناف أخرى.</small>
                 </label>
               )}
               {!editingItem.isWeighted && (
@@ -1004,7 +1057,11 @@ function ItemsTab({ categories, items, ingredients, sizes, addons, printers, onR
           <div>
             {recipeLines.map((line, idx) => (
               <div key={idx} className="page-toolbar" style={{ gap: 6, marginBottom: 8 }}>
-                <select value={line.ingredientId} onChange={(e) => { const next=[...recipeLines]; const ing=ingredients.find((i)=>i.id===e.target.value); next[idx]={...next[idx]!,ingredientId:e.target.value,unit:ing?.unit??line.unit}; setRecipeLines(next) }}>{ingredients.map((i)=><option key={i.id} value={i.id}>{i.nameAr}</option>)}</select>
+                <select value={line.ingredientId} onChange={(e) => { const next=[...recipeLines]; const ing=ingredients.find((i)=>i.id===e.target.value); next[idx]={...next[idx]!,ingredientId:e.target.value,unit:ing?.unit??line.unit}; setRecipeLines(next) }}>
+                  {ingredients
+                    .filter((i) => i.id !== items.find((item) => item.recipeId === editingRecipeId)?.linkedIngredientId)
+                    .map((i)=><option key={i.id} value={i.id}>{ingredientOptionLabel(i)}</option>)}
+                </select>
                 <input type="number" value={line.quantity} style={{ width: 80 }} onChange={(e) => { const next=[...recipeLines]; next[idx]={...next[idx]!,quantity:Number(e.target.value)}; setRecipeLines(next) }} />
                 <span style={{ fontSize: '0.85rem', color: 'var(--color-muted)' }}>{line.unit}</span>
                 <button type="button" className="btn btn--danger btn--sm" onClick={() => setRecipeLines((l)=>l.filter((_,i)=>i!==idx))}><MdClose /></button>
@@ -1087,7 +1144,7 @@ export function ItemsPage(): React.ReactElement {
         return
       }
       const index = Number(e.key)
-      if (!Number.isInteger(index) || index < 1 || index > 5) return
+      if (!Number.isInteger(index) || index < 1 || index > tabs.length) return
       e.preventDefault()
       const nextTab = tabs[index - 1]
       if (nextTab) setActiveTab(nextTab.key)
@@ -1164,7 +1221,7 @@ export function ItemsPage(): React.ReactElement {
         />
       )}
       {activeTab === 'sizes'         && <SizesTab         sizes={sizes}             onRefresh={load} setMessage={setMessage} />}
-      {activeTab === 'addons'        && <AddonsTab        addons={addons}           onRefresh={load} setMessage={setMessage} />}
+      {activeTab === 'addons'        && <AddonsTab        addons={addons} ingredients={ingredients} onRefresh={load} setMessage={setMessage} />}
       {activeTab === 'raw_materials' && <RawMaterialsTab  ingredients={ingredients} onRefresh={load} setMessage={setMessage} />}
     </div>
   )

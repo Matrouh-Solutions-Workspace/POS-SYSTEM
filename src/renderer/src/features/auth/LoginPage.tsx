@@ -117,13 +117,15 @@ export function LoginPage(): React.ReactElement {
               onChange={(e) => setUsername(e.target.value)}
               required
               autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              autoFocus
               dir="ltr"
-              placeholder="manager"
             />
           </label>
           <label className="field">
             <span>كلمة المرور</span>
-            <PasswordInput value={password} onChange={setPassword} autoComplete="off" />
+            <PasswordInput value={password} onChange={setPassword} autoComplete="off" required />
           </label>
           {error && <p className="form-error">{error}</p>}
           {notice && <p className="form-message form-message--ok">{notice}</p>}

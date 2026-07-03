@@ -1,13 +1,15 @@
 import React, { useState, FormEvent } from 'react'
-import { ItemAddon } from '@shared/types'
+import { Ingredient, ItemAddon } from '@shared/types'
 import { createAddon, updateAddon, deleteAddon, reorderAddons } from '@renderer/features/menu/addons-service'
+import { createIngredient } from '@renderer/features/inventory/inventory-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { ConfirmDialog, FormModal, FormField } from '@renderer/components/ui'
 import { MdArrowUpward, MdArrowDownward, MdEdit, MdDelete } from 'react-icons/md'
 import { moveItem } from './items-types'
 
-export function AddonsTab({ addons, onRefresh, setMessage }: {
+export function AddonsTab({ addons, ingredients, onRefresh, setMessage }: {
   addons: ItemAddon[]
+  ingredients: Ingredient[]
   onRefresh: () => Promise<void>
   setMessage: (m: string | null) => void
 }): React.ReactElement {
@@ -17,6 +19,7 @@ export function AddonsTab({ addons, onRefresh, setMessage }: {
   
   const [name, setName] = useState('')
   const [price, setPrice] = useState('')
+  const [linkedIngredientId, setLinkedIngredientId] = useState('')
   
   const [itemToDelete, setItemToDelete] = useState<string | null>(null)
   const [savingOrder, setSavingOrder] = useState(false)
@@ -25,6 +28,7 @@ export function AddonsTab({ addons, onRefresh, setMessage }: {
     setEditingAddon(null)
     setName('')
     setPrice('')
+    setLinkedIngredientId('')
     setFormOpen(true)
   }
 
@@ -32,18 +36,31 @@ export function AddonsTab({ addons, onRefresh, setMessage }: {
     setEditingAddon(a)
     setName(a.nameAr)
     setPrice(String(a.defaultPrice))
+    setLinkedIngredientId(a.linkedIngredientId ?? '')
     setFormOpen(true)
+  }
+
+  async function ensureAddonStockIngredient(): Promise<string> {
+    if (linkedIngredientId) return linkedIngredientId
+    const created = await createIngredient({
+      nameAr: name.trim(),
+      unit: 'وحدة',
+      active: true
+    }, user)
+    return created.id
   }
 
   async function saveAddon(e?: FormEvent): Promise<void> {
     if (e) e.preventDefault()
     if (!name.trim()) throw new Error('يرجى إدخال اسم الإضافة')
 
+    const stockIngredientId = await ensureAddonStockIngredient()
+
     if (editingAddon) {
-      await updateAddon(editingAddon.id, { nameAr: name.trim(), defaultPrice: Number(price) || 0 }, user)
+      await updateAddon(editingAddon.id, { nameAr: name.trim(), defaultPrice: Number(price) || 0, linkedIngredientId: stockIngredientId }, user)
       setMessage('تم تعديل الإضافة')
     } else {
-      await createAddon(name.trim(), Number(price) || 0, addons.length, user)
+      await createAddon(name.trim(), Number(price) || 0, addons.length, stockIngredientId, user)
       setMessage('تم إضافة الإضافة')
     }
     await onRefresh()
@@ -58,7 +75,7 @@ export function AddonsTab({ addons, onRefresh, setMessage }: {
 
   return (
     <div className="tab-content">
-      <div className="page-toolbar mb-16">
+      <div className="page-toolbar section-action-header mb-16">
         <h2 className="card__title m-0">قائمة الإضافات ({addons.length})</h2>
         <button type="button" className="btn btn--primary" onClick={openCreate}>+ إضافة مرفق</button>
       </div>
@@ -74,7 +91,7 @@ export function AddonsTab({ addons, onRefresh, setMessage }: {
         {addons.length > 0 && (
           <table className="data-table">
             <thead>
-              <tr><th>ترتيب</th><th>الإضافة</th><th>السعر الافتراضي</th><th>الحالة</th><th>إجراءات</th></tr>
+              <tr><th>ترتيب</th><th>الإضافة</th><th>السعر الافتراضي</th><th>المخزون المرتبط</th><th>الحالة</th><th>إجراءات</th></tr>
             </thead>
             <tbody>
               {addons.map((a, idx) => (
@@ -87,6 +104,7 @@ export function AddonsTab({ addons, onRefresh, setMessage }: {
                   </td>
                   <td>{a.nameAr}</td>
                   <td>{a.defaultPrice.toFixed(2)}</td>
+                  <td>{ingredients.find((ingredient) => ingredient.id === a.linkedIngredientId)?.nameAr ?? '-'}</td>
                   <td>
                     <span style={{ color: a.active ? 'var(--color-success)' : 'var(--color-muted)', fontWeight: 700, fontSize: '0.82rem' }}>
                       {a.active ? 'مفعّل' : 'معطّل'}
@@ -147,6 +165,15 @@ export function AddonsTab({ addons, onRefresh, setMessage }: {
               onChange={(e) => setPrice(e.target.value)} 
               placeholder="0.00" 
             />
+          </FormField>
+          <FormField label="المخزون المرتبط">
+            <select value={linkedIngredientId} onChange={(e) => setLinkedIngredientId(e.target.value)}>
+              <option value="">إنشاء مخزون تلقائياً باسم الإضافة</option>
+              {ingredients.filter((ingredient) => ingredient.active).map((ingredient) => (
+                <option key={ingredient.id} value={ingredient.id}>{ingredient.nameAr} ({ingredient.unit})</option>
+              ))}
+            </select>
+            <small className="field-hint">يتم خصم هذا المخزون عند بيع الإضافة منفردة أو كمرفق على صنف.</small>
           </FormField>
         </div>
       </FormModal>

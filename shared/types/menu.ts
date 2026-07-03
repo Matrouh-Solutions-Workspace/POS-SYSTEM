@@ -93,6 +93,8 @@ export interface ItemAddon {
   nameAr: string
   /** Default price suggestion (can be overridden per product) */
   defaultPrice: number
+  /** Optional inventory stock/component consumed when this add-on is sold */
+  linkedIngredientId?: string
   sortOrder: number
   active: boolean
   createdAt: number

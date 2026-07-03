@@ -61,7 +61,7 @@ export function RawMaterialsTab({ ingredients, onRefresh, setMessage }: {
 
   return (
     <div className="tab-content">
-      <div className="page-toolbar mb-16">
+      <div className="page-toolbar section-action-header mb-16">
         <h2 className="card__title m-0">المواد الخام ({ingredients.length})</h2>
         <button type="button" className="btn btn--primary" onClick={openCreate}>+ إضافة مادة خام</button>
       </div>

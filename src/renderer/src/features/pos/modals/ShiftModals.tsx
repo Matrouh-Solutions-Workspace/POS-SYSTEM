@@ -215,10 +215,24 @@ export function CloseShiftModal({
         )}
 
         {hasCloseIssues && (
-          <div className="p-8 mt-12 mb-12 rounded-6 border-2 border-[#ef4444] bg-[#fef2f2] text-[#991b1b] font-bold text-sm">
-            {blocked ? 'لا يمكن إغلاق الشيفت قبل معالجة التحذيرات:' : 'تحذير قبل إغلاق الشيفت:'}
-            {preview.pendingOrders.length > 0 && ` ${preview.pendingOrders.length} طلب معلق أو غير مدفوع.`}
-            {preview.incompletePaymentOrders.length > 0 && ` ${preview.incompletePaymentOrders.length} طلب بمدفوعات ناقصة.`}
+          <div className={`shift-close-alert${blocked ? ' shift-close-alert--blocked' : ''}`} role="alert">
+            <div className="shift-close-alert__icon">!</div>
+            <div className="shift-close-alert__body">
+              <strong>
+                {blocked ? 'لا يمكن إغلاق الشيفت الآن' : 'تنبيه مهم قبل إغلاق الشيفت'}
+              </strong>
+              <ul>
+                {preview.pendingOrders.length > 0 && (
+                  <li>{preview.pendingOrders.length} طلب معلق أو غير مدفوع</li>
+                )}
+                {preview.incompletePaymentOrders.length > 0 && (
+                  <li>{preview.incompletePaymentOrders.length} طلب بمدفوعات غير مكتملة</li>
+                )}
+              </ul>
+              {!blocked && (
+                <p>يمكن للمدير أو المشرف الإغلاق بعد كتابة سبب واضح للتجاوز.</p>
+              )}
+            </div>
           </div>
         )}
         {overrideRequired && (

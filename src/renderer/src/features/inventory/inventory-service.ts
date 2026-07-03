@@ -81,8 +81,10 @@ export async function deleteIngredient(id: string, actor?: AuditActor): Promise<
   }
   const linkedMenuItems = await getCachedDocs<MenuItem>(COLLECTIONS.menuItems)
   const linked = linkedMenuItems.some((item) => item.linkedIngredientId === id)
-  if (linked) {
-    throw new Error('لا يمكن الحذف — المكوّن مرتبط بصنف للبيع أو بالمخزون. أزل الربط أولاً.')
+  const linkedAddons = await getCachedDocs<{ linkedIngredientId?: string }>(COLLECTIONS.itemAddons)
+  const linkedAddon = linkedAddons.some((addon) => addon.linkedIngredientId === id)
+  if (linked || linkedAddon) {
+    throw new Error('لا يمكن الحذف — المكوّن مرتبط بصنف أو إضافة للبيع. أزل الربط أولاً.')
   }
   await dbDelete(COLLECTIONS.ingredients, id)
   audit(actor, {

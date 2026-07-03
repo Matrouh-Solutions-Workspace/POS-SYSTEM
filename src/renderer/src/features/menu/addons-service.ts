@@ -23,6 +23,7 @@ export async function createAddon(
   nameAr: string,
   defaultPrice: number,
   sortOrder: number,
+  linkedIngredientId?: string,
   actor?: AuditActor
 ): Promise<ItemAddon> {
   const now = Date.now()
@@ -30,6 +31,7 @@ export async function createAddon(
     id: generateId(),
     nameAr,
     defaultPrice,
+    linkedIngredientId,
     sortOrder,
     active: true,
     createdAt: now,
@@ -49,7 +51,7 @@ export async function createAddon(
 
 export async function updateAddon(
   id: string,
-  patch: Partial<Pick<ItemAddon, 'nameAr' | 'defaultPrice' | 'sortOrder' | 'active'>>,
+  patch: Partial<Pick<ItemAddon, 'nameAr' | 'defaultPrice' | 'linkedIngredientId' | 'sortOrder' | 'active'>>,
   actor?: AuditActor
 ): Promise<void> {
   const cached = await getCachedDoc<ItemAddon>(COLLECTIONS.itemAddons, id)

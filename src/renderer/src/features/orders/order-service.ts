@@ -11,6 +11,7 @@ import type {
   DiscountType,
   InventoryBatch,
   InventoryTransaction,
+  ItemAddon,
   MenuItem,
   Order,
   OrderItem,
@@ -600,6 +601,26 @@ function stockQuantityForOrderItem(item: OrderItem, stockUnit: string): number {
 async function buildInventoryLinesForOrderItem(
   item: OrderItem
 ): Promise<Array<{ ingredientId: string; quantity: number; unit: string }>> {
+  const addonId = item.menuItemId.includes(':attachment:')
+    ? item.menuItemId.split(':attachment:')[1]
+    : item.menuItemId.startsWith('addon:')
+      ? item.menuItemId.slice('addon:'.length)
+      : undefined
+  if (addonId) {
+    const addon = await getCachedDoc<ItemAddon>(COLLECTIONS.itemAddons, addonId)
+    if (!addon?.linkedIngredientId) return []
+    const ingredient = await getCachedDoc<{ unit: string }>(
+      COLLECTIONS.ingredients,
+      addon.linkedIngredientId
+    )
+    if (!ingredient) return []
+    return [{
+      ingredientId: addon.linkedIngredientId,
+      quantity: -Math.abs(item.quantity),
+      unit: ingredient.unit
+    }]
+  }
+
   const menuItem = await getCachedDoc<MenuItem>(COLLECTIONS.menuItems, item.menuItemId)
   if (!menuItem) return []
   if (menuItem.itemType === 'service') return []
