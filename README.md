@@ -1,7 +1,7 @@
 ﻿# POS MVP Launch Assessment
 
 Assessment date: 2026-07-01
-Product version reviewed: 2.2.7
+Product version reviewed: 2.2.8
 Scope: first real-world MVP launch in a single restaurant or cafe, primarily Windows desktop, local SQLite, optional LAN master/side mode.
 
 This assessment is based on the current codebase shape and implemented modules, not on previous README notes.
