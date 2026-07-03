@@ -22,6 +22,14 @@ export interface VersionLog {
 
 export const CHANGELOG: VersionLog[] = [
   {
+    version: '2.2.9',
+    date: '4 يوليو 2026',
+    changes: [
+      { type: 'fix',     text: 'إصلاح تحديثات GitHub الخاصة بحيث يكتب المثبت ملف صلاحية التحديث تلقائيا ولا يحتاج المستخدم لإعداد يدوي' },
+      { type: 'fix',     text: 'ضمان استخدام مزود التحديث الخاص عند وجود رمز التحديث بدلا من محاولة قراءة موجز الإصدارات العام' },
+    ]
+  },
+  {
     version: '2.2.8',
     date: '4 يوليو 2026',
     changes: [
