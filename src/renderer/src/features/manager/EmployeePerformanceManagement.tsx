@@ -195,32 +195,34 @@ export function EmployeePerformanceManagement(): React.ReactElement {
           </div>
 
           {tab === 'ranking' && (
-            <table className="data-table">
-              <thead><tr><th>#</th><th>الموظف</th><th>النقاط</th><th>صافي المبيعات</th><th>الطلبات</th><th>متوسط الطلب</th><th>الأصناف</th><th>وقت التنفيذ</th><th>مرتجعات</th><th>خصومات</th><th>فرق الكاش</th><th>ساعات العمل</th></tr></thead>
-              <tbody>
-                {rows.length === 0 ? <tr><td colSpan={12}>لا توجد بيانات في الفترة المحددة.</td></tr> : rows.map((row, index) => (
-                  <tr key={row.user.id}>
-                    <td>{index + 1}</td>
-                    <td>{row.user.username}</td>
-                    <td>{row.rankingScore.toFixed(1)}</td>
-                    <td>{row.totalSales.toFixed(2)}</td>
-                    <td>{row.completedOrders} / {row.ordersCount}</td>
-                    <td>{row.averageOrderValue.toFixed(2)}</td>
-                    <td>{row.itemsSold.toFixed(2)}</td>
-                    <td>{row.averageProcessingMinutes.toFixed(1)}د</td>
-                    <td>{row.refundedOrders} ({row.refundAmount.toFixed(2)})</td>
-                    <td>{row.discountAmount.toFixed(2)}</td>
-                    <td>{row.cashDifference.toFixed(2)}</td>
-                    <td>{minutesLabel(row.workedMinutes)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="table-scroll shifts-report-table-scroll">
+              <table className="data-table shifts-report-table shifts-report-table--wide">
+                <thead><tr><th>#</th><th>الموظف</th><th>النقاط</th><th>صافي المبيعات</th><th>الطلبات</th><th>متوسط الطلب</th><th>الأصناف</th><th>وقت التنفيذ</th><th>مرتجعات</th><th>خصومات</th><th>فرق الكاش</th><th>ساعات العمل</th></tr></thead>
+                <tbody>
+                  {rows.length === 0 ? <tr><td colSpan={12}>لا توجد بيانات في الفترة المحددة.</td></tr> : rows.map((row, index) => (
+                    <tr key={row.user.id}>
+                      <td>{index + 1}</td>
+                      <td>{row.user.username}</td>
+                      <td>{row.rankingScore.toFixed(1)}</td>
+                      <td>{row.totalSales.toFixed(2)}</td>
+                      <td>{row.completedOrders} / {row.ordersCount}</td>
+                      <td>{row.averageOrderValue.toFixed(2)}</td>
+                      <td>{row.itemsSold.toFixed(2)}</td>
+                      <td>{row.averageProcessingMinutes.toFixed(1)}د</td>
+                      <td>{row.refundedOrders} ({row.refundAmount.toFixed(2)})</td>
+                      <td>{row.discountAmount.toFixed(2)}</td>
+                      <td>{row.cashDifference.toFixed(2)}</td>
+                      <td>{minutesLabel(row.workedMinutes)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
 
           {tab === 'activity' && (
-            <div className="table-scroll">
-              <table className="data-table employee-activity-table">
+            <div className="table-scroll shifts-report-table-scroll">
+              <table className="data-table employee-activity-table shifts-report-table">
                 <thead><tr><th>المستخدم</th><th>العملية</th><th>الجهاز</th><th>المرجع</th><th>التفاصيل</th><th>الوقت</th></tr></thead>
                 <tbody>
                   {activity.length === 0 ? <tr><td colSpan={6}>لا يوجد نشاط مسجل في الفترة المحددة.</td></tr> : activity.map((entry) => (
@@ -243,30 +245,32 @@ export function EmployeePerformanceManagement(): React.ReactElement {
           )}
 
           {tab === 'closures' && (
-            <table className="data-table">
-              <thead><tr><th>المستخدم</th><th>الافتتاح</th><th>كاش</th><th>بطاقة</th><th>مرتجعات</th><th>تسويات</th><th>تقريب</th><th>المتوقع</th><th>الفعلي</th><th>الفرق</th><th>السبب</th><th>الاعتماد</th><th>التاريخ</th></tr></thead>
-              <tbody>
-                {closures.length === 0 ? <tr><td colSpan={13}>لا توجد سجلات إغلاق في الفترة المحددة.</td></tr> : closures.map((record) => (
-                  <tr key={record.id}>
-                    <td>{userMap.get(record.userId)?.username ?? record.userId}</td>
-                    <td>{record.openingCash.toFixed(2)}</td>
-                    <td>{record.cashSales.toFixed(2)}</td>
-                    <td>{record.cardSales.toFixed(2)}</td>
-                    <td>{record.refunds.toFixed(2)}</td>
-                    <td>{record.cashAdjustments.toFixed(2)}</td>
-                    <td>{(record.roundingAdjustments ?? 0).toFixed(2)}</td>
-                    <td>{record.expectedCash.toFixed(2)}</td>
-                    <td>{record.actualCash.toFixed(2)}</td>
-                    <td>{record.difference.toFixed(2)}</td>
-                    <td>{record.differenceReason ?? '-'}</td>
-                    <td>{record.approvedBy ? (userMap.get(record.approvedBy)?.username ?? 'تم الاعتماد') : (
-                      Math.abs(record.difference) < 0.01 ? 'متزن' : <button type="button" className="btn btn--secondary btn--sm" onClick={() => void approve(record)}><MdCheck /> اعتماد</button>
-                    )}</td>
-                    <td>{new Date(record.closedAt).toLocaleString('ar-EG')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="table-scroll shifts-report-table-scroll">
+              <table className="data-table shifts-report-table shifts-report-table--wide">
+                <thead><tr><th>المستخدم</th><th>الافتتاح</th><th>كاش</th><th>بطاقة</th><th>مرتجعات</th><th>تسويات</th><th>تقريب</th><th>المتوقع</th><th>الفعلي</th><th>الفرق</th><th>السبب</th><th>الاعتماد</th><th>التاريخ</th></tr></thead>
+                <tbody>
+                  {closures.length === 0 ? <tr><td colSpan={13}>لا توجد سجلات إغلاق في الفترة المحددة.</td></tr> : closures.map((record) => (
+                    <tr key={record.id}>
+                      <td>{userMap.get(record.userId)?.username ?? record.userId}</td>
+                      <td>{record.openingCash.toFixed(2)}</td>
+                      <td>{record.cashSales.toFixed(2)}</td>
+                      <td>{record.cardSales.toFixed(2)}</td>
+                      <td>{record.refunds.toFixed(2)}</td>
+                      <td>{record.cashAdjustments.toFixed(2)}</td>
+                      <td>{(record.roundingAdjustments ?? 0).toFixed(2)}</td>
+                      <td>{record.expectedCash.toFixed(2)}</td>
+                      <td>{record.actualCash.toFixed(2)}</td>
+                      <td>{record.difference.toFixed(2)}</td>
+                      <td>{record.differenceReason ?? '-'}</td>
+                      <td>{record.approvedBy ? (userMap.get(record.approvedBy)?.username ?? 'تم الاعتماد') : (
+                        Math.abs(record.difference) < 0.01 ? 'متزن' : <button type="button" className="btn btn--secondary btn--sm" onClick={() => void approve(record)}><MdCheck /> اعتماد</button>
+                      )}</td>
+                      <td>{new Date(record.closedAt).toLocaleString('ar-EG')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
 
         </>

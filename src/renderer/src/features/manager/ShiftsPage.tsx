@@ -520,80 +520,88 @@ export function ShiftsPage(): React.ReactElement {
           {selected.supplierPayments.length > 0 && (
             <>
               <h3 className="section-title">مدفوعات الموردين</h3>
-              <table className="data-table">
-                <thead><tr><th>المورد</th><th>المبلغ</th><th>طريقة الدفع</th><th>المستخدم</th><th>الوقت</th></tr></thead>
-                <tbody>
-                  {selected.supplierPayments.map((tx) => (
-                    <tr key={tx.id}>
-                      <td>{tx.supplierName ?? '-'}</td>
-                      <td>{Math.abs(tx.amount).toFixed(2)}</td>
-                      <td>{formatPaymentMethod(tx.paymentMethod)}</td>
-                      <td>{tx.userName}</td>
-                      <td>{new Date(tx.createdAt).toLocaleString('ar-EG')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="table-scroll shift-detail-table-scroll">
+                <table className="data-table shift-detail-table">
+                  <thead><tr><th>المورد</th><th>المبلغ</th><th>طريقة الدفع</th><th>المستخدم</th><th>الوقت</th></tr></thead>
+                  <tbody>
+                    {selected.supplierPayments.map((tx) => (
+                      <tr key={tx.id}>
+                        <td>{tx.supplierName ?? '-'}</td>
+                        <td>{Math.abs(tx.amount).toFixed(2)}</td>
+                        <td>{formatPaymentMethod(tx.paymentMethod)}</td>
+                        <td>{tx.userName}</td>
+                        <td>{new Date(tx.createdAt).toLocaleString('ar-EG')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
 
           {selected.pettyCashExpenses.length > 0 && (
             <>
               <h3 className="section-title">مصروفات نثرية</h3>
-              <table className="data-table">
-                <thead><tr><th>المبلغ</th><th>السبب</th><th>المستخدم</th><th>تأثير الدرج</th><th>الوقت</th></tr></thead>
-                <tbody>
-                  {selected.pettyCashExpenses.map((tx) => (
-                    <tr key={tx.id}>
-                      <td>{Math.abs(tx.amount).toFixed(2)}</td>
-                      <td>{tx.noteAr ?? '-'}</td>
-                      <td>{tx.userName}</td>
-                      <td>{tx.amount.toFixed(2)}</td>
-                      <td>{new Date(tx.createdAt).toLocaleString('ar-EG')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="table-scroll shift-detail-table-scroll">
+                <table className="data-table shift-detail-table">
+                  <thead><tr><th>المبلغ</th><th>السبب</th><th>المستخدم</th><th>تأثير الدرج</th><th>الوقت</th></tr></thead>
+                  <tbody>
+                    {selected.pettyCashExpenses.map((tx) => (
+                      <tr key={tx.id}>
+                        <td>{Math.abs(tx.amount).toFixed(2)}</td>
+                        <td>{tx.noteAr ?? '-'}</td>
+                        <td>{tx.userName}</td>
+                        <td>{tx.amount.toFixed(2)}</td>
+                        <td>{new Date(tx.createdAt).toLocaleString('ar-EG')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
 
           <h3 className="section-title">الأصناف المباعة في الشيفت</h3>
-          <table className="data-table">
-            <thead>
-              <tr><th>الصنف</th><th>الكمية</th><th>الإجمالي</th></tr>
-            </thead>
-            <tbody>
-              {selected.itemSummary.length === 0 ? (
-                <tr>
-                  <td colSpan={3} style={{ textAlign: 'center', color: 'var(--color-muted)' }}>
-                    لا توجد أصناف مباعة في هذا الشيفت
-                  </td>
-                </tr>
-              ) : selected.itemSummary.map((item) => (
-                <tr key={item.key}>
-                  <td>{item.nameAr}{item.sizeLabelAr ? ` - ${item.sizeLabelAr}` : ''}</td>
-                  <td>{formatQty(item.quantity)}{item.unitLabel ? ` ${item.unitLabel}` : ''}</td>
-                  <td>{item.total.toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll shift-detail-table-scroll">
+            <table className="data-table shift-detail-table">
+              <thead>
+                <tr><th>الصنف</th><th>الكمية</th><th>الإجمالي</th></tr>
+              </thead>
+              <tbody>
+                {selected.itemSummary.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} style={{ textAlign: 'center', color: 'var(--color-muted)' }}>
+                      لا توجد أصناف مباعة في هذا الشيفت
+                    </td>
+                  </tr>
+                ) : selected.itemSummary.map((item) => (
+                  <tr key={item.key}>
+                    <td>{item.nameAr}{item.sizeLabelAr ? ` - ${item.sizeLabelAr}` : ''}</td>
+                    <td>{formatQty(item.quantity)}{item.unitLabel ? ` ${item.unitLabel}` : ''}</td>
+                    <td>{item.total.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           <h3 className="section-title">المخزون المستخدم</h3>
-          <table className="data-table">
-            <thead><tr><th>المكون</th><th>الكمية</th><th>الوحدة</th></tr></thead>
-            <tbody>
-              {selected.usedInventory.length === 0 ? (
-                <tr>
-                  <td colSpan={3} style={{ textAlign: 'center', color: 'var(--color-muted)' }}>
-                    لا توجد حركات مخزون مستخدمة
-                  </td>
-                </tr>
-              ) : selected.usedInventory.map((tx) => (
-                <tr key={tx.id}><td>{tx.ingredientNameAr ?? tx.ingredientId}</td><td>{tx.quantity.toFixed(2)}</td><td>{tx.unit}</td></tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll shift-detail-table-scroll">
+            <table className="data-table shift-detail-table">
+              <thead><tr><th>المكون</th><th>الكمية</th><th>الوحدة</th></tr></thead>
+              <tbody>
+                {selected.usedInventory.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} style={{ textAlign: 'center', color: 'var(--color-muted)' }}>
+                      لا توجد حركات مخزون مستخدمة
+                    </td>
+                  </tr>
+                ) : selected.usedInventory.map((tx) => (
+                  <tr key={tx.id}><td>{tx.ingredientNameAr ?? tx.ingredientId}</td><td>{tx.quantity.toFixed(2)}</td><td>{tx.unit}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

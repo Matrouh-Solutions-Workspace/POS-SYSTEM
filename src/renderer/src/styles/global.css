@@ -1755,12 +1755,14 @@ textarea {
 .shifts-reports-stack {
   display: grid;
   gap: 16px;
+  min-width: 0;
 }
 
 .work-shift-card,
 .shifts-card,
 .shifts-summary-card {
   overflow: hidden;
+  min-width: 0;
 }
 
 .shifts-card__header {
@@ -1790,6 +1792,20 @@ textarea {
 .table-scroll .data-table {
   border: 0;
   min-width: 760px;
+}
+
+.shifts-report-table-scroll,
+.shift-detail-table-scroll {
+  max-width: 100%;
+  margin-bottom: 16px;
+}
+
+.table-scroll .shifts-report-table--wide {
+  min-width: 1180px;
+}
+
+.table-scroll .shift-detail-table {
+  min-width: 820px;
 }
 
 .shifts-table th {
