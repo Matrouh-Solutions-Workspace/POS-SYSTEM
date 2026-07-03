@@ -90,15 +90,17 @@ function readPrivateUpdateToken(): string | undefined {
 }
 
 function configurePrivateGitHubAuth(isDev: boolean): void {
-  const privateUpdatesEnabled = process.env['SHIFT_POS_PRIVATE_GITHUB_UPDATES'] === 'true'
-  if (!privateUpdatesEnabled) return
-
   const token = readPrivateUpdateToken()
   if (token) {
+    process.env['GH_TOKEN'] = token
     autoUpdater.addAuthHeader(`token ${token}`)
   } else if (!isDev) {
     console.warn('[updater] No GitHub token found; private repo updates will fail on master devices')
   }
+}
+
+function configureUpdateProviderAuth(isDev: boolean): void {
+  if (!configureSideUpdateFeed()) configurePrivateGitHubAuth(isDev)
 }
 
 function configureSideUpdateFeed(): boolean {
@@ -128,7 +130,7 @@ export function initAutoUpdater(): void {
     autoUpdater.forceDevUpdateConfig = true
   }
 
-  if (!configureSideUpdateFeed()) configurePrivateGitHubAuth(isDev)
+  configureUpdateProviderAuth(isDev)
 
   autoUpdater.logger = {
     info:  (msg: unknown) => console.log('[updater]', msg),
@@ -180,7 +182,7 @@ export function initAutoUpdater(): void {
 
   ipcMain.handle('updater:check-now', async () => {
     try {
-      configureSideUpdateFeed()
+      configureUpdateProviderAuth(isDev)
       const result = await autoUpdater.checkForUpdates()
       console.log('[updater] check result:', result)
     } catch (e) {
@@ -192,7 +194,7 @@ export function initAutoUpdater(): void {
 
   ipcMain.handle('updater:start-download', async () => {
     try {
-      configureSideUpdateFeed()
+      configureUpdateProviderAuth(isDev)
       console.log('[updater] starting download...')
       await autoUpdater.downloadUpdate()
       console.log('[updater] download started')
@@ -210,14 +212,14 @@ export function initAutoUpdater(): void {
   app.once('browser-window-created', (_, win) => {
     win.webContents.once('did-finish-load', () => {
       setTimeout(() => {
-        configureSideUpdateFeed()
+        configureUpdateProviderAuth(isDev)
         autoUpdater.checkForUpdates().catch((err: Error) => {
           console.warn('[updater] check failed:', err.message)
         })
       }, 3000)
 
       setInterval(() => {
-        configureSideUpdateFeed()
+        configureUpdateProviderAuth(isDev)
         autoUpdater.checkForUpdates().catch((err: Error) => {
           console.warn('[updater] periodic check failed:', err.message)
         })

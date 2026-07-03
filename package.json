@@ -48,7 +48,7 @@
       "owner": "xlargetomato",
       "repo": "AbdoKoftaDesktop",
       "releaseType": "release",
-      "private": false
+      "private": true
     },
     "directories": {
       "output": "release",
