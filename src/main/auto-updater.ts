@@ -90,6 +90,9 @@ function readPrivateUpdateToken(): string | undefined {
 }
 
 function configurePrivateGitHubAuth(isDev: boolean): void {
+  const privateUpdatesEnabled = process.env['SHIFT_POS_PRIVATE_GITHUB_UPDATES'] === 'true'
+  if (!privateUpdatesEnabled) return
+
   const token = readPrivateUpdateToken()
   if (token) {
     autoUpdater.addAuthHeader(`token ${token}`)
