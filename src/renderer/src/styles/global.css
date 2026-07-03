@@ -5449,6 +5449,7 @@ select.inline-edit-input {
 .receipt-designer {
   border-top: 2px solid var(--color-border);
   padding-top: 18px;
+  min-width: 0;
 }
 
 .receipt-designer__workspace {
@@ -5456,6 +5457,7 @@ select.inline-edit-input {
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
+  min-width: 0;
 }
 
 .receipt-designer__controls {
@@ -5463,18 +5465,43 @@ select.inline-edit-input {
   grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
+  min-width: 0;
 }
 
 .receipt-designer-panel {
   border: 2px solid var(--color-border);
   background: var(--color-surface);
   padding: 14px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.receipt-designer-panel .settings-form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr));
+  min-width: 0;
+}
+
+.receipt-designer-panel .field,
+.receipt-designer-panel .field--checkbox {
+  min-width: 0;
+}
+
+.receipt-designer-panel input,
+.receipt-designer-panel select,
+.receipt-designer-panel textarea {
+  max-width: 100%;
+}
+
+.receipt-designer-panel input[type="file"] {
+  min-width: 0;
+  width: 100%;
 }
 
 .receipt-section-list,
 .receipt-preview-items {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .receipt-section-row {
@@ -5499,13 +5526,15 @@ select.inline-edit-input {
 
 .receipt-preview-item {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) 74px 86px minmax(100px, 1fr) auto;
+  grid-template-columns: minmax(120px, 1fr) minmax(64px, 74px) minmax(74px, 86px) minmax(100px, 1fr) auto;
   gap: 8px;
   align-items: center;
+  min-width: 0;
 }
 
 .receipt-preview-item input {
   min-width: 0;
+  width: 100%;
 }
 
 .receipt-designer__preview {
@@ -5566,6 +5595,8 @@ select.inline-edit-input {
   margin-top: 10px;
   width: 80mm;
   max-width: 100%;
+  min-width: 0;
+  overflow: auto;
 }
 
 .receipt-logo-print-preview > span {
@@ -5585,7 +5616,7 @@ select.inline-edit-input {
   padding: 10px;
 }
 
-@media (max-width: 1000px) {
+@media (max-width: 1220px) {
   .receipt-designer__controls {
     grid-template-columns: 1fr;
   }
@@ -5599,11 +5630,18 @@ select.inline-edit-input {
 
 @media (max-width: 760px) {
   .receipt-preview-item {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
   .receipt-preview-item .btn {
     grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  .receipt-preview-item {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
