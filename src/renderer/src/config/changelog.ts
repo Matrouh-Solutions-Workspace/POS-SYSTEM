@@ -22,6 +22,16 @@ export interface VersionLog {
 
 export const CHANGELOG: VersionLog[] = [
   {
+    version: '2.2.11',
+    date: '23 يوليو 2026',
+    changes: [
+      { type: 'improve', text: 'إزالة Firebase من التطبيق بالكامل — التطبيق لم يعد يعتمد على Firebase في البنية أو التشغيل' },
+      { type: 'fix',     text: 'إصلاح صفحة تفعيل الرخصة بحيث لا تعرض رسالة خطأ مسبقة عند فتحها، ويظهر فقط "التطبيق يحتاج إلى تفعيل للمتابعة"' },
+      { type: 'new',     text: 'إضافة التفعيل بمفتاح الاشتراك أونلاين مباشرة، مع دعم إلغاء التفعيل عبر اختصار مخفي من شاشة تسجيل الدخول' },
+      { type: 'fix',     text: 'إصلاح عدم التعرف على بعض دوال API في واجهة Electron مثل activateWithLicenseKey وdeactivateLicense وonLicenseRevoked' },
+    ]
+  },
+  {
     version: '2.2.10',
     date: '4 يوليو 2026',
     changes: [

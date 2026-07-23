@@ -1,12 +1,15 @@
-import {
-  getAuth,
-  signInWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-  type User
-} from 'firebase/auth'
-import { getFirebaseApp } from './app'
+// Firebase Auth disabled — stub only
+export const auth: never = null as never
+export type User = never
 
-export const auth = getAuth(getFirebaseApp())
+export function signInWithEmailAndPassword(): never {
+  throw new Error('Firebase Auth is not configured')
+}
 
-export { signInWithEmailAndPassword, signOut, onAuthStateChanged, type User }
+export function signOut(): never {
+  throw new Error('Firebase Auth is not configured')
+}
+
+export function onAuthStateChanged(): never {
+  throw new Error('Firebase Auth is not configured')
+}

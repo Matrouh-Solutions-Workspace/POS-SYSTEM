@@ -1,10 +1,11 @@
-import type { DocumentData, DocumentSnapshot } from 'firebase/firestore'
+// Firebase disabled — stub mapper
+export type DocumentData = Record<string, unknown>
+export type DocumentSnapshot<T = DocumentData> = { id: string; data: () => T | undefined }
 
 export function mapDoc<T extends { id: string }>(
   snap: DocumentSnapshot<DocumentData>
 ): T {
   const data = snap.data() ?? {}
-  // Firestore doc id wins — stored `id` field from old addDoc seeds must not override
   return { ...data, id: snap.id } as T
 }
 

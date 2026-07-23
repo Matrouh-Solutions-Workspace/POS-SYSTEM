@@ -22,7 +22,7 @@ export function LicenseActivationPage({
 }: LicenseActivationPageProps): React.ReactElement {
   const [step, setStep] = useState<ActivationStep>('license')
   const [method, setMethod] = useState<ActivationMethod>('key')
-  const [message, setMessage] = useState(status.reason ?? '')
+  const [message, setMessage] = useState('')
   const [messageType, setMessageType] = useState<'warn' | 'error' | 'success'>('warn')
   const [busy, setBusy] = useState(false)
   const [licenseKey, setLicenseKey] = useState('')
