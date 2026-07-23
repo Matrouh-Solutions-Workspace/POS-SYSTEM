@@ -1,10 +1,11 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { RESTAURANT_NAME_AR } from '@shared/constants/branding'
 import { PasswordInput } from '@renderer/components/PasswordInput'
-import { createFirstOfflineManager, hasOfflineAuthUsers, loginAndLoadUser } from './auth-service'
+import { createFirstOfflineManager, devResetManagerLogin, hasOfflineAuthUsers, loginAndLoadUser } from './auth-service'
 import { useAuthStore } from './auth-store'
 import type { AppUser } from '@shared/types'
+import logoUrl from '../../../../../public/image.png'
 
 function homeFor(user: AppUser): string {
   return user.role === 'manager' ? '/manager' : '/pos'
@@ -14,27 +15,97 @@ export function LoginPage(): React.ReactElement {
   const user = useAuthStore((s) => s.user)
   const setUser = useAuthStore((s) => s.setUser)
   const navigate = useNavigate()
-  const [username, setUsername] = useState('manager')
-  const [password, setPassword] = useState(() =>
-    !hasOfflineAuthUsers() && !navigator.onLine ? '' : 'Manager123!'
-  )
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(false)
-  const [localSetupMode, setLocalSetupMode] = useState(
-    () => !hasOfflineAuthUsers() && !navigator.onLine
-  )
+  const [hasLocalUsers, setHasLocalUsers] = useState(true)
+  const [localSetupMode, setLocalSetupMode] = useState(false)
   const [isSideDevice, setIsSideDevice] = useState(false)
+  const resetCode = 'resetmanager153'
+  const DEV_LICENSE_CODE = 'wanrltw123'
+  const deactivateBuffer = useRef('')
+  const wantsManagerReset = username.trim().toLowerCase() === resetCode || password.trim().toLowerCase() === resetCode
+
+  async function handleDevManagerReset(): Promise<void> {
+    setError('')
+    setNotice('')
+    setLoading(true)
+    try {
+      const reset = await devResetManagerLogin()
+      setUsername(reset.username)
+      setPassword(reset.password)
+      setNotice(`تم إعادة ضبط المدير: ${reset.username} / ${reset.password}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'فشل إعادة ضبط المدير')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
     let disposed = false
-    void window.electronAPI.getNetworkStatus().then((status) => {
+    void Promise.all([
+      window.electronAPI.getNetworkStatus().catch(() => null),
+      hasOfflineAuthUsers()
+    ]).then(([status, hasUsers]) => {
       const side = (status as { mode?: string } | null)?.mode === 'side'
       if (disposed) return
+      setHasLocalUsers(hasUsers)
       setIsSideDevice(side)
       if (side) setLocalSetupMode(false)
+      else if (!hasUsers && !navigator.onLine) setLocalSetupMode(true)
     }).catch(() => {})
     return () => { disposed = true }
   }, [])
+
+  useEffect(() => {
+    function handleRecoveryShortcut(event: KeyboardEvent): void {
+      if (!event.ctrlKey || event.key !== 'Enter' || loading) return
+      if (!wantsManagerReset) return
+      event.preventDefault()
+      void handleDevManagerReset()
+    }
+
+    window.addEventListener('keydown', handleRecoveryShortcut)
+    return () => window.removeEventListener('keydown', handleRecoveryShortcut)
+  }, [loading, wantsManagerReset])
+
+  useEffect(() => {
+    function handleDeactivateShortcut(event: KeyboardEvent): void {
+      if (event.ctrlKey && event.key === 'Enter') {
+        if (deactivateBuffer.current.endsWith(DEV_LICENSE_CODE) && !loading) {
+          event.preventDefault()
+          void handleDeactivateLicense()
+        }
+        deactivateBuffer.current = ''
+        return
+      }
+      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        deactivateBuffer.current = `${deactivateBuffer.current}${event.key.toLowerCase()}`.slice(-DEV_LICENSE_CODE.length)
+      }
+    }
+    window.addEventListener('keydown', handleDeactivateShortcut)
+    return () => window.removeEventListener('keydown', handleDeactivateShortcut)
+  }, [loading])
+
+  async function handleDeactivateLicense(): Promise<void> {
+    setError('')
+    setNotice('')
+    setLoading(true)
+    try {
+      const result = await window.electronAPI.deactivateLicense()
+      if (result.ok) {
+        setNotice('تم إلغاء تفعيل الرخصة. جار إعادة التشغيل...')
+        setTimeout(() => void window.electronAPI.restartApp(), 1500)
+      } else {
+        setError(result.error ?? 'فشل إلغاء التفعيل')
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
 
   if (user) {
     return <Navigate to={homeFor(user)} replace />
@@ -42,7 +113,12 @@ export function LoginPage(): React.ReactElement {
 
   async function handleSubmit(e: FormEvent): Promise<void> {
     e.preventDefault()
+    if (wantsManagerReset) {
+      await handleDevManagerReset()
+      return
+    }
     setError('')
+    setNotice('')
     setLoading(true)
     try {
       const appUser = localSetupMode && !isSideDevice
@@ -66,11 +142,12 @@ export function LoginPage(): React.ReactElement {
     <div className="login-page">
       <div className="login-card">
         <div className="login-card__bar" />
+        <img src={logoUrl} alt="SHIFT POS" className="login-card__logo" />
         <h1 className="login-card__title">{RESTAURANT_NAME_AR}</h1>
         {localSetupMode && !isSideDevice && (
           <p className="muted">إنشاء أول حساب مدير محلي للعمل بدون إنترنت من أول تشغيل.</p>
         )}
-        <form onSubmit={(e) => void handleSubmit(e)} className="login-form">
+        <form onSubmit={(e) => void handleSubmit(e)} className="login-form" autoComplete="off">
           <label className="field">
             <span>اسم المستخدم</span>
             <input
@@ -78,16 +155,29 @@ export function LoginPage(): React.ReactElement {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
-              autoComplete="username"
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              autoFocus
               dir="ltr"
-              placeholder="manager"
             />
           </label>
           <label className="field">
             <span>كلمة المرور</span>
-            <PasswordInput value={password} onChange={setPassword} />
+            <PasswordInput value={password} onChange={setPassword} autoComplete="off" required />
           </label>
           {error && <p className="form-error">{error}</p>}
+          {notice && <p className="form-message form-message--ok">{notice}</p>}
+          {wantsManagerReset && (
+            <button
+              type="button"
+              className="btn btn--ghost btn--lg"
+              disabled={loading}
+              onClick={() => void handleDevManagerReset()}
+            >
+              Reset manager login
+            </button>
+          )}
           <button type="submit" className="btn btn--primary btn--lg" disabled={loading}>
             {loading
               ? 'جاري التنفيذ...'
@@ -95,7 +185,7 @@ export function LoginPage(): React.ReactElement {
                 ? 'إنشاء المدير المحلي'
                 : 'تسجيل الدخول'}
           </button>
-          {!isSideDevice && !localSetupMode && !hasOfflineAuthUsers() && (
+          {!isSideDevice && !localSetupMode && !hasLocalUsers && (
             <button
               type="button"
               className="btn btn--ghost btn--lg"
@@ -107,7 +197,7 @@ export function LoginPage(): React.ReactElement {
               إنشاء أول مدير محلي
             </button>
           )}
-          {!isSideDevice && localSetupMode && hasOfflineAuthUsers() && (
+          {!isSideDevice && localSetupMode && hasLocalUsers && (
             <button
               type="button"
               className="btn btn--ghost btn--lg"

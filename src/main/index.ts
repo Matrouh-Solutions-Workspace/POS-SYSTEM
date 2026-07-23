@@ -22,6 +22,23 @@ const isDev = Boolean(process.env['ELECTRON_RENDERER_URL'])
 let mainWindow: BrowserWindow | null = null
 let backupScheduler: ReturnType<typeof setInterval> | null = null
 
+function enableWindowsStartup(): void {
+  if (process.platform !== 'win32' || isDev || !app.isPackaged) return
+
+  try {
+    const path = process.execPath
+    const settings = app.getLoginItemSettings({ path })
+    if (!settings.openAtLogin) {
+      app.setLoginItemSettings({
+        openAtLogin: true,
+        path
+      })
+    }
+  } catch (error) {
+    console.warn('[startup]', error)
+  }
+}
+
 function toggleDevTools(win: BrowserWindow | null = mainWindow): void {
   if (!isDev || !win) return
   if (win.webContents.isDevToolsOpened()) {
@@ -353,21 +370,18 @@ function startBackupScheduler(): void {
   backupScheduler = setInterval(tick, 60 * 60 * 1000)
 }
 
-import {
-  deleteAuthUser,
-  ensureAuthUser,
-  readAdminDocument,
-  resetAuthUserPassword,
-  writeAdminDocument
-} from './firebase-admin'
+import { pushOutboxToApi } from './api-sync'
 import { initAutoUpdater } from './auto-updater'
 import {
+  activateWithDevCode,
+  activateWithLicenseKey,
   createActivationRequestFile,
+  deactivateLicense,
   getLicenseStatus,
   importLicenseFile,
-  isDevBypassActive,
-  toggleDevLicense,
-  activateMasterKey
+  startPeriodicValidation,
+  validateOnStartup,
+  validateWithServer
 } from './license'
 import {
   cacheDocuments,
@@ -381,15 +395,13 @@ import {
   readIngredientStocks,
   getLocalStoreStatus,
   initLocalStore,
-  markOutboxFailed,
-  markOutboxSynced,
   readCachedDocument,
   readCachedDocuments,
-  readPendingOutbox,
+  resetManagerLoginForDev,
   resetDatabase,
-  resetFailedOutbox,
   runConfiguredBackup,
   deleteAuthCredentialForUser,
+  hasAuthCredentials,
   storeAuthCredential,
   verifyAuthCredential
 } from './local-store'
@@ -398,6 +410,7 @@ app.whenReady().then(() => {
   if (!isDev) {
     Menu.setApplicationMenu(null)
   }
+  enableWindowsStartup()
 
   // Init updater in both dev and prod
   // (forceDevUpdateConfig handles the dev case via dev-app-update.yml)
@@ -405,6 +418,17 @@ app.whenReady().then(() => {
   if (!isSideMode() && getLicenseStatus().valid) {
     initLocalStore()
     startBackupScheduler()
+    startPeriodicValidation()
+
+    // Validate with server on every startup — catches revoked licenses immediately
+    void validateOnStartup().then((result) => {
+      if (result === 'revoked') {
+        // License was revoked — reload renderer to show activation screen
+        console.warn('[license] License revoked by server at startup — reloading')
+        mainWindow?.webContents.reload()
+      }
+    })
+
     void syncMasterServerWithSettings({ printReceiptHtml: async (html) => (await printReceiptUsingDefault(html)).ok, printKitchenBatch }).catch((e) => {
       console.error('[master-server]', e)
     })
@@ -414,14 +438,16 @@ app.whenReady().then(() => {
   ipcMain.handle('license:get-status', async () => getLicenseStatus())
   ipcMain.handle('license:create-activation-request', () => createActivationRequestFile())
   ipcMain.handle('license:import-license', () => importLicenseFile())
-  ipcMain.handle('license:activate-master-key', (_event, key: string) => {
-    return activateMasterKey(key)
-  })
+  ipcMain.handle('license:activate-with-dev-code', (_, code: string) => activateWithDevCode(code))
+  ipcMain.handle('license:deactivate', () => deactivateLicense())
+  ipcMain.handle('license:activate-with-key', (_, key: string) => activateWithLicenseKey(key))
+  ipcMain.handle('license:validate-server', () => validateWithServer())
   ipcMain.handle('network:get-status', async () => {
     const side = readSideConnection()
     if (side) {
       try {
         const health = await callMasterWithConfig(side, '/health', undefined, { method: 'GET', auth: false })
+        await callMasterWithConfig(side, '/pairing-status', undefined, { method: 'GET' })
         return { mode: 'side' as const, side, connected: true, health }
       } catch (e) {
         return { mode: 'side' as const, side, connected: false, error: e instanceof Error ? e.message : String(e) }
@@ -469,13 +495,17 @@ app.whenReady().then(() => {
   ipcMain.handle('network:master-revoke-device', (_, deviceId: string) => ({
     ok: revokeMasterDevice(deviceId)
   }))
-  ipcMain.handle('auth:login-local', async (_, username: string, passwordHash: string) => {
-    if (isSideMode()) return callMaster('/auth/login', { username, passwordHash })
-    return verifyAuthCredential(username, passwordHash)
+  ipcMain.handle('auth:has-users', async () => {
+    if (isSideMode()) return callMaster('/auth/has-users')
+    return { ok: true as const, hasUsers: hasAuthCredentials() }
   })
-  ipcMain.handle('auth:store-credential', (_, username: string, passwordHash: string, user: unknown) => {
-    if (isSideMode()) return callMaster('/auth/store-credential', { username, passwordHash, user })
-    return storeAuthCredential(username, passwordHash, user)
+  ipcMain.handle('auth:login-local', async (_, username: string, password: string) => {
+    if (isSideMode()) return callMaster('/auth/login', { username, password })
+    return verifyAuthCredential(username, password)
+  })
+  ipcMain.handle('auth:store-credential', (_, username: string, password: string, user: unknown) => {
+    if (isSideMode()) return callMaster('/auth/store-credential', { username, password, user })
+    return storeAuthCredential(username, password, user)
   })
   ipcMain.handle('local-store:get-status', async () => {
     if (isSideMode()) {
@@ -577,37 +607,10 @@ app.whenReady().then(() => {
     return restoreDatabase(result.filePaths[0]!)
   })
 
-  // Sync outbox: read pending entries for Firebase background upload
-  ipcMain.handle('outbox:get-pending', () => {
-    if (isSideMode()) return []
-    return readPendingOutbox()
-  })
-
-  // Sync outbox: enqueue a document for Firebase upload
+  // Sync outbox: enqueue a document for master-device API upload
   ipcMain.handle('outbox:enqueue', (_, entityType: string, entityId: string, operation: 'set' | 'delete', payload: unknown) => {
     if (isSideMode()) return { ok: true as const }
     enqueueOutbox(entityType, entityId, operation, payload)
-    return { ok: true as const }
-  })
-
-  // Sync outbox: mark entries synced
-  ipcMain.handle('outbox:mark-synced', (_, ids: string[]) => {
-    if (isSideMode()) return { ok: true as const }
-    markOutboxSynced(ids)
-    return { ok: true as const }
-  })
-
-  // Sync outbox: mark entries failed
-  ipcMain.handle('outbox:mark-failed', (_, ids: string[]) => {
-    if (isSideMode()) return { ok: true as const }
-    markOutboxFailed(ids)
-    return { ok: true as const }
-  })
-
-  // Sync outbox: reset failed entries for retry
-  ipcMain.handle('outbox:reset-failed', () => {
-    if (isSideMode()) return { ok: true as const }
-    resetFailedOutbox()
     return { ok: true as const }
   })
 
@@ -617,10 +620,17 @@ app.whenReady().then(() => {
     return { count: countPendingOutbox() }
   })
 
+  ipcMain.handle('api-sync:push', () => pushOutboxToApi())
+
   // DEV ONLY — wipe all SQLite data so the app boots as fresh
   ipcMain.handle('dev:reset-database', () => {
     if (isSideMode()) return { ok: false, error: 'Reset is available on the master device only' }
     return resetDatabase()
+  })
+
+  ipcMain.handle('dev:reset-manager-login', () => {
+    if (isSideMode()) return { ok: false, error: 'Manager login reset is available on the master device only' }
+    return resetManagerLoginForDev()
   })
 
   ipcMain.handle('app:restart', () => {
@@ -706,55 +716,6 @@ app.whenReady().then(() => {
     return exportHtmlToPdf(html, suggestedName)
   })
 
-  ipcMain.handle('auth:delete-user', async (_, uid: string) => {
-    try {
-      await deleteAuthUser(uid)
-      return { ok: true as const }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      return { ok: false as const, error: message }
-    }
-  })
-
-  ipcMain.handle('auth:reset-password', async (_, uid: string, newPassword: string) => {
-    try {
-      await resetAuthUserPassword(uid, newPassword)
-      return { ok: true as const }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      return { ok: false as const, error: message }
-    }
-  })
-
-  ipcMain.handle('auth:ensure-user', async (_, params: { uid: string; email: string; password: string; displayName: string }) => {
-    try {
-      await ensureAuthUser(params)
-      return { ok: true as const }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      return { ok: false as const, error: message }
-    }
-  })
-
-  ipcMain.handle('admin:get-document', async (_, collectionName: string, documentId: string) => {
-    try {
-      return { ok: true as const, data: await readAdminDocument(collectionName, documentId) }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      return { ok: false as const, error: message }
-    }
-  })
-
-  ipcMain.handle('admin:set-document', async (_, collectionName: string, documentId: string, data: unknown) => {
-    try {
-      await writeAdminDocument(collectionName, documentId, data)
-      return { ok: true as const }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      return { ok: false as const, error: message }
-    }
-  })
-
   createWindow()
 
   if (isDev) {
@@ -782,9 +743,8 @@ app.whenReady().then(() => {
     }
 
     // -----------------------------------------------------------------------
-    // Ctrl+Shift+1 arms the dev menu for 2 s, then:
-    //   → Ctrl+Shift+P  toggle license bypass (activate / deactivate)
-    //   → Ctrl+Shift+R  wipe SQLite database   (fresh first-run state)
+    // Ctrl+Shift+1 arms the dev reset menu for 2 s, then:
+    //   Ctrl+Shift+R wipes SQLite database (fresh first-run state)
     // -----------------------------------------------------------------------
     let devArmed = false
     let devTimer: ReturnType<typeof setTimeout> | null = null
@@ -793,7 +753,7 @@ app.whenReady().then(() => {
       devArmed = true
       if (devTimer) clearTimeout(devTimer)
       devTimer = setTimeout(() => { devArmed = false; devTimer = null }, 2000)
-      console.log('[dev] armed — Ctrl+Shift+P = toggle license | Ctrl+Shift+R = reset DB')
+      console.log('[dev] armed - Ctrl+Shift+R = reset DB')
     }
 
     function disarmDev(): void {
@@ -802,19 +762,6 @@ app.whenReady().then(() => {
     }
 
     globalShortcut.register('CommandOrControl+Shift+1', armDev)
-
-    // Toggle license bypass
-    globalShortcut.register('CommandOrControl+Shift+P', () => {
-      if (!devArmed) return
-      disarmDev()
-      const wasActive = isDevBypassActive()
-      console.log('[dev-license]', toggleDevLicense())
-      const win = BrowserWindow.getFocusedWindow() ?? mainWindow
-      win?.webContents.executeJavaScript(devToast(
-        wasActive ? '#c0392b' : '#27ae60',
-        wasActive ? '🔴 License OFF — restart app' : '🟢 License ON — restart app'
-      )).catch(() => {})
-    })
 
     // Wipe SQLite database
     globalShortcut.register('CommandOrControl+Shift+R', () => {
