@@ -1,6 +1,6 @@
 {
   "name": "shift-pos",
-  "version": "2.2.0",
+  "version": "2.2.10",
   "description": "Restaurant Management and POS - Arabic RTL",
   "main": "./out/main/index.js",
   "private": true,
@@ -8,22 +8,19 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "dist:win": "npm run build && electron-builder --win --x64",
-    "dist:win:publish": "npm run build && electron-builder --win --x64 --publish always",
+    "verify:phase5": "npm run typecheck && node scripts/phase5-checks.mjs",
+    "prepare:updater-token": "tsx scripts/prepare-updater-token.ts",
+    "dist:win": "npm run verify:phase5 && npm run build && npm run prepare:updater-token && electron-builder --win --x64",
+    "dist:win:publish": "npm run verify:phase5 && tsx scripts/publish-win.ts",
     "preview:prod": "npm run build && electron .",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
-    "seed": "tsx scripts/seed.ts",
-    "seed:demo": "tsx scripts/seed-demo.ts",
     "seed:local": "node --experimental-sqlite scripts/seed-local.mjs",
-    "deploy:rules": "tsx scripts/deploy-rules.ts",
-    "verify:login": "tsx scripts/verify-login.ts",
-    "setup:firebase": "tsx scripts/setup-firebase.ts"
+    "seed": "npm run seed:local",
+    "reset:manager": "node --experimental-sqlite scripts/reset-manager-login.mjs"
   },
   "dependencies": {
     "electron-updater": "6.8.3",
-    "firebase": "^11.6.0",
-    "firebase-admin": "^13.4.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-icons": "5.6.0",
@@ -35,7 +32,7 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "^4.4.1",
     "dotenv": "^16.5.0",
-    "electron": "^42.3.3",
+    "electron": "42.3.3",
     "electron-builder": "26.8.1",
     "electron-vite": "^3.1.0",
     "tsx": "^4.19.4",
@@ -66,6 +63,12 @@
       "!**/.env*",
       "!service-account.json",
       "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "build/updater-auth.generated.json",
+        "to": "updater-auth.json"
+      }
     ],
     "asar": true,
     "compression": "maximum",

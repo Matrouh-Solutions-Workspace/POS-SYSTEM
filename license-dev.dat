@@ -1,0 +1,14 @@
+{
+  "payload": {
+    "schema": "abdokofta.license.v1",
+    "licenseId": "e2d1845b-4be5-4467-9cf4-31dc5dc363f9",
+    "customerName": "Dev Machine",
+    "appId": "com.shift.pos",
+    "hwid": "44d66e06c3c7cebb8184be9d98af6de72d0cd5f4d5535200533fb1fdae5b4bc8",
+    "features": [
+      "offline-pos"
+    ],
+    "issuedAt": 1782539070703
+  },
+  "signature": "dGCtm2VNuvtYrQp6Xk8vo8hEsZcNshbpKUFt9EP3P+hz0myWSavpxEx++FuPTLvpeltMxCffEKPvCDV6UnwoCw=="
+}

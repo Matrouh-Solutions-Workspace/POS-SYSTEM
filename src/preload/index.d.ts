@@ -75,25 +75,6 @@ export interface ElectronAPI {
       copies: number
     }
   ) => Promise<{ ok: boolean; error?: string; code?: string }>
-  // Auth admin
-  deleteAuthUser: (uid: string) => Promise<{ ok: boolean; error?: string }>
-  resetAuthUserPassword: (uid: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>
-  ensureAuthUser: (params: {
-    uid: string
-    email: string
-    password: string
-    displayName: string
-  }) => Promise<{ ok: boolean; error?: string }>
-  getAdminDocument: (
-    collectionName: string,
-    documentId: string
-  ) => Promise<{ ok: boolean; data?: unknown | null; error?: string }>
-  setAdminDocument: (
-    collectionName: string,
-    documentId: string,
-    data: unknown
-  ) => Promise<{ ok: boolean; error?: string }>
-
   // App version & control
   getAppVersion: () => Promise<string>
   restartApp: () => Promise<void>
@@ -116,7 +97,11 @@ export interface ElectronAPI {
     status?: { valid: boolean; reason?: string }
     error?: string
   }>
-  activateMasterKey: (key: string) => Promise<{ ok: boolean; error?: string }>
+  activateWithDevCode: (code: string) => Promise<{
+    ok: boolean
+    status?: { valid: boolean; reason?: string }
+    error?: string
+  }>
   getNetworkStatus: () => Promise<unknown>
   pairSideDevice: (params: { masterUrl: string; deviceName: string; code: string }) => Promise<{ ok: boolean; error?: string }>
   clearSideConnection: () => Promise<{ ok: boolean }>
@@ -124,8 +109,9 @@ export interface ElectronAPI {
   refreshMasterServer: () => Promise<unknown>
   resetMasterPairingCode: () => Promise<{ code: string }>
   revokeMasterDevice: (deviceId: string) => Promise<{ ok: boolean }>
-  authLoginLocal: (username: string, passwordHash: string) => Promise<{ ok: boolean; user?: unknown; error?: string }>
-  authStoreCredential: (username: string, passwordHash: string, user: unknown) => Promise<{ ok: boolean; error?: string }>
+  authHasUsers: () => Promise<{ ok: boolean; hasUsers: boolean; error?: string }>
+  authLoginLocal: (username: string, password: string) => Promise<{ ok: boolean; user?: unknown; error?: string }>
+  authStoreCredential: (username: string, password: string, user: unknown) => Promise<{ ok: boolean; error?: string }>
   getLocalStoreStatus: () => Promise<{
     ok: boolean
     path: string
@@ -154,13 +140,19 @@ export interface ElectronAPI {
   getIngredientStocks: () => Promise<Array<{ ingredient_id: string; quantity: number }>>
 
   // Sync outbox
-  outboxGetPending: () => Promise<unknown[]>
   outboxEnqueue: (entityType: string, entityId: string, operation: 'set' | 'delete', payload: unknown) => Promise<{ ok: boolean }>
-  outboxMarkSynced: (ids: string[]) => Promise<{ ok: boolean }>
-  outboxMarkFailed: (ids: string[]) => Promise<{ ok: boolean }>
-  outboxResetFailed: () => Promise<{ ok: boolean }>
   outboxCountPending: () => Promise<{ count: number }>
+  pushApiSync: () => Promise<{
+    ok: boolean
+    enabled: boolean
+    uploaded: number
+    failed: number
+    pending: number
+    skipped?: 'disabled' | 'not_master' | 'invalid_license' | 'empty'
+    error?: string
+  }>
   devResetDatabase: () => Promise<{ ok: boolean; error?: string }>
+  devResetManagerLogin: () => Promise<{ ok: boolean; username?: string; password?: string; error?: string }>
 
   // Auto-updater — actions
   updaterCheckNow: () => Promise<void>

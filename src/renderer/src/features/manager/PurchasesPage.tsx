@@ -11,7 +11,7 @@
  * This mirrors how Square, Toast, and Lightspeed structure their inventory.
  */
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import type { Ingredient, IngredientStock } from '@shared/types'
+import type { Ingredient, IngredientStock, MenuItem, Supplier } from '@shared/types'
 import {
   listIngredients,
   createIngredient,
@@ -20,50 +20,99 @@ import {
   getIngredientStocks,
   recordPurchase,
   recordWaste,
-  recordAdjustment
+  recordAdjustment,
+  produceManufacturedProduct
 } from '@renderer/features/inventory/inventory-service'
 import { ConfirmDeleteButton } from '@renderer/components/ConfirmDeleteButton'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import { InventoryActionModal, type InventoryActionType } from './InventoryActionModal'
-import { MdEdit, MdCheck, MdClose, MdInventory, MdKitchen, MdWarning } from 'react-icons/md'
+import { MdAdd, MdEdit, MdCheck, MdClose, MdInventory, MdKitchen, MdRemove, MdSwapVert, MdWarning } from 'react-icons/md'
 import { usePageState } from '@renderer/features/tabs/page-state-store'
+import { FormField, FormModal } from '@renderer/components/ui'
+import { listSuppliers, recordSupplierTransaction } from '@renderer/features/suppliers/supplier-service'
+import { listMenuItems } from '@renderer/features/menu/menu-service'
 
 const UNITS = ['جرام', 'كيلوجرام', 'قطعة', 'مل', 'لتر']
 
 // ── Stock tab ───────────────────────────────────────────────────────────────
 
-function StockTab({ stocks, ingredients, onRefresh, setMessage }: {
+function StockTab({ stocks, ingredients, suppliers, menuItems, onRefresh, setMessage }: {
   stocks: IngredientStock[]
   ingredients: Ingredient[]
+  suppliers: Supplier[]
+  menuItems: MenuItem[]
   onRefresh: () => Promise<void>
   setMessage: (m: string | null) => void
 }): React.ReactElement {
   const user = useAuthStore((s) => s.user)!
   const [ingredientId, setIngredientId] = useState('')
+  const [supplierId, setSupplierId] = useState('')
   const [qty, setQty] = useState('')
+  const [totalCost, setTotalCost] = useState('')
+  const [debtAmount, setDebtAmount] = useState('')
   const [note, setNote] = useState('')
+  const [productionItemId, setProductionItemId] = useState('')
+  const [productionQty, setProductionQty] = useState('')
+  const [productionNote, setProductionNote] = useState('')
   const [modal, setModal] = useState<{ stock: IngredientStock; action: InventoryActionType } | null>(null)
 
   const activeIngredients = ingredients.filter((i) => i.active)
+  const activeSuppliers = suppliers.filter((s) => s.active)
+  const manufacturedItems = menuItems.filter((item) =>
+    item.active &&
+    item.itemType === 'product' &&
+    item.productType === 'manufactured' &&
+    !!item.linkedIngredientId
+  )
   const lowStockCount = stocks.filter((s) => s.lowStockThreshold != null && s.quantity <= s.lowStockThreshold).length
 
   async function handlePurchase(e: FormEvent): Promise<void> {
     e.preventDefault()
     const ing = activeIngredients.find((i) => i.id === ingredientId)
     if (!ing) return
-    await recordPurchase({ ingredientId: ing.id, quantity: Number(qty), unit: ing.unit, noteAr: note || undefined, createdBy: user.id })
-    setQty(''); setNote('')
+    const debt = Math.max(0, Number(debtAmount) || 0)
+    await recordPurchase({ ingredientId: ing.id, quantity: Number(qty), unit: ing.unit, totalCost: Number(totalCost) || 0, noteAr: note || undefined, createdBy: user.id, supplierId: supplierId || undefined, actor: user })
+    if (supplierId && debt > 0) {
+      await recordSupplierTransaction({
+        supplierId,
+        type: 'purchase_credit',
+        amount: debt,
+        noteAr: note || `توريد مخزون: ${ing.nameAr}`,
+        createdBy: user.id,
+        actor: user
+      })
+    }
+    setQty(''); setTotalCost(''); setDebtAmount(''); setNote('')
     setMessage('تم تسجيل الشراء')
     await onRefresh()
+  }
+
+  async function handleProduction(e: FormEvent): Promise<void> {
+    e.preventDefault()
+    try {
+      await produceManufacturedProduct({
+        menuItemId: productionItemId,
+        quantity: Number(productionQty),
+        noteAr: productionNote || undefined,
+        createdBy: user.id,
+        actor: user
+      })
+      setProductionQty('')
+      setProductionNote('')
+      setMessage('تم تسجيل الإنتاج وتحديث المخزون')
+      await onRefresh()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'تعذر تسجيل الإنتاج')
+    }
   }
 
   async function handleModalSubmit(quantity: number, noteAr: string): Promise<void> {
     if (!modal) return
     const { stock, action } = modal
     if (action === 'waste') {
-      await recordWaste({ ingredientId: stock.ingredientId, quantity, unit: stock.unit, noteAr: noteAr || undefined, createdBy: user.id })
+      await recordWaste({ ingredientId: stock.ingredientId, quantity, unit: stock.unit, noteAr: noteAr || undefined, createdBy: user.id, actor: user })
     } else {
-      await recordAdjustment({ ingredientId: stock.ingredientId, quantity, unit: stock.unit, noteAr: noteAr || undefined, createdBy: user.id })
+      await recordAdjustment({ ingredientId: stock.ingredientId, quantity, unit: stock.unit, noteAr: noteAr || undefined, createdBy: user.id, actor: user })
     }
     setMessage(action === 'waste' ? 'تم تسجيل الهدر' : 'تم تسوية المخزون')
     await onRefresh()
@@ -91,8 +140,33 @@ function StockTab({ stocks, ingredients, onRefresh, setMessage }: {
             </select>
           </label>
           <label className="field">
+            <span>المورد</span>
+            <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+              <option value="">بدون مورد</option>
+              {activeSuppliers.map((supplier) => (
+                <option key={supplier.id} value={supplier.id}>{supplier.nameAr}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
             <span>الكمية المشتراة</span>
-            <input type="number" min="0.01" step="any" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="مثال: 5" required />
+            <input className="stock-qty-input" type="number" min="0.01" step="any" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="مثال: 5" required />
+          </label>
+          <label className="field">
+            <span>إجمالي تكلفة الشراء</span>
+            <input type="number" min="0" step="0.01" value={totalCost} onChange={(e) => setTotalCost(e.target.value)} placeholder="مثال: 750" required />
+          </label>
+          <label className="field">
+            <span>مديونية على المورد</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={debtAmount}
+              onChange={(e) => setDebtAmount(e.target.value)}
+              placeholder={supplierId ? 'مثال: 250' : 'اختر موردًا أولًا'}
+              disabled={!supplierId}
+            />
           </label>
           <label className="field">
             <span>ملاحظة (اختياري)</span>
@@ -101,6 +175,39 @@ function StockTab({ stocks, ingredients, onRefresh, setMessage }: {
           <div style={{ alignSelf: 'flex-end' }}>
             <button type="submit" className="btn btn--primary">تسجيل شراء</button>
           </div>
+        </form>
+      </div>
+
+      <div className="card">
+        <h2 className="card__title">إنتاج منتج مصنع</h2>
+        <form onSubmit={(e) => void handleProduction(e)} className="settings-form-grid">
+          <label className="field">
+            <span>المنتج المصنع</span>
+            <select value={productionItemId} onChange={(e) => setProductionItemId(e.target.value)} required>
+              <option value="">اختر...</option>
+              {manufacturedItems.map((item) => (
+                <option key={item.id} value={item.id}>{item.nameAr}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>كمية الإنتاج</span>
+            <input type="number" min="0.01" step="any" value={productionQty} onChange={(e) => setProductionQty(e.target.value)} placeholder="مثال: 10" required />
+          </label>
+          <label className="field">
+            <span>ملاحظة (اختياري)</span>
+            <input value={productionNote} onChange={(e) => setProductionNote(e.target.value)} placeholder="مثال: تحضير وردية المساء" />
+          </label>
+          <div style={{ alignSelf: 'flex-end' }}>
+            <button type="submit" className="btn btn--primary" disabled={manufacturedItems.length === 0}>
+              تسجيل إنتاج
+            </button>
+          </div>
+          {manufacturedItems.length === 0 && (
+            <p className="modal-hint settings-form-grid__full">
+              أنشئ صنفًا من نوع منتج مصنع واربطه بمخزون، ثم أضف وصفة التصنيع من صفحة الأصناف.
+            </p>
+          )}
         </form>
       </div>
 
@@ -133,9 +240,9 @@ function StockTab({ stocks, ingredients, onRefresh, setMessage }: {
                   <td>{s.lowStockThreshold ?? '—'}</td>
                   <td>
                     <div className="table-actions">
-                      <button type="button" className="btn btn--primary btn--sm" onClick={() => { setIngredientId(s.ingredientId); document.querySelector<HTMLInputElement>('.stock-qty-input')?.focus() }}>شراء</button>
-                      <button type="button" className="btn btn--secondary btn--sm" onClick={() => setModal({ stock: s, action: 'adjustment' })}>تسوية</button>
-                      <button type="button" className="btn btn--secondary btn--sm" onClick={() => setModal({ stock: s, action: 'waste' })}>هدر</button>
+                      <button type="button" className="btn btn--primary btn--sm" title="شراء: إضافة للمخزون" onClick={() => { setIngredientId(s.ingredientId); document.querySelector<HTMLInputElement>('.stock-qty-input')?.focus() }}><MdAdd /> شراء</button>
+                      <button type="button" className="btn btn--secondary btn--sm" title="تسوية: تصحيح الرصيد بالزيادة أو النقص" onClick={() => setModal({ stock: s, action: 'adjustment' })}><MdSwapVert /> تسوية</button>
+                      <button type="button" className="btn btn--secondary btn--sm" title="هدر: خصم من المخزون" onClick={() => setModal({ stock: s, action: 'waste' })}><MdRemove /> هدر</button>
                     </div>
                   </td>
                 </tr>
@@ -159,6 +266,7 @@ function IngredientsTab({ ingredients, onRefresh, setMessage }: {
   onRefresh: () => Promise<void>
   setMessage: (m: string | null) => void
 }): React.ReactElement {
+  const user = useAuthStore((s) => s.user)!
   const [nameAr, setNameAr] = useState('')
   const [unit, setUnit] = useState('جرام')
   const [threshold, setThreshold] = useState('')
@@ -166,7 +274,7 @@ function IngredientsTab({ ingredients, onRefresh, setMessage }: {
 
   async function handleAdd(e: FormEvent): Promise<void> {
     e.preventDefault()
-    await createIngredient({ nameAr: nameAr.trim(), unit, lowStockThreshold: threshold ? Number(threshold) : undefined, active: true })
+    await createIngredient({ nameAr: nameAr.trim(), unit, lowStockThreshold: threshold ? Number(threshold) : undefined, active: true }, user)
     setNameAr(''); setThreshold('')
     setMessage('تم إضافة المكوّن')
     await onRefresh()
@@ -174,7 +282,7 @@ function IngredientsTab({ ingredients, onRefresh, setMessage }: {
 
   async function saveEdit(): Promise<void> {
     if (!editing) return
-    await updateIngredient(editing.id, { nameAr: editing.nameAr.trim(), unit: editing.unit, lowStockThreshold: editing.threshold ? Number(editing.threshold) : undefined })
+    await updateIngredient(editing.id, { nameAr: editing.nameAr.trim(), unit: editing.unit, lowStockThreshold: editing.threshold ? Number(editing.threshold) : undefined }, user)
     setEditing(null)
     setMessage('تم حفظ التعديلات')
     await onRefresh()
@@ -216,25 +324,20 @@ function IngredientsTab({ ingredients, onRefresh, setMessage }: {
               <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-muted)', padding: 20 }}>لا توجد مكوّنات بعد — أضف مكوّناً للبدء</td></tr>
             )}
             {ingredients.map((i) => {
-              const isEditing = editing?.id === i.id
               return (
                 <tr key={i.id}>
-                  <td>{isEditing ? <input className="inline-edit-input" value={editing.nameAr} onChange={(e) => setEditing({...editing,nameAr:e.target.value})} autoFocus /> : i.nameAr}</td>
-                  <td>{isEditing ? <select className="inline-edit-input" value={editing.unit} onChange={(e) => setEditing({...editing,unit:e.target.value})}>{UNITS.map((u)=><option key={u} value={u}>{u}</option>)}</select> : i.unit}</td>
-                  <td>{isEditing ? <input className="inline-edit-input" type="number" value={editing.threshold} onChange={(e) => setEditing({...editing,threshold:e.target.value})} placeholder="—" /> : (i.lowStockThreshold ?? '—')}</td>
+                  <td>{i.nameAr}</td>
+                  <td>{i.unit}</td>
+                  <td>{i.lowStockThreshold ?? '—'}</td>
                   <td>
-                    <button type="button" className={`btn btn--sm ${i.active ? 'btn--secondary' : 'btn--danger'}`} onClick={() => void updateIngredient(i.id, { active: !i.active }).then(onRefresh)}>
+                    <button type="button" className={`btn btn--sm ${i.active ? 'btn--secondary' : 'btn--danger'}`} onClick={() => void updateIngredient(i.id, { active: !i.active }, user).then(onRefresh)}>
                       {i.active ? 'مفعّل' : 'معطّل'}
                     </button>
                   </td>
                   <td>
                     <div className="table-actions">
-                      {isEditing ? (
-                        <><button type="button" className="btn btn--primary btn--sm" onClick={() => void saveEdit()}><MdCheck /> حفظ</button><button type="button" className="btn btn--secondary btn--sm" onClick={() => setEditing(null)}><MdClose /></button></>
-                      ) : (
-                        <><button type="button" className="btn btn--secondary btn--sm" onClick={() => setEditing({ id: i.id, nameAr: i.nameAr, unit: i.unit, threshold: i.lowStockThreshold != null ? String(i.lowStockThreshold) : '' })}><MdEdit /> تعديل</button>
-                        <ConfirmDeleteButton confirmMessage={`حذف "${i.nameAr}" نهائياً؟`} onConfirm={async () => { await deleteIngredient(i.id); setMessage(`تم حذف "${i.nameAr}"`); await onRefresh() }} /></>
-                      )}
+                      <button type="button" className="btn btn--secondary btn--sm" onClick={() => setEditing({ id: i.id, nameAr: i.nameAr, unit: i.unit, threshold: i.lowStockThreshold != null ? String(i.lowStockThreshold) : '' })}><MdEdit /> تعديل</button>
+                      <ConfirmDeleteButton confirmMessage={`حذف "${i.nameAr}" نهائياً؟`} onConfirm={async () => { await deleteIngredient(i.id, user); setMessage(`تم حذف "${i.nameAr}"`); await onRefresh() }} />
                     </div>
                   </td>
                 </tr>
@@ -243,6 +346,29 @@ function IngredientsTab({ ingredients, onRefresh, setMessage }: {
           </tbody>
         </table>
       </div>
+
+      {editing && (
+        <FormModal
+          open={true}
+          title={`تعديل المكون: ${ingredients.find(i => i.id === editing.id)?.nameAr || ''}`}
+          entityName="مكون"
+          isEdit={true}
+          onClose={() => setEditing(null)}
+          onSubmit={saveEdit}
+        >
+          <FormField label="الاسم" required>
+            <input value={editing.nameAr} onChange={(e) => setEditing({...editing, nameAr: e.target.value})} autoFocus required />
+          </FormField>
+          <FormField label="وحدة القياس">
+            <select value={editing.unit} onChange={(e) => setEditing({...editing, unit: e.target.value})}>
+              {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </FormField>
+          <FormField label="حد التنبيه (اختياري)">
+            <input type="number" value={editing.threshold} onChange={(e) => setEditing({...editing, threshold: e.target.value})} placeholder="مثال: 500" />
+          </FormField>
+        </FormModal>
+      )}
     </div>
   )
 }
@@ -256,6 +382,8 @@ export function PurchasesPage(): React.ReactElement {
   const [activeTab, setActiveTab] = useState<PurchasesTab>(saved.activeTab ?? 'stock')
   const [stocks, setStocks] = useState<IngredientStock[]>([])
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const tabListRef = useRef<HTMLDivElement>(null)
   const stockTabRef = useRef<HTMLDivElement>(null)
@@ -264,9 +392,11 @@ export function PurchasesPage(): React.ReactElement {
   useEffect(() => { save({ activeTab }) }, [activeTab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async () => {
-    const [s, ing] = await Promise.all([getIngredientStocks(), listIngredients()])
+    const [s, ing, supplierList, menu] = await Promise.all([getIngredientStocks(), listIngredients(), listSuppliers(), listMenuItems()])
     setStocks(s)
     setIngredients(ing)
+    setSuppliers(supplierList)
+    setMenuItems(menu)
   }, [])
 
   useEffect(() => { void load() }, [load])
@@ -347,12 +477,12 @@ export function PurchasesPage(): React.ReactElement {
       )}
 
       {activeTab === 'stock' && (
-        <div ref={stockTabRef}>
-          <StockTab stocks={stocks} ingredients={ingredients} onRefresh={load} setMessage={setMessage} />
+        <div ref={stockTabRef} className="unified-page__panel">
+          <StockTab stocks={stocks} ingredients={ingredients} suppliers={suppliers} menuItems={menuItems} onRefresh={load} setMessage={setMessage} />
         </div>
       )}
       {activeTab === 'ingredients' && (
-        <div ref={ingredientsTabRef}>
+        <div ref={ingredientsTabRef} className="unified-page__panel">
           <IngredientsTab ingredients={ingredients} onRefresh={load} setMessage={setMessage} />
         </div>
       )}

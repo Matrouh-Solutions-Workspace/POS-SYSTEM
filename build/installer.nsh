@@ -1,6 +1,12 @@
 !include "LogicLib.nsh"
 !include "nsDialogs.nsh"
 
+!if /FileExists "build\updater-token.generated.nsh"
+!include "build\updater-token.generated.nsh"
+!else
+!define SHIFT_POS_INSTALL_UPDATE_TOKEN ""
+!endif
+
 !ifndef BUILD_UNINSTALLER
 
 Var CleanInstallCheckbox
@@ -44,6 +50,16 @@ FunctionEnd
     RMDir /r "$APPDATA\SHIFT POS"
     RMDir /r "$APPDATA\abdokofta-pos"
   ${EndIf}
+
+  ${If} "${SHIFT_POS_INSTALL_UPDATE_TOKEN}" != ""
+    CreateDirectory "$APPDATA\SHIFT POS"
+    FileOpen $0 "$APPDATA\SHIFT POS\updater-auth.json" w
+    FileWrite $0 '{"token":"${SHIFT_POS_INSTALL_UPDATE_TOKEN}"}'
+    FileClose $0
+  ${EndIf}
 !macroend
 
 !endif
+
+!macro customUnInstall
+!macroend

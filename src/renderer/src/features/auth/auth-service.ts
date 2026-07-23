@@ -1,78 +1,52 @@
 /**
- * Authentication service — SQLite primary, Firebase background.
+ * Authentication service — SQLite primary.
  *
- * All user data is stored in SQLite. Firebase Auth is only used
- * in the background to keep the cloud in sync.
+ * All user data and credentials are stored locally.
  */
-import type { AppUser, AppUserCreate, UserRole } from '@shared/types'
+import type { AppUser, AppUserCreate, ShiftAccessResult, UserRole } from '@shared/types'
 import { usernameToEmail } from '@shared/types/user'
 import { COLLECTIONS } from '@shared/constants/collections'
 import { cacheDocs, getCachedDoc, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 import { dbDelete } from '@renderer/lib/db/sqlite-db'
+import { actorAuditName, describePatch, type AuditActor } from '@renderer/features/audit/audit-service'
+import { ensureOpenShift } from '@renderer/features/shifts/shift-service'
 
 // ---------------------------------------------------------------------------
-// Session persistence (localStorage)
+// Session guard
 // ---------------------------------------------------------------------------
 
 const SESSION_KEY = 'abdokofta.session.v2'
-const OFFLINE_AUTH_KEY = 'abdokofta.offlineAuth.v1'
-
-interface StoredSession {
-  userId: string
-  updatedAt: number
-}
-
-function readSession(): StoredSession | null {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY)
-    if (!raw) return null
-    return JSON.parse(raw) as StoredSession
-  } catch {
-    return null
-  }
-}
-
-function writeSession(userId: string): void {
-  localStorage.setItem(SESSION_KEY, JSON.stringify({ userId, updatedAt: Date.now() }))
-}
 
 function clearSession(): void {
   localStorage.removeItem(SESSION_KEY)
 }
 
-// ---------------------------------------------------------------------------
-// Offline auth cache (hashed passwords in localStorage)
-// ---------------------------------------------------------------------------
-
-interface CachedAuthUser {
-  username: string
-  passwordHash: string
-  userId: string
-  updatedAt: number
-}
-
-function readAuthCache(): CachedAuthUser[] {
-  try {
-    return JSON.parse(localStorage.getItem(OFFLINE_AUTH_KEY) ?? '[]') as CachedAuthUser[]
-  } catch {
-    return []
-  }
-}
-
-function writeAuthCache(entries: CachedAuthUser[]): void {
-  localStorage.setItem(OFFLINE_AUTH_KEY, JSON.stringify(entries))
-}
-
-async function sha256(value: string): Promise<string> {
-  const bytes = new TextEncoder().encode(value)
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
+export function clearSavedSession(): void {
+  clearSession()
 }
 
 function normalizeUsername(username: string): string {
   return username.toLowerCase().trim()
+}
+
+async function enforceCashierWorkShift(user: AppUser): Promise<ShiftAccessResult | null> {
+  if (user.role !== 'cashier') return null
+  const { validateUserShiftAccess } = await import('@renderer/features/shifts/work-shift-service')
+  const access = await validateUserShiftAccess(user.id)
+  if (!access.allowed) {
+    throw new Error(access.reason ?? 'لا يمكن تسجيل الدخول خارج وقت وردية العمل')
+  }
+  return access
+}
+
+async function openScheduledShiftOnLogin(user: AppUser, access: ShiftAccessResult | null): Promise<void> {
+  if (user.role !== 'cashier' || !access?.workShift) return
+  await ensureOpenShift({
+    cashierId: user.id,
+    cashierName: user.displayName,
+    cashierCode: user.cashierCode,
+    openingCash: 0
+  })
 }
 
 async function isLanSideDevice(): Promise<boolean> {
@@ -81,52 +55,38 @@ async function isLanSideDevice(): Promise<boolean> {
 }
 
 async function storeLocalCredential(user: AppUser, password: string): Promise<void> {
-  const side = await isLanSideDevice()
   const username = normalizeUsername(user.username)
-  const passwordHash = await sha256(`${username}:${password}`)
-  if (!side) {
-    const existing = readAuthCache().filter((e) => e.username !== username)
-    existing.push({ username, passwordHash, userId: user.id, updatedAt: Date.now() })
-    writeAuthCache(existing)
-  }
-  await window.electronAPI.authStoreCredential(username, passwordHash, user)
-}
-
-async function verifyLocalCredential(username: string, password: string): Promise<string | null> {
-  if (await isLanSideDevice()) return null
-  const norm = normalizeUsername(username)
-  const hash = await sha256(`${norm}:${password}`)
-  const match = readAuthCache().find((e) => e.username === norm && e.passwordHash === hash)
-  return match?.userId ?? null
+  await window.electronAPI.authStoreCredential(username, password, user)
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-export function hasOfflineAuthUsers(): boolean {
-  return readAuthCache().length > 0
+export async function hasOfflineAuthUsers(): Promise<boolean> {
+  const result = await window.electronAPI.authHasUsers().catch(() => null)
+  return result?.ok === true && result.hasUsers
 }
 
-/** Restore session from localStorage → look up user in SQLite */
-export async function restoreSessionFromLocal(): Promise<AppUser | null> {
-  const session = readSession()
-  if (!session) return null
-  const user = await getCachedDoc<AppUser>(COLLECTIONS.users, session.userId)
-  if (!user?.active) return null
-  return user
+export async function devResetManagerLogin(): Promise<{ username: string; password: string }> {
+  const result = await window.electronAPI.devResetManagerLogin()
+  if (!result.ok || !result.username || !result.password) {
+    throw new Error(result.error ?? 'فشل إعادة ضبط حساب المدير')
+  }
+  return { username: result.username, password: result.password }
 }
 
-/** Login with username + password — reads from SQLite, no Firebase required */
+/** Login with username + password from the local credential store. */
 export async function loginAndLoadUser(username: string, password: string): Promise<AppUser> {
   const normalized = normalizeUsername(username)
-  const passwordHash = await sha256(`${normalized}:${password}`)
-  const mainAuth = await window.electronAPI.authLoginLocal(normalized, passwordHash).catch(() => null)
+  const mainAuth = await window.electronAPI.authLoginLocal(normalized, password).catch(() => null)
   if (mainAuth?.ok && mainAuth.user) {
     const user = mainAuth.user as AppUser
-    writeSession(user.id)
+    const shiftAccess = await enforceCashierWorkShift(user)
+    await openScheduledShiftOnLogin(user, shiftAccess)
+    clearSession()
     void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
-      logAudit({ action: 'login', actorId: user.id, actorName: user.displayName, detailAr: `ØªØ³Ø¬ÙŠÙ„ Ø¯Ø®ÙˆÙ„: ${user.displayName}` })
+      logAudit({ action: 'login', actorId: user.id, actorName: actorAuditName(user), detailAr: `تسجيل دخول: ${user.displayName}` })
     )
     return user
   }
@@ -134,7 +94,7 @@ export async function loginAndLoadUser(username: string, password: string): Prom
     throw new Error(mainAuth?.error ?? 'لا يمكن تسجيل الدخول على الجهاز الجانبي بدون اتصال صحيح بالماستر')
   }
 
-  const userId = await verifyLocalCredential(username, password)
+  const userId = null
   if (!userId) {
     throw new Error('اسم المستخدم أو كلمة المرور غير صحيحة')
   }
@@ -145,19 +105,21 @@ export async function loginAndLoadUser(username: string, password: string): Prom
   if (!user.active) {
     throw new Error('الحساب غير نشط')
   }
-  writeSession(user.id)
+  const shiftAccess = await enforceCashierWorkShift(user)
+  await openScheduledShiftOnLogin(user, shiftAccess)
+  clearSession()
   // Audit: login
   void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
-    logAudit({ action: 'login', actorId: user.id, actorName: user.displayName, detailAr: `تسجيل دخول: ${user.displayName}` })
+    logAudit({ action: 'login', actorId: user.id, actorName: actorAuditName(user), detailAr: `تسجيل دخول: ${user.displayName}` })
   )
   return user
 }
 
 /** Logout — clear local session only */
-export async function logoutUser(user?: { id: string; displayName: string }): Promise<void> {
+export async function logoutUser(user?: { id: string; displayName: string; username?: string }): Promise<void> {
   if (user) {
     void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
-      logAudit({ action: 'logout', actorId: user.id, actorName: user.displayName, detailAr: `تسجيل خروج: ${user.displayName}` })
+      logAudit({ action: 'logout', actorId: user.id, actorName: actorAuditName(user), detailAr: `تسجيل خروج: ${user.displayName}` })
     )
   }
   clearSession()
@@ -172,7 +134,7 @@ export async function createFirstOfflineManager(params: {
   if (await isLanSideDevice()) {
     throw new Error('لا يمكن إنشاء مدير محلي على جهاز جانبي. سجّل الدخول بحساب موجود على الماستر.')
   }
-  if (hasOfflineAuthUsers()) {
+  if (await hasOfflineAuthUsers()) {
     throw new Error('يوجد حساب محلي بالفعل')
   }
   const username = normalizeUsername(params.username)
@@ -192,7 +154,7 @@ export async function createFirstOfflineManager(params: {
   }
   await cacheDocs(COLLECTIONS.users, [user])
   await storeLocalCredential(user, params.password)
-  writeSession(user.id)
+  clearSession()
   return user
 }
 
@@ -226,6 +188,12 @@ export async function createAccount(
   _createdByManagerId: string
 ): Promise<AppUser> {
   const username = normalizeUsername(data.username)
+  if (
+    data.maxCashRoundingDifference != null &&
+    (!Number.isFinite(data.maxCashRoundingDifference) || data.maxCashRoundingDifference < 0)
+  ) {
+    throw new Error('حد تقريب النقدي غير صالح')
+  }
   const existing = await getCachedDocs<AppUser>(COLLECTIONS.users)
 
   // Check cashier code uniqueness locally
@@ -247,6 +215,8 @@ export async function createAccount(
     cashierCode: data.cashierCode?.toUpperCase(),
     role: data.role,
     permissions: data.permissions,
+    allowCashRounding: data.allowCashRounding ?? false,
+    maxCashRoundingDifference: data.maxCashRoundingDifference,
     active: true,
     createdAt: now,
     updatedAt: now
@@ -254,32 +224,19 @@ export async function createAccount(
 
   await cacheDocs(COLLECTIONS.users, [user])
   await storeLocalCredential(user, data.password)
+  const actor = existing.find((u) => u.id === _createdByManagerId)
 
   // Audit: account created
   void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
     logAudit({
       action: 'account_created',
       actorId: _createdByManagerId,
-      actorName: 'مدير',
+      actorName: actor?.username ?? _createdByManagerId,
       targetId: user.id,
       targetType: 'user',
       detailAr: `إنشاء حساب جديد: ${user.displayName} (${user.role})`
     })
   )
-
-  // Background: create in Firebase Auth (fire-and-forget)
-  void (async () => {
-    try {
-      await window.electronAPI.ensureAuthUser({
-        uid: user.id,
-        email: user.email,
-        password: data.password,
-        displayName: user.displayName
-      })
-    } catch {
-      // Best-effort — user already saved locally
-    }
-  })()
 
   return user
 }
@@ -305,10 +262,17 @@ export async function updateUserActive(userId: string, active: boolean, actorId 
 
 export async function updateUserProfile(
   userId: string,
-  patch: Partial<Pick<AppUser, 'displayName' | 'username' | 'pinHash' | 'cashierCode' | 'role' | 'permissions'>>
+  patch: Partial<Pick<AppUser, 'displayName' | 'username' | 'pinHash' | 'cashierCode' | 'role' | 'permissions' | 'allowCashRounding' | 'maxCashRoundingDifference'>>,
+  actor?: AuditActor
 ): Promise<void> {
   const cached = await getCachedDoc<AppUser>(COLLECTIONS.users, userId)
   if (!cached) return
+  if (
+    patch.maxCashRoundingDifference != null &&
+    (!Number.isFinite(patch.maxCashRoundingDifference) || patch.maxCashRoundingDifference < 0)
+  ) {
+    throw new Error('حد تقريب النقدي غير صالح')
+  }
   const normalizedPatch = {
     ...patch,
     cashierCode: patch.cashierCode?.toUpperCase()
@@ -324,19 +288,39 @@ export async function updateUserProfile(
   }
 
   await cacheDocs(COLLECTIONS.users, [{ ...cached, ...normalizedPatch, updatedAt: Date.now() }])
+  if (actor) {
+    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+      logAudit({
+        action: 'account_updated',
+        actorId: actor.id,
+        actorName: actorAuditName(actor),
+        targetId: userId,
+        targetType: 'user',
+        detailAr: `تعديل حساب: ${cached.username} — ${describePatch({ ...normalizedPatch, pinHash: normalizedPatch.pinHash ? 'تم التعيين' : normalizedPatch.pinHash })}`
+      })
+    )
+  }
 }
 
-export async function resetCashierPassword(userId: string, newPassword: string): Promise<void> {
+export async function resetCashierPassword(userId: string, newPassword: string, actor?: AuditActor): Promise<void> {
   const cached = await getCachedDoc<AppUser>(COLLECTIONS.users, userId)
   if (!cached) throw new Error('المستخدم غير موجود')
 
   await storeLocalCredential(cached, newPassword)
   await cacheDocs(COLLECTIONS.users, [{ ...cached, updatedAt: Date.now() }])
+  if (actor) {
+    void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
+      logAudit({
+        action: 'account_updated',
+        actorId: actor.id,
+        actorName: actorAuditName(actor),
+        targetId: userId,
+        targetType: 'user',
+        detailAr: `تغيير كلمة مرور حساب: ${cached.username}`
+      })
+    )
+  }
 
-  // Background: update Firebase Auth password (fire-and-forget)
-  void window.electronAPI.resetAuthUserPassword(userId, newPassword).catch(() => {
-    // Best-effort
-  })
 }
 
 export async function deleteAccount(userId: string, currentUserId: string): Promise<void> {
@@ -345,13 +329,14 @@ export async function deleteAccount(userId: string, currentUserId: string): Prom
   }
 
   const cached = await getCachedDoc<AppUser>(COLLECTIONS.users, userId)
+  const actor = await getCachedDoc<AppUser>(COLLECTIONS.users, currentUserId)
   if (cached) {
     await dbDelete(COLLECTIONS.users, userId)
     void import('@renderer/features/audit/audit-service').then(({ logAudit }) =>
       logAudit({
         action: 'account_deleted',
         actorId: currentUserId,
-        actorName: 'مدير',
+        actorName: actor?.username ?? currentUserId,
         targetId: userId,
         targetType: 'user',
         detailAr: `حذف حساب: ${cached.displayName}`
@@ -359,8 +344,6 @@ export async function deleteAccount(userId: string, currentUserId: string): Prom
     )
   }
 
-  writeAuthCache(readAuthCache().filter((e) => e.userId !== userId))
-  void window.electronAPI.deleteAuthUser(userId).catch(() => {})
 }
 
 // ---------------------------------------------------------------------------

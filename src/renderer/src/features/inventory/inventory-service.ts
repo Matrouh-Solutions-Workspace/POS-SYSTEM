@@ -10,13 +10,22 @@ import type {
   Ingredient,
   InventoryTransaction,
   InventoryTransactionType,
+  InventoryBatch,
   IngredientStock,
-  MenuItem
+  MenuItem,
+  Recipe,
+  Supplier
 } from '@shared/types'
 import { COLLECTIONS } from '@shared/constants/collections'
 import { cacheDocs, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 import { dbBatch, dbDelete } from '@renderer/lib/db/sqlite-db'
 import { generateId } from '@renderer/lib/utils/id'
+import { actorAuditName, describePatch, type AuditActor } from '@renderer/features/audit/audit-service'
+
+function audit(actor: AuditActor | undefined, params: Parameters<typeof import('@renderer/features/audit/audit-service').logAudit>[0]): void {
+  if (!actor) return
+  void import('@renderer/features/audit/audit-service').then(({ logAudit }) => logAudit(params))
+}
 
 export async function listIngredients(): Promise<Ingredient[]> {
   const ingredients = await getCachedDocs<Ingredient>(COLLECTIONS.ingredients)
@@ -24,25 +33,45 @@ export async function listIngredients(): Promise<Ingredient[]> {
 }
 
 export async function createIngredient(
-  data: Omit<Ingredient, 'id' | 'createdAt' | 'updatedAt'>
+  data: Omit<Ingredient, 'id' | 'createdAt' | 'updatedAt'>,
+  actor?: AuditActor
 ): Promise<Ingredient> {
   const now = Date.now()
   const ingredient: Ingredient = { ...data, id: generateId(), createdAt: now, updatedAt: now }
   await cacheDocs(COLLECTIONS.ingredients, [ingredient])
+  audit(actor, {
+    action: 'ingredient_created',
+    actorId: actor?.id ?? 'system',
+    actorName: actor ? actorAuditName(actor) : 'system',
+    targetId: ingredient.id,
+    targetType: 'ingredient',
+    detailAr: `إضافة مكوّن: ${ingredient.nameAr} — الوحدة ${ingredient.unit}`
+  })
   return ingredient
 }
 
 export async function updateIngredient(
   id: string,
-  patch: Partial<Pick<Ingredient, 'nameAr' | 'unit' | 'lowStockThreshold' | 'active'>>
+  patch: Partial<Pick<Ingredient, 'nameAr' | 'unit' | 'lowStockThreshold' | 'active'>>,
+  actor?: AuditActor
 ): Promise<void> {
   const ingredients = await getCachedDocs<Ingredient>(COLLECTIONS.ingredients)
   const cached = ingredients.find((i) => i.id === id)
   if (!cached) return
   await cacheDocs(COLLECTIONS.ingredients, [{ ...cached, ...patch, updatedAt: Date.now() }])
+  audit(actor, {
+    action: 'ingredient_updated',
+    actorId: actor?.id ?? 'system',
+    actorName: actor ? actorAuditName(actor) : 'system',
+    targetId: id,
+    targetType: 'ingredient',
+    detailAr: `تعديل مكوّن "${cached.nameAr}" — ${describePatch(patch)}`
+  })
 }
 
-export async function deleteIngredient(id: string): Promise<void> {
+export async function deleteIngredient(id: string, actor?: AuditActor): Promise<void> {
+  const ingredients = await getCachedDocs<Ingredient>(COLLECTIONS.ingredients)
+  const cached = ingredients.find((i) => i.id === id)
   const recipes = await getCachedDocs<{ lines?: Array<{ ingredientId: string }> }>(
     COLLECTIONS.recipes
   )
@@ -52,10 +81,20 @@ export async function deleteIngredient(id: string): Promise<void> {
   }
   const linkedMenuItems = await getCachedDocs<MenuItem>(COLLECTIONS.menuItems)
   const linked = linkedMenuItems.some((item) => item.linkedIngredientId === id)
-  if (linked) {
-    throw new Error('لا يمكن الحذف — المكوّن مرتبط بصنف للبيع أو بالمخزون. أزل الربط أولاً.')
+  const linkedAddons = await getCachedDocs<{ linkedIngredientId?: string }>(COLLECTIONS.itemAddons)
+  const linkedAddon = linkedAddons.some((addon) => addon.linkedIngredientId === id)
+  if (linked || linkedAddon) {
+    throw new Error('لا يمكن الحذف — المكوّن مرتبط بصنف أو إضافة للبيع. أزل الربط أولاً.')
   }
   await dbDelete(COLLECTIONS.ingredients, id)
+  audit(actor, {
+    action: 'ingredient_deleted',
+    actorId: actor?.id ?? 'system',
+    actorName: actor ? actorAuditName(actor) : 'system',
+    targetId: id,
+    targetType: 'ingredient',
+    detailAr: `حذف مكوّن: ${cached?.nameAr ?? id}`
+  })
 }
 
 export async function recordInventoryTransaction(params: {
@@ -69,6 +108,10 @@ export async function recordInventoryTransaction(params: {
   createdBy: string
   shiftId?: string
   supplierId?: string
+  batchId?: string
+  unitCost?: number
+  totalCost?: number
+  actor?: AuditActor
 }): Promise<InventoryTransaction> {
   const tx: InventoryTransaction = {
     id: generateId(),
@@ -80,12 +123,38 @@ export async function recordInventoryTransaction(params: {
     referenceId: params.referenceId,
     shiftId: params.shiftId,
     supplierId: params.supplierId,
+    batchId: params.batchId,
+    unitCost: params.unitCost,
+    totalCost: params.totalCost,
     noteAr: params.noteAr,
     createdBy: params.createdBy,
     createdAt: Date.now()
   }
   // Use dbBatch so the ingredient_stock materialized table is updated atomically (REQ-11)
   await dbBatch([{ collection: COLLECTIONS.inventoryTransactions, id: tx.id, data: tx, op: 'set' }])
+  const action = tx.type === 'purchase'
+    ? 'inventory_purchase'
+    : tx.type === 'waste'
+      ? 'inventory_waste'
+      : tx.type === 'adjustment'
+        ? 'inventory_adjustment'
+        : null
+  if (action) {
+    const [ingredients, suppliers] = await Promise.all([
+      getCachedDocs<Ingredient>(COLLECTIONS.ingredients),
+      getCachedDocs<Supplier>(COLLECTIONS.suppliers)
+    ])
+    const ingredientName = ingredients.find((ingredient) => ingredient.id === tx.ingredientId)?.nameAr ?? tx.ingredientId
+    const supplierName = tx.supplierId ? (suppliers.find((supplier) => supplier.id === tx.supplierId)?.nameAr ?? tx.supplierId) : ''
+    audit(params.actor, {
+      action,
+      actorId: params.actor?.id ?? params.createdBy,
+      actorName: params.actor ? actorAuditName(params.actor) : params.createdBy,
+      targetId: tx.id,
+      targetType: 'inventory',
+      detailAr: `${tx.type === 'purchase' ? 'تسجيل شراء' : tx.type === 'waste' ? 'تسجيل هدر' : 'تسوية مخزون'} — ${ingredientName} — كمية ${tx.quantity} ${tx.unit}${supplierName ? ` — مورد: ${supplierName}` : ''}${tx.noteAr ? ` — ملاحظة: ${tx.noteAr}` : ''}`
+    })
+  }
   return tx
 }
 
@@ -155,13 +224,62 @@ export async function recordPurchase(params: {
   createdBy: string
   shiftId?: string
   supplierId?: string
+  totalCost?: number
+  actor?: AuditActor
 }): Promise<InventoryTransaction> {
-  return recordInventoryTransaction({
-    ...params,
+  const quantity = Math.abs(params.quantity)
+  if (!quantity) throw new Error('الكمية المشتراة يجب أن تكون أكبر من صفر')
+  const totalCost = Math.max(0, Number(params.totalCost) || 0)
+  const now = Date.now()
+  const tx: InventoryTransaction = {
+    id: generateId(),
+    ingredientId: params.ingredientId,
     type: 'purchase',
-    quantity: Math.abs(params.quantity),
-    referenceType: 'purchase'
+    quantity,
+    unit: params.unit,
+    referenceType: 'purchase',
+    shiftId: params.shiftId,
+    supplierId: params.supplierId,
+    unitCost: totalCost / quantity,
+    totalCost,
+    noteAr: params.noteAr,
+    createdBy: params.createdBy,
+    createdAt: now
+  }
+  const batch: InventoryBatch = {
+    id: generateId(),
+    ingredientId: params.ingredientId,
+    supplierId: params.supplierId,
+    purchaseTransactionId: tx.id,
+    quantity,
+    remainingQuantity: quantity,
+    unit: params.unit,
+    unitCost: tx.unitCost ?? 0,
+    receivedAt: now,
+    createdBy: params.createdBy
+  }
+  tx.batchId = batch.id
+  await dbBatch([
+    { collection: COLLECTIONS.inventoryTransactions, id: tx.id, data: tx, op: 'set' },
+    { collection: COLLECTIONS.inventoryBatches, id: batch.id, data: batch, op: 'set' }
+  ])
+  const ingredients = await getCachedDocs<Ingredient>(COLLECTIONS.ingredients)
+  const ingredientName = ingredients.find((ingredient) => ingredient.id === tx.ingredientId)?.nameAr ?? tx.ingredientId
+  audit(params.actor, {
+    action: 'inventory_purchase',
+    actorId: params.actor?.id ?? params.createdBy,
+    actorName: params.actor ? actorAuditName(params.actor) : params.createdBy,
+    targetId: tx.id,
+    targetType: 'inventory',
+    detailAr: `تسجيل شراء — ${ingredientName} — كمية ${quantity} ${params.unit} — تكلفة ${totalCost.toFixed(2)}`
   })
+  return tx
+}
+
+export async function listInventoryBatches(ingredientId?: string): Promise<InventoryBatch[]> {
+  let batches = await getCachedDocs<InventoryBatch>(COLLECTIONS.inventoryBatches)
+  if (ingredientId) batches = batches.filter((batch) => batch.ingredientId === ingredientId)
+  return batches.sort((a, b) => a.receivedAt - b.receivedAt)
 }
 
 export async function recordWaste(params: {
@@ -170,6 +288,7 @@ export async function recordWaste(params: {
   unit: string
   noteAr?: string
   createdBy: string
+  actor?: AuditActor
 }): Promise<InventoryTransaction> {
   return recordInventoryTransaction({
     ...params,
@@ -186,6 +305,7 @@ export async function recordAdjustment(params: {
   unit: string
   noteAr?: string
   createdBy: string
+  actor?: AuditActor
 }): Promise<InventoryTransaction> {
   if (params.quantity === 0) throw new Error('كمية التسوية يجب أن تكون غير صفر')
   return recordInventoryTransaction({
@@ -195,4 +315,103 @@ export async function recordAdjustment(params: {
     referenceType: 'manual',
     noteAr: params.noteAr ?? 'تسوية مخزون'
   })
+}
+
+export async function produceManufacturedProduct(params: {
+  menuItemId: string
+  quantity: number
+  createdBy: string
+  noteAr?: string
+  actor?: AuditActor
+}): Promise<InventoryTransaction[]> {
+  const producedQuantity = Math.abs(Number(params.quantity) || 0)
+  if (producedQuantity <= 0) throw new Error('كمية الإنتاج يجب أن تكون أكبر من صفر')
+
+  const [menuItems, recipes, ingredients, stocks] = await Promise.all([
+    getCachedDocs<MenuItem>(COLLECTIONS.menuItems),
+    getCachedDocs<Recipe>(COLLECTIONS.recipes),
+    getCachedDocs<Ingredient>(COLLECTIONS.ingredients),
+    getIngredientStocks()
+  ])
+  const item = menuItems.find((entry) => entry.id === params.menuItemId)
+  if (!item || item.itemType !== 'product' || item.productType !== 'manufactured') {
+    throw new Error('اختر منتجًا مصنعًا من القائمة')
+  }
+  if (!item.linkedIngredientId) {
+    throw new Error('المنتج المصنع يجب أن يكون مرتبطًا بمخزون منتج نهائي')
+  }
+  const producedIngredient = ingredients.find((ingredient) => ingredient.id === item.linkedIngredientId)
+  if (!producedIngredient) throw new Error('مخزون المنتج النهائي غير موجود')
+
+  const recipe = recipes.find((entry) => entry.menuItemId === item.id || entry.id === item.recipeId)
+  const lines = (recipe?.lines ?? []).filter((line) => line.ingredientId && Number(line.quantity) > 0)
+  if (!lines.length) throw new Error('وصفة التصنيع غير مكتملة')
+
+  const stockMap = new Map(stocks.map((stock) => [stock.ingredientId, stock.quantity]))
+  const ingredientMap = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]))
+  for (const line of lines) {
+    if (line.ingredientId === item.linkedIngredientId) {
+      throw new Error('لا يمكن أن يحتوي المنتج على نفسه داخل وصفة التصنيع')
+    }
+    const required = Number(line.quantity) * producedQuantity
+    const available = stockMap.get(line.ingredientId) ?? 0
+    const ingredientName = ingredientMap.get(line.ingredientId)?.nameAr ?? line.ingredientId
+    if (available + 0.0001 < required) {
+      throw new Error(`المخزون غير كافٍ من ${ingredientName}. المطلوب ${required} والمتاح ${available}`)
+    }
+  }
+
+  const now = Date.now()
+  const productionId = generateId()
+  const txs: InventoryTransaction[] = [
+    ...lines.map((line) => {
+      const ingredient = ingredientMap.get(line.ingredientId)
+      const required = Number(line.quantity) * producedQuantity
+      return {
+        id: generateId(),
+        ingredientId: line.ingredientId,
+        ingredientNameAr: ingredient?.nameAr,
+        type: 'production' as const,
+        quantity: -Math.abs(required),
+        unit: line.unit || ingredient?.unit || producedIngredient.unit,
+        referenceType: 'production' as const,
+        referenceId: productionId,
+        menuItemId: item.id,
+        noteAr: `تصنيع ${item.nameAr}${params.noteAr ? ` — ${params.noteAr}` : ''}`,
+        createdBy: params.createdBy,
+        createdAt: now
+      }
+    }),
+    {
+      id: generateId(),
+      ingredientId: producedIngredient.id,
+      ingredientNameAr: producedIngredient.nameAr,
+      type: 'production' as const,
+      quantity: producedQuantity,
+      unit: producedIngredient.unit,
+      referenceType: 'production' as const,
+      referenceId: productionId,
+      menuItemId: item.id,
+      noteAr: `إنتاج ${item.nameAr}${params.noteAr ? ` — ${params.noteAr}` : ''}`,
+      createdBy: params.createdBy,
+      createdAt: now
+    }
+  ]
+
+  await dbBatch(txs.map((tx) => ({
+    collection: COLLECTIONS.inventoryTransactions,
+    id: tx.id,
+    data: tx,
+    op: 'set'
+  })))
+
+  audit(params.actor, {
+    action: 'inventory_production',
+    actorId: params.actor?.id ?? params.createdBy,
+    actorName: params.actor ? actorAuditName(params.actor) : params.createdBy,
+    targetId: productionId,
+    targetType: 'inventory',
+    detailAr: `إنتاج ${item.nameAr} — كمية ${producedQuantity} ${producedIngredient.unit} — مكونات ${lines.length}`
+  })
+  return txs
 }

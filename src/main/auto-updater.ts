@@ -1,4 +1,6 @@
 import { ipcMain, BrowserWindow, app } from 'electron'
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import pkg from 'electron-updater'
 import { publishDownloadedUpdateForMaster } from './master-update-artifacts'
 import { readSideConnection } from './network-config'
@@ -9,6 +11,8 @@ type UpdateDownloadedEvent = import('electron-updater').UpdateDownloadedEvent
 
 let sideFeedKey: string | null = null
 
+const PRIVATE_TOKEN_KEYS = ['GH_TOKEN', 'GITHUB_TOKEN', 'SHIFT_POS_UPDATE_TOKEN'] as const
+
 function getMainWindow(): BrowserWindow | undefined {
   return BrowserWindow.getAllWindows()[0]
 }
@@ -18,6 +22,86 @@ function send(channel: string, payload?: unknown): void {
   if (win && !win.isDestroyed()) {
     win.webContents.send(channel, payload)
   }
+}
+
+function normalizeToken(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function readTokenFromEnvFile(filePath: string): string | undefined {
+  if (!existsSync(filePath)) return undefined
+  try {
+    const raw = readFileSync(filePath, 'utf8')
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const equalsIndex = trimmed.indexOf('=')
+      if (equalsIndex <= 0) continue
+      const key = trimmed.slice(0, equalsIndex).trim()
+      if (!PRIVATE_TOKEN_KEYS.includes(key as (typeof PRIVATE_TOKEN_KEYS)[number])) continue
+      const value = trimmed.slice(equalsIndex + 1).trim().replace(/^['"]|['"]$/g, '')
+      const token = normalizeToken(value)
+      if (token) return token
+    }
+  } catch (error) {
+    console.warn('[updater] failed to read env token file:', error instanceof Error ? error.message : String(error))
+  }
+  return undefined
+}
+
+function readPrivateUpdateToken(): string | undefined {
+  for (const key of PRIVATE_TOKEN_KEYS) {
+    const token = normalizeToken(process.env[key])
+    if (token) return token
+  }
+
+  const candidates = [
+    join(process.resourcesPath, 'updater-auth.json'),
+    join(app.getPath('userData'), 'updater-auth.json'),
+    join(app.getPath('userData'), 'update-token.txt'),
+    join(app.getPath('userData'), '.env'),
+    join(dirname(process.execPath), '.env'),
+    join(process.cwd(), '.env')
+  ]
+
+  for (const filePath of candidates) {
+    if (!existsSync(filePath)) continue
+    try {
+      const raw = readFileSync(filePath, 'utf8').trim()
+      if (!raw) continue
+      if (filePath.endsWith('.json')) {
+        const parsed = JSON.parse(raw) as { token?: unknown; ghToken?: unknown; githubToken?: unknown }
+        const token = parsed.token ?? parsed.ghToken ?? parsed.githubToken
+        const normalized = normalizeToken(token)
+        if (normalized) return normalized
+        continue
+      }
+      if (filePath.endsWith('.env')) {
+        const token = readTokenFromEnvFile(filePath)
+        if (token) return token
+        continue
+      }
+      return raw
+    } catch (error) {
+      console.warn('[updater] failed to read private update token:', error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  return undefined
+}
+
+function configurePrivateGitHubAuth(isDev: boolean): void {
+  const token = readPrivateUpdateToken()
+  if (token) {
+    process.env['GH_TOKEN'] = token
+    autoUpdater.addAuthHeader(`token ${token}`)
+  } else if (!isDev) {
+    console.warn('[updater] No GitHub token found; private repo updates will fail on master devices')
+  }
+}
+
+function configureUpdateProviderAuth(isDev: boolean): void {
+  if (!configureSideUpdateFeed()) configurePrivateGitHubAuth(isDev)
 }
 
 function configureSideUpdateFeed(): boolean {
@@ -47,14 +131,7 @@ export function initAutoUpdater(): void {
     autoUpdater.forceDevUpdateConfig = true
   }
 
-  if (!configureSideUpdateFeed()) {
-    const token = process.env['GH_TOKEN'] ?? process.env['GITHUB_TOKEN']
-    if (token) {
-      autoUpdater.addAuthHeader(`token ${token}`)
-    } else if (!isDev) {
-      console.warn('[updater] No GH_TOKEN found; private repo updates will fail')
-    }
-  }
+  configureUpdateProviderAuth(isDev)
 
   autoUpdater.logger = {
     info:  (msg: unknown) => console.log('[updater]', msg),
@@ -106,7 +183,7 @@ export function initAutoUpdater(): void {
 
   ipcMain.handle('updater:check-now', async () => {
     try {
-      configureSideUpdateFeed()
+      configureUpdateProviderAuth(isDev)
       const result = await autoUpdater.checkForUpdates()
       console.log('[updater] check result:', result)
     } catch (e) {
@@ -118,7 +195,7 @@ export function initAutoUpdater(): void {
 
   ipcMain.handle('updater:start-download', async () => {
     try {
-      configureSideUpdateFeed()
+      configureUpdateProviderAuth(isDev)
       console.log('[updater] starting download...')
       await autoUpdater.downloadUpdate()
       console.log('[updater] download started')
@@ -136,14 +213,14 @@ export function initAutoUpdater(): void {
   app.once('browser-window-created', (_, win) => {
     win.webContents.once('did-finish-load', () => {
       setTimeout(() => {
-        configureSideUpdateFeed()
+        configureUpdateProviderAuth(isDev)
         autoUpdater.checkForUpdates().catch((err: Error) => {
           console.warn('[updater] check failed:', err.message)
         })
       }, 3000)
 
       setInterval(() => {
-        configureSideUpdateFeed()
+        configureUpdateProviderAuth(isDev)
         autoUpdater.checkForUpdates().catch((err: Error) => {
           console.warn('[updater] periodic check failed:', err.message)
         })

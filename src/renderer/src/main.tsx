@@ -1,4 +1,5 @@
 import './styles/global.css'
+import './styles/components.css'
 
 const rootEl = document.getElementById('root')!
 rootEl.innerHTML =

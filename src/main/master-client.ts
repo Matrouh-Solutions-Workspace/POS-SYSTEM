@@ -60,7 +60,7 @@ function requestJson<T>(
 
 function sideConfigOrThrow(): SideConnectionConfig {
   const config = readSideConnection()
-  if (!config) throw new Error('Side device is not paired with a master')
+  if (!config) throw new Error('الجهاز الفرعي غير مقترن بجهاز ماستر')
   return config
 }
 

@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  AppSettings,
   DiningTable,
   DiscountType,
   MenuCategory,
+  ItemAddon,
   MenuItem,
   MenuItemAttachment,
   MenuItemSizeOption,
   Order,
-  OrderType
+  OrderType,
+  DeliveryContact,
+  Shift
 } from '@shared/types'
 import { getIngredientStocks } from '@renderer/features/inventory/inventory-service'
 import { listCategories, listMenuItems, getRecipeByMenuItem } from '@renderer/features/menu/menu-service'
+import { listAddons } from '@renderer/features/menu/addons-service'
 import {
   completeOrder,
   editOrderItems,
@@ -20,32 +25,49 @@ import {
 } from '@renderer/features/orders/order-service'
 import { getOrderItems } from '@renderer/features/orders/order-service'
 import { listDiningTables } from '@renderer/features/tables/table-service'
+import { ConfirmDialog } from '@renderer/components/ui'
 import { printReceipt } from '@renderer/features/receipt/receipt-builder'
 import { printKitchenTickets } from '@renderer/features/printers/kitchen-printing'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
 import {
-  lineTotal,
+  createDeliveryContact,
+  listDeliveryContacts,
+  normalizePhone
+} from '@renderer/features/contacts/delivery-contact-service'
+import {
   orderSubtotal,
   orderTotal,
   computeDiscount,
-  computeTax
+  computeTax,
+  computeService,
+  effectiveTaxRate,
+  effectiveServiceRate
 } from '@shared/services/order-calculator'
 import { orderReference } from '@shared/services/order-reference'
 import {
   closeShift,
   ensureOpenShift,
-  getOpenShiftForCashier
+  getOpenShiftForCashier,
+  getShiftClosurePreview,
+  type ShiftClosurePreview
 } from '@renderer/features/shifts/shift-service'
 import { FloorMapPicker } from './FloorMapPicker'
+import {
+  calculateAutomaticCashRounding,
+  getCashRoundingAccess,
+  type CashRoundingAccess
+} from '@renderer/features/rounding/cash-rounding-service'
 
-// ── Local cart line type ──────────────────────────────────────────────────
+import { AddonPopup, SizePopup, WeightPopup } from './components/Popups'
+import { CategoryBrowser } from './components/CategoryBrowser'
+import { ItemGrid } from './components/ItemGrid'
+import { CartPanel } from './components/CartPanel'
+import { HeldOrdersPanel } from './components/HeldOrdersPanel'
+import { OpeningCashModal, CloseShiftModal } from './modals/ShiftModals'
+import { CheckoutModal } from './modals/CheckoutModal'
+import { usePosStore, type HeldOrder, type LocalCartLine } from './pos-store'
 
-interface LocalCartLine extends CartLine {
-  key: string
-  parentKey?: string
-}
-
-interface PendingCartSelection {
+export interface PendingCartSelection {
   item: MenuItem
   quantity: number
   unitPrice: number
@@ -53,387 +75,37 @@ interface PendingCartSelection {
   anchor: DOMRect
 }
 
-// ── Floating popup wrapper ────────────────────────────────────────────────
+const ALL_CATEGORY_ID = '__all__'
 
-function FloatingPopup({
-  anchor,
-  onClose,
-  children
-}: {
-  anchor: DOMRect
-  onClose: () => void
-  children: React.ReactNode
-}): React.ReactElement {
-  const ref = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    function handler(e: MouseEvent): void {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
-    }
-    setTimeout(() => document.addEventListener('mousedown', handler), 0)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [onClose])
-
-  return (
-    <div
-      ref={ref}
-      className="weight-popup"
-      style={{
-        position: 'fixed',
-        zIndex: 500,
-        left: anchor.left,
-        top: anchor.bottom + 6,
-        minWidth: Math.max(anchor.width || 160, 220)
-      }}
-    >
-      {children}
-    </div>
-  )
-}
-
-// ── Weight popup ──────────────────────────────────────────────────────────
-
-function WeightPopup({
-  item,
-  anchor,
-  onSelect,
-  onClose
-}: {
-  item: MenuItem
-  anchor: DOMRect
-  onSelect: (kg: number, unitPrice: number) => void
-  onClose: () => void
-}): React.ReactElement {
-  const [customGrams, setCustomGrams] = useState('')
-  const options = item.weightedPriceOptions ?? []
-  const customUnitPrice = item.customWeightUnitPrice ?? item.price
-
-  return (
-    <FloatingPopup anchor={anchor} onClose={onClose}>
-      <div className="weight-popup__header">
-        <span>{item.nameAr}</span>
-        <span className="weight-popup__price">
-          {item.allowCustomWeight ? `${customUnitPrice.toFixed(2)} / كجم مخصص` : 'أسعار محددة'}
-        </span>
-      </div>
-      {options.length > 0 ? (
-        <div className="weight-popup__shortcuts">
-          {options.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              className="weight-popup__btn"
-              onClick={() => { onSelect(option.weightKg, option.price / option.weightKg); onClose() }}
-            >
-              <span>{option.label}</span>
-              <span>{option.price.toFixed(2)}</span>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <p className="weight-popup__empty">لا توجد أسعار محددة لهذا الصنف</p>
-      )}
-      {item.allowCustomWeight && (
-        <div className="weight-popup__custom">
-          <input
-            type="number"
-            min="1"
-            step="1"
-            value={customGrams}
-            onChange={(e) => setCustomGrams(e.target.value)}
-            placeholder="جرام"
-          />
-          <button
-            type="button"
-            className="btn btn--primary btn--sm"
-            onClick={() => {
-              const grams = Number(customGrams)
-              if (grams <= 0) return
-              onSelect(grams / 1000, customUnitPrice)
-              onClose()
-            }}
-          >
-            إضافة
-          </button>
-        </div>
-      )}
-    </FloatingPopup>
-  )
-}
-
-// ── Size popup ────────────────────────────────────────────────────────────
-
-function SizePopup({
-  item,
-  anchor,
-  onSelect,
-  onClose
-}: {
-  item: MenuItem
-  anchor: DOMRect
-  onSelect: (size: MenuItemSizeOption) => void
-  onClose: () => void
-}): React.ReactElement {
-  return (
-    <FloatingPopup anchor={anchor} onClose={onClose}>
-      <div className="weight-popup__header">
-        <span>{item.nameAr}</span>
-        <span className="weight-popup__price">اختر الحجم</span>
-      </div>
-      <div className="weight-popup__shortcuts">
-        {(item.sizeOptions ?? []).map((size) => (
-          <button
-            key={size.id}
-            type="button"
-            className="weight-popup__btn"
-            onClick={() => { onSelect(size); onClose() }}
-          >
-            <span>{size.labelAr}</span>
-            <span>{size.price.toFixed(2)}</span>
-          </button>
-        ))}
-      </div>
-    </FloatingPopup>
-  )
-}
-
-function AddonPopup({
-  item,
-  anchor,
-  onConfirm,
-  onClose
-}: {
-  item: MenuItem
-  anchor: DOMRect
-  onConfirm: (selected: MenuItemAttachment[]) => void
-  onClose: () => void
-}): React.ReactElement {
-  const attachments = item.attachments ?? []
-  const [selectedIds, setSelectedIds] = useState<string[]>([])
-
-  function toggle(id: string): void {
-    setSelectedIds((prev) => prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id])
-  }
-
-  return (
-    <FloatingPopup anchor={anchor} onClose={onClose}>
-      <div className="weight-popup__header">
-        <span>{item.nameAr}</span>
-        <span className="weight-popup__price">اختيار المرفقات</span>
-      </div>
-      <div style={{ display: 'grid', gap: 8 }}>
-        {attachments.map((attachment) => (
-          <label
-            key={attachment.id}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
-              padding: '8px 10px',
-              borderRadius: 10,
-              background: 'rgba(255,255,255,0.04)',
-              cursor: 'pointer'
-            }}
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input
-                type="checkbox"
-                checked={selectedIds.includes(attachment.id)}
-                onChange={() => toggle(attachment.id)}
-              />
-              <span>{attachment.nameAr}</span>
-            </span>
-            <span>{attachment.price.toFixed(2)}</span>
-          </label>
-        ))}
-      </div>
-      <div className="modal-actions" style={{ marginTop: 12 }}>
-        <button
-          type="button"
-          className="btn btn--primary btn--sm"
-          onClick={() => {
-            onConfirm(attachments.filter((attachment) => selectedIds.includes(attachment.id)))
-            onClose()
-          }}
-        >
-          إضافة
-        </button>
-        <button type="button" className="btn btn--secondary btn--sm" onClick={onClose}>
-          إلغاء
-        </button>
-      </div>
-    </FloatingPopup>
-  )
-}
-
-// ── Opening cash modal ────────────────────────────────────────────────────
-
-function OpeningCashModal({
-  onConfirm,
-  onCancel
-}: {
-  onConfirm: (amount: number) => void
-  onCancel: () => void
-}): React.ReactElement {
-  const [value, setValue] = useState('')
-
-  return (
-    <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
-        <div className="order-details__header">
-          <h2 className="order-details__title">فتح الشيفت</h2>
-        </div>
-        <p style={{ marginBottom: 16, fontSize: '0.9rem', color: 'var(--color-muted)' }}>
-          أدخل مبلغ الكاش الموجود في الدرج عند بدء الشيفت
-        </p>
-        <label className="field">
-          <span>مبلغ الافتتاح</span>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder="0.00"
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') onConfirm(Number(value) || 0)
-            }}
-          />
-        </label>
-        <div className="modal-actions" style={{ marginTop: 16 }}>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={() => onConfirm(Number(value) || 0)}
-          >
-            فتح الشيفت
-          </button>
-          <button type="button" className="btn btn--secondary" onClick={onCancel}>
-            إلغاء
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Close shift modal (replaces window.confirm + window.prompt) ───────────
-
-function CloseShiftModal({
-  unpaidCount,
-  onConfirm,
-  onCancel
-}: {
-  unpaidCount: number
-  onConfirm: (closingCash: number | undefined) => void
-  onCancel: () => void
-}): React.ReactElement {
-  const [cashValue, setCashValue] = useState('')
-
-  return (
-    <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
-        <div className="order-details__header">
-          <h2 className="order-details__title">تقفيل الشيفت</h2>
-          <button type="button" className="order-details__close" onClick={onCancel} aria-label="إغلاق">✕</button>
-        </div>
-
-        {unpaidCount > 0 && (
-          <div style={{
-            background: '#fef3c7',
-            border: '2px solid #f59e0b',
-            borderRadius: 6,
-            padding: '8px 12px',
-            marginBottom: 14,
-            fontSize: '0.85rem',
-            fontWeight: 700,
-            color: '#92400e'
-          }}>
-            ⚠️ يوجد {unpaidCount} طلب غير مدفوع في الصالة
-          </div>
-        )}
-
-        <label className="field">
-          <span>الكاش الفعلي في الدرج عند الإغلاق (اختياري)</span>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={cashValue}
-            onChange={(e) => setCashValue(e.target.value)}
-            placeholder="0.00"
-            autoFocus
-          />
-        </label>
-        <p style={{ fontSize: '0.8rem', color: 'var(--color-muted)', margin: '4px 0 16px' }}>
-          اترك الحقل فارغاً إذا لم تريد إدخال مبلغ الإغلاق
-        </p>
-
-        <div className="modal-actions">
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={() => {
-              const parsed = Number(cashValue)
-              onConfirm(cashValue.trim() !== '' && !isNaN(parsed) ? parsed : undefined)
-            }}
-          >
-            تأكيد التقفيل
-          </button>
-          <button type="button" className="btn btn--secondary" onClick={onCancel}>إلغاء</button>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // ── Confirm dine-in occupied table modal ──────────────────────────────────
 
 function OccupiedTableModal({
   tableNameAr,
+  order,
   onConfirm,
   onCancel
 }: {
   tableNameAr: string
+  order?: Order
   onConfirm: () => void
   onCancel: () => void
 }): React.ReactElement {
   return (
-    <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
-        <div className="order-details__header">
-          <h2 className="order-details__title">الترابيزة مشغولة</h2>
-          <button type="button" className="order-details__close" onClick={onCancel} aria-label="إغلاق">✕</button>
-        </div>
-        <p style={{ marginBottom: 20, fontSize: '0.9rem' }}>
-          الترابيزة <strong>{tableNameAr}</strong> عليها طلب غير مدفوع. هل تريد إضافة طلب جديد عليها؟
-        </p>
-        <div className="modal-actions">
-          <button type="button" className="btn btn--primary" onClick={onConfirm}>نعم، أضف طلب</button>
-          <button type="button" className="btn btn--secondary" onClick={onCancel}>إلغاء</button>
-        </div>
-      </div>
-    </div>
+    <ConfirmDialog
+      open
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+      title="الترابيزة مشغولة"
+      message={`الترابيزة ${tableNameAr} عليها طلب مفتوح${order ? ` #${orderReference(order)}` : ''}. سيتم إضافة الأصناف الحالية إلى نفس الطلب بدل إنشاء طلب جديد.`}
+      confirmLabel="إضافة على الطلب المفتوح"
+      cancelLabel="إلغاء"
+    />
   )
 }
 
 // ── REQ-3: Held order type (module-scope so no hoisting issues) ──────────
-interface HeldOrder {
-  id: string
-  cart: LocalCartLine[]
-  orderType: OrderType
-  orderNote: string
-  selectedTableId: string
-  customerName: string
-  customerPhone: string
-  customerAddress: string
-  deliveryFee: string
-  discountType: DiscountType
-  discountValue: string
-  label: string
-}
 
 // ── Main POS page ─────────────────────────────────────────────────────────
 
@@ -443,20 +115,40 @@ export function PosPage(): React.ReactElement {
   // Menu data
   const [categories, setCategories] = useState<MenuCategory[]>([])
   const [items, setItems] = useState<MenuItem[]>([])
+  const [addons, setAddons] = useState<ItemAddon[]>([])
   const [unavailableItems, setUnavailableItems] = useState<Map<string, string>>(new Map())
+  const [unavailableAddons, setUnavailableAddons] = useState<Map<string, string>>(new Map())
   const [lowStockItems, setLowStockItems] = useState<Set<string>>(new Set())
-  const [selectedCategory, setSelectedCategory] = useState<string | 'all'>('all')
+  const [lowStockAddons, setLowStockAddons] = useState<Set<string>>(new Set())
+  const [posLogoUrl, setPosLogoUrl] = useState('/image.png')
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
-  // Cart
-  const [cart, setCart] = useState<LocalCartLine[]>([])
-  const [orderType, setOrderType] = useState<OrderType>('takeaway')
-  const [orderNote, setOrderNote] = useState('')
+  // Pos Store
+  const {
+    cart, setCart,
+    orderType, setOrderType,
+    orderNote, setOrderNote,
+    selectedTableId, setSelectedTableId,
+    customerName, setCustomerName,
+    customerPhone, setCustomerPhone,
+    customerAddress, setCustomerAddress,
+    contactId, setContactId,
+    deliveryFee, setDeliveryFee,
+    discountType, setDiscountType,
+    discountValue, setDiscountValue,
+    heldOrders,
+    holdCurrentOrder,
+    resumeHeldOrder,
+    discardHeldOrder,
+    resetCheckoutFields
+  } = usePosStore()
 
   // Tables
   const [tables, setTables] = useState<DiningTable[]>([])
   const [unpaidOrders, setUnpaidOrders] = useState<Order[]>([])
-  const [selectedTableId, setSelectedTableId] = useState('')
+  const [deliveryContacts, setDeliveryContacts] = useState<DeliveryContact[]>([])
+  const [contactSearch, setContactSearch] = useState('')
   const [tablePopupOpen, setTablePopupOpen] = useState(false)
 
   // Item popups
@@ -467,6 +159,23 @@ export function PosPage(): React.ReactElement {
   // UI state
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const [currentShift, setCurrentShift] = useState<Shift | null>(null)
+
+  useEffect(() => {
+    function handlePosNotification(event: Event): void {
+      const detail = (event as CustomEvent<{ message?: string; restoreFocus?: boolean }>).detail
+      if (detail?.message) setMessage(detail.message)
+      if (detail?.restoreFocus) {
+        window.setTimeout(() => {
+          window.focus()
+          searchInputRef.current?.focus()
+        }, 0)
+      }
+    }
+    window.addEventListener('pos:notification', handlePosNotification)
+    return () => window.removeEventListener('pos:notification', handlePosNotification)
+  }, [])
 
   // Edit mode
   const [editingOrder, setEditingOrder] = useState<Order | null>(null)
@@ -480,91 +189,59 @@ export function PosPage(): React.ReactElement {
   const [cashReceived, setCashReceived] = useState('')
   const [splitCash, setSplitCash] = useState('')
   const [splitCard, setSplitCard] = useState('')
-  const [discountType, setDiscountType] = useState<DiscountType>('percent')
-  const [discountValue, setDiscountValue] = useState('')
-  const [deliveryFee, setDeliveryFee] = useState('')
-  const [customerName, setCustomerName] = useState('')
-  const [customerPhone, setCustomerPhone] = useState('')
-  const [customerAddress, setCustomerAddress] = useState('')
+  const [posSettings, setPosSettings] = useState<AppSettings | null>(null)
+  const [roundingAccess, setRoundingAccess] = useState<CashRoundingAccess>({
+    enabled: false,
+    allowed: false,
+    maxDifference: 0,
+    increment: 1
+  })
+  const [roundedTotal, setRoundedTotal] = useState('')
+  const [roundingReason, setRoundingReason] = useState('')
 
   // ── REQ-3: Hold / Park orders ────────────────────────────────────────
-  const [heldOrders, setHeldOrders] = useState<HeldOrder[]>([])
   const [heldPanelOpen, setHeldPanelOpen] = useState(false)
 
-  function holdCurrentOrder(): void {
-    if (cart.length === 0) return
-    if (heldOrders.length >= 10) {
-      setMessage('الحد الأقصى للطلبات المعلقة هو 10')
-      return
-    }
-    const held: HeldOrder = {
-      id: crypto.randomUUID(),
-      cart,
-      orderType,
-      orderNote,
-      selectedTableId,
-      customerName,
-      customerPhone,
-      customerAddress,
-      deliveryFee,
-      discountType,
-      discountValue,
-      label: `${orderType === 'dine_in' ? `صالة ${selectedTable?.nameAr ?? ''}` : orderType === 'delivery' ? `دليفري ${customerName}` : 'تيك أواي'} — ${cart.length} صنف`
-    }
-    setHeldOrders((prev) => [...prev, held])
-    setCart([])
-    setOrderNote('')
-    setMessage('تم تعليق الطلب')
-  }
-
-  function resumeHeldOrder(held: HeldOrder): void {
-    if (cart.length > 0) {
-      holdCurrentOrder()
-    }
-    setCart(held.cart)
-    setOrderType(held.orderType)
-    setOrderNote(held.orderNote)
-    setSelectedTableId(held.selectedTableId)
-    setCustomerName(held.customerName)
-    setCustomerPhone(held.customerPhone)
-    setCustomerAddress(held.customerAddress)
-    setDeliveryFee(held.deliveryFee)
-    setDiscountType(held.discountType)
-    setDiscountValue(held.discountValue)
-    setHeldOrders((prev) => prev.filter((h) => h.id !== held.id))
-    setHeldPanelOpen(false)
-    setMessage('تم استعادة الطلب')
-  }
-
-  function discardHeldOrder(id: string): void {
-    setHeldOrders((prev) => prev.filter((h) => h.id !== id))
-  }
   // Pending action to run after the cashier confirms opening cash
   const [openingCashModal, setOpeningCashModal] = useState(false)
   const [pendingCheckoutAfterShift, setPendingCheckoutAfterShift] = useState<null | (() => Promise<void>)>(null)
 
   // ── REQ-13: Close shift modal ─────────────────────────────────────────
   const [closeShiftModal, setCloseShiftModal] = useState(false)
-  const [closeShiftUnpaidCount, setCloseShiftUnpaidCount] = useState(0)
+  const [closeShiftPreview, setCloseShiftPreview] = useState<ShiftClosurePreview | null>(null)
+  const [performanceTrackingEnabled, setPerformanceTrackingEnabled] = useState(false)
 
   // Occupied table confirmation modal
   const [occupiedTableModal, setOccupiedTableModal] = useState(false)
   const [pendingOccupiedTable, setPendingOccupiedTable] = useState<DiningTable | null>(null)
+  const [pendingOccupiedOrder, setPendingOccupiedOrder] = useState<Order | null>(null)
 
   // ── Load menu & tables ────────────────────────────────────────────────
 
   const load = useCallback(async () => {
-    const [cats, menu, stocks, diningTables, unpaid] = await Promise.all([
+    const [cats, menu, itemAddons, stocks, diningTables, unpaid, settings, access, contacts, openShift] = await Promise.all([
       listCategories(),
       listMenuItems(true),
+      listAddons(),
       getIngredientStocks(),
       listDiningTables(),
-      listUnpaidDineInOrders()
+      listUnpaidDineInOrders(),
+      getSettings(),
+      getCashRoundingAccess(user),
+      listDeliveryContacts(),
+      getOpenShiftForCashier(user.id)
     ])
     setCategories(cats.filter((c) => c.active))
     setItems(menu)
+    setAddons(itemAddons.filter((addon) => addon.active))
     setTables(diningTables)
     setUnpaidOrders(unpaid)
+    setDeliveryContacts(contacts)
+    setPosLogoUrl(settings.receiptLogoDataUrl || settings.receiptLogoProcessedDataUrl || '/image.png')
+    setPosSettings(settings)
+    setMaxDiscountPct(settings.maxCashierDiscountPct)
+    setRoundingAccess(access)
+    setCurrentShift(openShift)
     if (diningTables.length > 0) setSelectedTableId((prev) => prev || diningTables[0]!.id)
 
     const outOfStock = new Map<string, string>()
@@ -578,6 +255,8 @@ export function PosPage(): React.ReactElement {
 
     const unavailable = new Map<string, string>()
     const lowItems = new Set<string>()
+    const unavailableAddonMap = new Map<string, string>()
+    const lowAddonSet = new Set<string>()
     const stockByIngredientId = new Map(stocks.map((stock) => [stock.ingredientId, stock]))
     await Promise.all(
       menu.map(async (item) => {
@@ -607,11 +286,33 @@ export function PosPage(): React.ReactElement {
         }
       })
     )
+    for (const addon of itemAddons) {
+      if (!addon.active || !addon.linkedIngredientId) continue
+      const linkedStock = stockByIngredientId.get(addon.linkedIngredientId)
+      if (!linkedStock) continue
+      if (linkedStock.quantity <= 0) unavailableAddonMap.set(addon.id, linkedStock.nameAr)
+      else if (
+        linkedStock.lowStockThreshold != null &&
+        linkedStock.quantity <= linkedStock.lowStockThreshold
+      ) {
+        lowAddonSet.add(addon.id)
+      }
+    }
     setUnavailableItems(unavailable)
     setLowStockItems(lowItems)
-  }, [])
+    setUnavailableAddons(unavailableAddonMap)
+    setLowStockAddons(lowAddonSet)
+  }, [user])
 
   useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    setSelectedCategory((current) => {
+      if (!current) return current
+      if (current === ALL_CATEGORY_ID) return current
+      return categories.some((category) => category.id === current) ? current : null
+    })
+  }, [categories])
 
   // ── Derived values ────────────────────────────────────────────────────
 
@@ -626,12 +327,18 @@ export function PosPage(): React.ReactElement {
 
   const filteredItems = useMemo(() => {
     let list = items
-    if (selectedCategory !== 'all') {
-      const visibleIds = new Set([
-        selectedCategory,
-        ...(categoryChildren.get(selectedCategory)?.map((c) => c.id) ?? [])
-      ])
+    if (selectedCategory && selectedCategory !== ALL_CATEGORY_ID) {
+      const visibleIds = new Set<string>([selectedCategory])
+      const collectChildren = (categoryId: string): void => {
+        for (const child of categoryChildren.get(categoryId) ?? []) {
+          visibleIds.add(child.id)
+          collectChildren(child.id)
+        }
+      }
+      collectChildren(selectedCategory)
       list = list.filter((item) => visibleIds.has(item.categoryId))
+    } else if (!search.trim() && selectedCategory !== ALL_CATEGORY_ID) {
+      return []
     }
     if (search.trim()) {
       const q = search.trim().toLowerCase()
@@ -640,25 +347,67 @@ export function PosPage(): React.ReactElement {
     return list
   }, [categoryChildren, items, selectedCategory, search])
 
+  const filteredAddons = useMemo(() => {
+    let list = addons
+    if (search.trim()) {
+      const q = search.trim().toLowerCase()
+      list = list.filter((addon) => addon.nameAr.toLowerCase().includes(q))
+    }
+    return list
+  }, [addons, search])
+
   const subtotal = orderSubtotal(cart)
-  const discountAmt = computeDiscount(
-    subtotal,
-    discountValue ? discountType : undefined,
-    discountValue ? Number(discountValue) : undefined
+  const discountsEnabled = posSettings?.discountsEnabled !== false
+  const discountAmt = discountsEnabled
+    ? computeDiscount(
+      subtotal,
+      discountValue ? discountType : undefined,
+      discountValue ? Number(discountValue) : undefined
+    )
+    : 0
+  const effectiveTax = effectiveTaxRate(
+    posSettings?.taxRate,
+    orderType,
+    posSettings?.taxApplicationMode,
+    posSettings?.taxOrderTypes
   )
-  const taxAmt = computeTax(subtotal - discountAmt, 0) // actual tax rate applied at submit time
+  const taxAmt = computeTax(subtotal - discountAmt, effectiveTax)
+  const effectiveService = effectiveServiceRate(
+    posSettings?.serviceRate,
+    orderType,
+    posSettings?.serviceApplicationMode,
+    posSettings?.serviceOrderTypes
+  )
+  const serviceAmt = computeService(subtotal - discountAmt, effectiveService)
   const deliveryFeeNum = orderType === 'delivery' ? (Number(deliveryFee) || 0) : 0
-  const total = orderTotal(subtotal, discountAmt, taxAmt, deliveryFeeNum)
+  const total = orderTotal(subtotal, discountAmt, taxAmt, deliveryFeeNum, serviceAmt)
+  const automaticRounding = orderType === 'takeaway' && checkoutMethod === 'cash'
+    ? calculateAutomaticCashRounding(total, roundingAccess)
+    : null
+  const roundedTotalNum = automaticRounding?.finalAmount ?? total
+  const roundingDifference = automaticRounding?.differenceAmount ?? 0
+  const roundingApplied = automaticRounding != null
+  const roundingDisplay = roundingDifference > 0
+    ? `- ${roundingDifference.toFixed(2)}`
+    : `+ ${Math.abs(roundingDifference).toFixed(2)}`
+  const roundingInvalid = false
+  const checkoutTotal = roundingApplied ? roundedTotalNum : total
 
   // REQ-1: change due when cash payment
   const cashReceivedNum = Number(cashReceived) || 0
-  const changeDue = checkoutMethod === 'cash' ? Math.max(0, cashReceivedNum - total) : 0
-  const cashInsufficient = checkoutMethod === 'cash' && cashReceived.trim() !== '' && cashReceivedNum < total
+  const changeDue = checkoutMethod === 'cash' ? Math.max(0, cashReceivedNum - checkoutTotal) : 0
+  const cashInsufficient = checkoutMethod === 'cash' && cashReceived.trim() !== '' && cashReceivedNum < checkoutTotal
 
   // REQ-6: discount over-limit check
-  const isDiscountLimited = user.role === 'cashier' && maxDiscountPct != null && maxDiscountPct < 100
-  const appliedDiscountPct = discountType === 'percent' ? Number(discountValue) || 0 : 0
-  const discountOverLimit = isDiscountLimited && discountType === 'percent' && appliedDiscountPct > (maxDiscountPct ?? 100)
+  const configuredDiscountLimitPct = maxDiscountPct == null ? undefined : Number(maxDiscountPct)
+  const discountLimitPct = configuredDiscountLimitPct != null && Number.isFinite(configuredDiscountLimitPct)
+    ? Math.max(0, configuredDiscountLimitPct)
+    : undefined
+  const isDiscountLimited = discountsEnabled && user.role !== 'manager' && discountLimitPct != null && discountLimitPct < 100
+  const appliedDiscountPct = discountType === 'percent'
+    ? Number(discountValue) || 0
+    : subtotal > 0 ? (discountAmt / subtotal) * 100 : 0
+  const discountOverLimit = isDiscountLimited && appliedDiscountPct > (discountLimitPct ?? 100)
 
   const occupiedTableIds = useMemo(
     () => new Set(unpaidOrders.map((o) => o.tableId).filter(Boolean) as string[]),
@@ -668,6 +417,23 @@ export function PosPage(): React.ReactElement {
     () => tables.find((t) => t.id === selectedTableId),
     [tables, selectedTableId]
   )
+  const contactSearchResults = useMemo(() => {
+    const query = contactSearch.trim()
+    const selected = contactId ? deliveryContacts.find((contact) => contact.id === contactId) : undefined
+    if (!query) {
+      const base = deliveryContacts.slice(0, 8)
+      return selected && !base.some((contact) => contact.id === selected.id) ? [selected, ...base.slice(0, 7)] : base
+    }
+    const normalized = normalizePhone(query)
+    const lower = query.toLowerCase()
+    const matches = deliveryContacts
+      .filter((contact) =>
+        (normalized && contact.normalizedPhone.includes(normalized)) ||
+        contact.name.toLowerCase().includes(lower)
+      )
+      .slice(0, 8)
+    return selected && !matches.some((contact) => contact.id === selected.id) ? [selected, ...matches.slice(0, 7)] : matches
+  }, [contactId, contactSearch, deliveryContacts])
   const groupedTables = useMemo(() => {
     const groups = new Map<string, DiningTable[]>()
     for (const t of tables) {
@@ -728,7 +494,7 @@ export function PosPage(): React.ReactElement {
     const attachmentLines: LocalCartLine[] = selectedAttachments.map((att) => ({
       key: `${key}:att:${att.id}`,
       parentKey: key,
-      menuItemId: `${item.id}:attachment:${att.id}`,
+      menuItemId: `${item.id}:attachment:${att.masterAddonId ?? att.id}`,
       attachmentForMenuItemId: item.id,
       nameAr: `+ ${att.nameAr}`,
       unitPrice: att.price,
@@ -754,6 +520,30 @@ export function PosPage(): React.ReactElement {
     })
   }
 
+  function addAddonToCart(addon: ItemAddon): void {
+    if (unavailableAddons.has(addon.id)) return
+    const key = `addon:${addon.id}`
+    const line: LocalCartLine = {
+      key,
+      menuItemId: key,
+      nameAr: addon.nameAr,
+      unitPrice: addon.defaultPrice,
+      quantity: 1
+    }
+
+    setCart((prev) => {
+      const existing = prev.find((cartLine) => cartLine.key === key)
+      if (existing) {
+        return prev.map((cartLine) => (
+          cartLine.key === key
+            ? { ...cartLine, quantity: cartLine.quantity + 1 }
+            : cartLine
+        ))
+      }
+      return [...prev, line]
+    })
+  }
+
   function changeQty(key: string, delta: number): void {
     setCart((prev) => {
       const target = prev.find((line) => line.key === key)
@@ -772,15 +562,44 @@ export function PosPage(): React.ReactElement {
     })
   }
 
-  function resetCheckoutFields(): void {
-    setCashReceived('')
-    setSplitCash('')
-    setSplitCard('')
-    setDiscountValue('')
-    setDeliveryFee('')
-    setCustomerName('')
-    setCustomerPhone('')
-    setCustomerAddress('')
+  function selectDeliveryContact(contact: DeliveryContact): void {
+    setContactId(contact.id)
+    setCustomerName(contact.name)
+    setCustomerPhone(contact.phone)
+    setCustomerAddress(contact.address ?? '')
+    setContactSearch(`${contact.name} - ${contact.phone}`)
+  }
+
+  async function createContactFromCheckout(form: {
+    name: string
+    phone: string
+    address?: string
+    notes?: string
+  }): Promise<DeliveryContact> {
+    const contact = await createDeliveryContact(form, user)
+    setDeliveryContacts(await listDeliveryContacts())
+    selectDeliveryContact(contact)
+    return contact
+  }
+
+
+  function handleHoldOrder(): void {
+    const label = `${orderType === 'dine_in' ? `صالة ${selectedTable?.nameAr ?? ''}` : orderType === 'delivery' ? `دليفري ${customerName}` : 'تيك أواي'} — ${cart.length} صنف`
+    const res = holdCurrentOrder(label)
+    if (res.message) setMessage(res.message)
+  }
+
+  function handleResumeHeldOrder(held: HeldOrder): void {
+    const currentLabel = `${orderType === 'dine_in' ? `صالة ${selectedTable?.nameAr ?? ''}` : orderType === 'delivery' ? `دليفري ${customerName}` : 'تيك أواي'} — ${cart.length} صنف`
+    const res = resumeHeldOrder(held, currentLabel)
+    if (res.message) setMessage(res.message)
+    if (held.contactId) {
+      const contact = deliveryContacts.find((entry) => entry.id === held.contactId)
+      setContactSearch(contact ? `${contact.name} - ${contact.phone}` : held.customerPhone)
+    } else {
+      setContactSearch('')
+    }
+    setHeldPanelOpen(false)
   }
 
   // ── REQ-2: Ensure shift open with opening cash prompt ─────────────────
@@ -802,28 +621,24 @@ export function PosPage(): React.ReactElement {
   async function handleOpeningCashConfirm(amount: number): Promise<void> {
     setOpeningCashModal(false)
     // Open the shift with the given opening cash
-    await ensureOpenShift({
+    const shift = await ensureOpenShift({
       cashierId: user.id,
       cashierName: user.displayName,
       cashierCode: user.cashierCode,
       openingCash: amount
     })
+    setCurrentShift(shift)
     // Now run the pending checkout action
     if (pendingCheckoutAfterShift) {
       const fn = pendingCheckoutAfterShift
       setPendingCheckoutAfterShift(null)
       await fn()
+    } else {
+      setMessage('تم بدء الشيفت')
     }
   }
 
   // ── Checkout for takeaway / delivery ─────────────────────────────────
-
-  function openCheckoutModal(method?: 'cash' | 'card' | 'split'): void {
-    if (method) setCheckoutMethod(method)
-    // REQ-6: load discount limit once when modal opens
-    void getSettings().then((s) => setMaxDiscountPct(s.maxCashierDiscountPct))
-    setCheckoutOpen(true)
-  }
 
   function printKitchenAfterSave(order: Order, orderItems: Awaited<ReturnType<typeof getOrderItems>>, settings: Awaited<ReturnType<typeof getSettings>>, successPrefix: string): void {
     printKitchenTickets(order, orderItems, settings).then((result) => {
@@ -836,15 +651,20 @@ export function PosPage(): React.ReactElement {
   async function submitCheckout(): Promise<void> {
     if (cart.length === 0) return
 
+    if (!discountsEnabled && discountValue) {
+      setMessage('الخصومات غير مفعلة من إعدادات المدير')
+      return
+    }
+
     // REQ-6: enforce discount limit for cashiers
     if (discountOverLimit) {
-      setMessage(`الخصم يتجاوز الحد المسموح به (${maxDiscountPct}%) — يتطلب موافقة المدير`)
+      setMessage(`الخصم يتجاوز الحد المسموح (${discountLimitPct}%)`)
       return
     }
 
     // REQ-1 validation: cash received must cover the total
     if (checkoutMethod === 'cash') {
-      if (cashReceived.trim() !== '' && cashReceivedNum < total) {
+      if (cashReceived.trim() !== '' && cashReceivedNum < checkoutTotal) {
         setMessage('المبلغ المستلم أقل من الإجمالي')
         return
       }
@@ -871,9 +691,62 @@ export function PosPage(): React.ReactElement {
         paymentMethod: checkoutMethod,
         cashPaid,
         cardPaid,
-        discountType: discountValue ? discountType : undefined,
-        discountValue: discountValue ? Number(discountValue) : undefined,
+        cashReceived: checkoutMethod === 'cash'
+          ? (cashReceived.trim() ? cashReceivedNum : checkoutTotal)
+          : undefined,
+        discountType: discountsEnabled && discountValue ? discountType : undefined,
+        discountValue: discountsEnabled && discountValue ? Number(discountValue) : undefined,
         deliveryFee: orderType === 'delivery' ? Number(deliveryFee) || 0 : undefined,
+        contactId: orderType === 'delivery' ? contactId : undefined,
+        customerName: customerName || undefined,
+        customerPhone: customerPhone || undefined,
+        customerAddress: customerAddress || undefined,
+        roundedTotal: orderType === 'takeaway' && roundingApplied ? roundedTotalNum : undefined,
+        roundingReason: orderType === 'takeaway' && roundingApplied ? 'تقريب نقدي تلقائي' : undefined
+      })
+      const [orderItems, settings] = await Promise.all([getOrderItems(order.id), getSettings()])
+      setCart([])
+      setOrderNote('')
+      setCheckoutOpen(false)
+      resetCheckoutFields()
+      setContactSearch('')
+      setMessage(`تم إتمام الطلب #${orderReference(order)}`)
+      printReceipt(order, orderItems, settings).catch(() => {})
+      printKitchenAfterSave(order, orderItems, settings, 'تم حفظ الطلب')
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'فشل')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function submitDeliveryUnpaid(): Promise<void> {
+    if (cart.length === 0 || orderType !== 'delivery') return
+
+    if (!discountsEnabled && discountValue) {
+      setMessage('الخصومات غير مفعلة من إعدادات المدير')
+      return
+    }
+
+    if (discountOverLimit) {
+      setMessage(`الخصم يتجاوز الحد المسموح (${discountLimitPct}%)`)
+      return
+    }
+
+    setLoading(true)
+    setMessage('')
+    try {
+      const order = await completeOrder({
+        cashierId: user.id,
+        cashierName: user.displayName,
+        cashierCode: user.cashierCode,
+        lines: cart,
+        orderNoteAr: orderNote || undefined,
+        orderType: 'delivery',
+        discountType: discountsEnabled && discountValue ? discountType : undefined,
+        discountValue: discountsEnabled && discountValue ? Number(discountValue) : undefined,
+        deliveryFee: Number(deliveryFee) || 0,
+        contactId,
         customerName: customerName || undefined,
         customerPhone: customerPhone || undefined,
         customerAddress: customerAddress || undefined
@@ -883,8 +756,8 @@ export function PosPage(): React.ReactElement {
       setOrderNote('')
       setCheckoutOpen(false)
       resetCheckoutFields()
-      setMessage(`تم إتمام الطلب #${orderReference(order)}`)
-      printReceipt(order, orderItems, settings).catch(() => {})
+      setContactSearch('')
+      setMessage(`تم إنشاء طلب دليفري غير مدفوع #${orderReference(order)}`)
       printKitchenAfterSave(order, orderItems, settings, 'تم حفظ الطلب')
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'فشل')
@@ -917,10 +790,51 @@ export function PosPage(): React.ReactElement {
       setOrderNote('')
       setUnpaidOrders(unpaid)
       setMessage(`تم إنشاء طلب صالة #${orderReference(order)}`)
-      printReceipt(order, orderItems, settings).catch(() => {})
       printKitchenAfterSave(order, orderItems, settings, 'تم حفظ الطلب')
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'فشل')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function appendToDineInOrder(order: Order): Promise<void> {
+    setLoading(true)
+    setMessage('')
+    try {
+      const existingItems = await getOrderItems(order.id)
+      const lines: CartLine[] = [
+        ...existingItems.map((item) => ({
+          menuItemId: item.menuItemId,
+          nameAr: item.nameAr,
+          unitPrice: item.unitPrice,
+          quantity: item.quantity,
+          sizeLabelAr: item.sizeLabelAr,
+          attachmentForMenuItemId: item.attachmentForMenuItemId,
+          unitLabel: item.unitLabel,
+          weightGrams: item.weightGrams,
+          noteAr: item.noteAr
+        })),
+        ...cart
+      ]
+      const updatedOrder = await editOrderItems({
+        orderId: order.id,
+        cashierId: user.id,
+        lines,
+        orderNoteAr: orderNote || order.noteAr
+      })
+      const [orderItems, settings, unpaid] = await Promise.all([
+        getOrderItems(updatedOrder.id),
+        getSettings(),
+        listUnpaidDineInOrders()
+      ])
+      setCart([])
+      setOrderNote('')
+      setUnpaidOrders(unpaid)
+      setMessage(`تمت إضافة الأصناف إلى طلب الصالة #${orderReference(updatedOrder)}`)
+      printKitchenAfterSave(updatedOrder, orderItems, settings, 'تم تحديث طلب الصالة')
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'فشل إضافة الأصناف للطلب')
     } finally {
       setLoading(false)
     }
@@ -936,6 +850,7 @@ export function PosPage(): React.ReactElement {
 
       if (occupiedTableIds.has(selectedTable.id)) {
         // Show modal instead of window.confirm
+        setPendingOccupiedOrder(unpaidOrders.find((order) => order.tableId === selectedTable.id) ?? null)
         setPendingOccupiedTable(selectedTable)
         setOccupiedTableModal(true)
         return
@@ -953,7 +868,11 @@ export function PosPage(): React.ReactElement {
       if (method) setCheckoutMethod(method)
       else if (orderType === 'delivery') setCheckoutMethod('cash')
       // REQ-6: load discount limit
-      void getSettings().then((s) => setMaxDiscountPct(s.maxCashierDiscountPct))
+      void Promise.all([getSettings(), getCashRoundingAccess(user)]).then(([settings, access]) => {
+        setMaxDiscountPct(settings.maxCashierDiscountPct)
+        setPosSettings(settings)
+        setRoundingAccess(access)
+      })
       setCheckoutOpen(true)
     }
     const ready = await ensureShiftOrPrompt(action)
@@ -1011,18 +930,30 @@ export function PosPage(): React.ReactElement {
 
   async function handleCloseShift(): Promise<void> {
     const shift = await getOpenShiftForCashier(user.id)
-    if (!shift) { setMessage('لا يوجد شيفت مفتوح'); return }
-    const unpaidCount = (await listUnpaidDineInOrders()).length
-    setCloseShiftUnpaidCount(unpaidCount)
+    setCurrentShift(shift)
+    if (!shift) {
+      setPendingCheckoutAfterShift(null)
+      setOpeningCashModal(true)
+      return
+    }
+    const [preview, settings] = await Promise.all([getShiftClosurePreview(shift), getSettings()])
+    setCloseShiftPreview(preview)
+    setPerformanceTrackingEnabled(settings.employeePerformanceTrackingEnabled === true)
     setCloseShiftModal(true)
   }
 
-  async function confirmCloseShift(closingCash: number | undefined): Promise<void> {
-    setCloseShiftModal(false)
+  async function confirmCloseShift(closingCash: number | undefined, differenceReason?: string, overrideReason?: string): Promise<void> {
     const shift = await getOpenShiftForCashier(user.id)
     if (!shift) return
-    await closeShift(shift.id, user.id, closingCash)
-    setMessage('تم تقفيل الشيفت')
+    try {
+      await closeShift(shift.id, user.id, closingCash, { differenceReason, overrideReason })
+      setCurrentShift(null)
+      setCloseShiftModal(false)
+      setCloseShiftPreview(null)
+      setMessage('تمت تسوية وإغلاق الشيفت')
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'تعذر إغلاق الشيفت')
+    }
   }
 
   // ── Render ────────────────────────────────────────────────────────────
@@ -1042,11 +973,13 @@ export function PosPage(): React.ReactElement {
       )}
 
       {/* ── REQ-13: Close shift modal ── */}
-      {closeShiftModal && (
+      {closeShiftModal && closeShiftPreview && (
         <CloseShiftModal
-          unpaidCount={closeShiftUnpaidCount}
-          onConfirm={(cash) => void confirmCloseShift(cash)}
-          onCancel={() => setCloseShiftModal(false)}
+          preview={closeShiftPreview}
+          performanceEnabled={performanceTrackingEnabled}
+          userRole={user.role}
+          onConfirm={(cash, reason, overrideReason) => void confirmCloseShift(cash, reason, overrideReason)}
+          onCancel={() => { setCloseShiftModal(false); setCloseShiftPreview(null) }}
         />
       )}
 
@@ -1054,17 +987,24 @@ export function PosPage(): React.ReactElement {
       {occupiedTableModal && pendingOccupiedTable && (
         <OccupiedTableModal
           tableNameAr={pendingOccupiedTable.nameAr}
+          order={pendingOccupiedOrder ?? undefined}
           onConfirm={async () => {
-            const table = pendingOccupiedTable
+            const order = pendingOccupiedOrder
             setOccupiedTableModal(false)
             setPendingOccupiedTable(null)
-            const action = async (): Promise<void> => submitDineIn(table)
+            setPendingOccupiedOrder(null)
+            if (!order) {
+              setMessage('لم يتم العثور على الطلب المفتوح لهذه الترابيزة')
+              return
+            }
+            const action = async (): Promise<void> => appendToDineInOrder(order)
             const ready = await ensureShiftOrPrompt(action)
             if (ready) await action()
           }}
           onCancel={() => {
             setOccupiedTableModal(false)
             setPendingOccupiedTable(null)
+            setPendingOccupiedOrder(null)
           }}
         />
       )}
@@ -1072,99 +1012,66 @@ export function PosPage(): React.ReactElement {
       {/* ── Menu panel ── */}
       <section className="pos-menu">
         <input
+          ref={searchInputRef}
           className="pos-search"
           placeholder="بحث في القائمة..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
 
-        <div className="pos-categories">
-          <button
-            type="button"
-            className={`pos-cat-btn ${selectedCategory === 'all' ? 'active' : ''}`}
-            onClick={() => setSelectedCategory('all')}
-          >
-            الكل
-          </button>
-          {categories.filter((c) => !c.parentId).map((cat) => (
-            <div key={cat.id} className="pos-category-group">
-              <button
-                type="button"
-                className={`pos-cat-btn ${selectedCategory === cat.id ? 'active' : ''}`}
-                onClick={() => setSelectedCategory(cat.id)}
-              >
-                {cat.nameAr}
-              </button>
-              {categoryChildren.get(cat.id)?.map((child) => (
-                <button
-                  key={child.id}
-                  type="button"
-                  className={`pos-cat-btn ${selectedCategory === child.id ? 'active' : ''}`}
-                  onClick={() => setSelectedCategory(child.id)}
-                >
-                  {child.nameAr}
-                </button>
-              ))}
-            </div>
-          ))}
-          {categories
-            .filter((c) => c.parentId && !categories.some((p) => p.id === c.parentId))
-            .map((cat) => (
-              <button
-                key={cat.id}
-                type="button"
-                className={`pos-cat-btn ${selectedCategory === cat.id ? 'active' : ''}`}
-                onClick={() => setSelectedCategory(cat.id)}
-              >
-                {cat.nameAr}
-              </button>
-            ))}
-        </div>
+        <CategoryBrowser
+          categories={categories}
+          categoryChildren={categoryChildren}
+          items={items}
+          selectedCategory={selectedCategory}
+          allCategoryId={ALL_CATEGORY_ID}
+          onSelectCategory={setSelectedCategory}
+        />
 
-        <div className="pos-items">
-          {filteredItems.map((item) => {
-            const outReason = unavailableItems.get(item.id)
-            const isUnavailable = !!outReason
-            const isLow = !isUnavailable && lowStockItems.has(item.id)
-            const hasSizes = !item.isWeighted && (item.sizeOptions?.length ?? 0) > 0
-            const priceLabel = item.isWeighted
-              ? item.allowCustomWeight
-                ? `${(item.customWeightUnitPrice ?? item.price).toFixed(2)} / كجم`
-                : 'أسعار محددة'
-              : hasSizes
-                ? 'أحجام'
-                : item.price.toFixed(2)
-
-            return (
-              <div
-                key={item.id}
-                className={`pos-item-wrap${isUnavailable ? ' pos-item-wrap--unavailable' : ''}${isLow ? ' pos-item-wrap--low' : ''}`}
-              >
-                <button
-                  type="button"
-                  className="pos-item-btn"
-                  disabled={isUnavailable}
-                  onClick={(e) => {
-                    if (isUnavailable) return
-                    const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect()
-                    if (item.isWeighted) setWeightPopup({ item, rect })
-                    else if (hasSizes) setSizePopup({ item, rect })
-                    else openAddonsOrAddToCart({ item, quantity: 1, unitPrice: item.price, anchor: rect })
-                  }}
-                >
-                  {item.nameAr}
-                  <span className="pos-item-btn__price">{priceLabel}</span>
-                  {isLow && <span className="pos-item-badge pos-item-badge--low">قرب النفاد</span>}
-                </button>
-                {isUnavailable && (
-                  <div className="pos-item-overlay">
-                    <span className="pos-item-overlay__reason">نفذ: {outReason}</span>
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
+        {(selectedCategory || search.trim()) && (
+          <>
+            <ItemGrid
+              items={filteredItems}
+              unavailableItems={unavailableItems}
+              lowStockItems={lowStockItems}
+              onItemClick={(item, rect, isUnavailable, hasSizes) => {
+                if (isUnavailable) return
+                if (item.isWeighted) setWeightPopup({ item, rect })
+                else if (hasSizes) setSizePopup({ item, rect })
+                else openAddonsOrAddToCart({ item, quantity: 1, unitPrice: item.price, anchor: rect })
+              }}
+            />
+            {filteredAddons.length > 0 && (
+              <section className="pos-addon-section" aria-label="الإضافات">
+                <div className="pos-addon-section__header">
+                  <h3>الإضافات</h3>
+                  <span>{filteredAddons.length} إضافة</span>
+                </div>
+                <div className="pos-addon-grid">
+                  {filteredAddons.map((addon) => {
+                    const outReason = unavailableAddons.get(addon.id)
+                    const isUnavailable = !!outReason
+                    const isLow = !isUnavailable && lowStockAddons.has(addon.id)
+                    return (
+                      <button
+                        key={addon.id}
+                        type="button"
+                        className={`pos-addon-btn${isUnavailable ? ' pos-addon-btn--unavailable' : ''}${isLow ? ' pos-addon-btn--low' : ''}`}
+                        disabled={isUnavailable}
+                        onClick={() => addAddonToCart(addon)}
+                      >
+                        <span>{addon.nameAr}</span>
+                        <strong>{addon.defaultPrice.toFixed(2)}</strong>
+                        {isLow && <em>قرب النفاد</em>}
+                        {isUnavailable && <em>نفذ: {outReason}</em>}
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
+          </>
+        )}
       </section>
 
       {/* ── Item popups ── */}
@@ -1242,300 +1149,87 @@ export function PosPage(): React.ReactElement {
       )}
 
       {/* ── Cart sidebar ── */}
-      <aside className="pos-cart">
-        <div className="pos-cart__header">
-          <span>الطلب</span>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            {/* REQ-3: Held orders badge — in header, always visible */}
-            {heldOrders.length > 0 && (
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                style={{ position: 'relative', paddingInlineEnd: 22 }}
-                onClick={() => setHeldPanelOpen(true)}
-                title="عرض الطلبات المعلقة"
-              >
-                معلقة
-                <span style={{
-                  position: 'absolute',
-                  top: -6,
-                  insetInlineEnd: -6,
-                  background: 'var(--color-primary)',
-                  color: '#fff',
-                  borderRadius: '50%',
-                  width: 18,
-                  height: 18,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.7rem',
-                  fontWeight: 900,
-                  lineHeight: 1
-                }}>
-                  {heldOrders.length}
-                </span>
-              </button>
-            )}
-            <button
-              type="button"
-              className="btn btn--secondary btn--sm pos-cart__shift-btn"
-              onClick={() => void handleCloseShift()}
-            >
-              تقفيل الشيفت
-            </button>
-          </div>
-        </div>
+      <CartPanel
+        posLogoUrl={posLogoUrl}
+        tables={tables}
+        occupiedTableIds={occupiedTableIds}
+        selectedTable={selectedTable}
+        setTablePopupOpen={setTablePopupOpen}
+        hasOpenShift={!!currentShift}
+        handleCloseShift={() => void handleCloseShift()}
+        changeQty={changeQty}
+        discountAmt={discountAmt}
+        subtotal={subtotal}
+        deliveryFeeNum={deliveryFeeNum}
+        total={total}
+        message={message}
+        editingOrder={editingOrder}
+        setEditingOrder={setEditingOrder}
+        loading={loading}
+        submitEditOrder={() => void submitEditOrder()}
+        handleHoldOrder={handleHoldOrder}
+        handleCheckout={(method) => void handleCheckout(method)}
+        setCheckoutMethod={setCheckoutMethod}
+        setHeldPanelOpen={setHeldPanelOpen}
+      />
 
-        {/* Order type toggle */}
-        <div className="order-service-panel">
-          <div className="order-type-toggle">
-            {(['takeaway', 'dine_in', 'delivery'] as const).map((type) => (
-              <button
-                key={type}
-                type="button"
-                className={`order-type-toggle__btn${orderType === type ? ' order-type-toggle__btn--active' : ''}`}
-                onClick={() => setOrderType(type)}
-              >
-                {type === 'takeaway' ? 'تيك أواي' : type === 'dine_in' ? 'صالة' : 'دليفري'}
-              </button>
-            ))}
-          </div>
-          {orderType === 'dine_in' && (
-            <button
-              type="button"
-              className={`table-picker-trigger${selectedTable ? ' table-picker-trigger--selected' : ''}${selectedTable && occupiedTableIds.has(selectedTable.id) ? ' table-picker-trigger--occupied' : ''}`}
-              onClick={() => setTablePopupOpen(true)}
-            >
-              <span>الترابيزة</span>
-              <strong>
-                {selectedTable
-                  ? `${selectedTable.nameAr}${selectedTable.categoryAr ? ` - ${selectedTable.categoryAr}` : ''}`
-                  : tables.length ? 'اختيار ترابيزة' : 'لا توجد ترابيزات'}
-              </strong>
-            </button>
-          )}
-        </div>
-
-        {/* Cart lines */}
-        <div className="pos-cart__lines">
-          {cart.length === 0 && (
-            <div className="pos-cart__empty">
-              <img src="/image.png" alt="شعار المطعم" className="pos-cart__logo" />
-              <p className="pos-cart__empty-text">أضف أصنافًا من القائمة</p>
-            </div>
-          )}
-          {cart.map((line) => (
-            <div key={line.key} className={`cart-line${line.parentKey ? ' cart-line--attachment' : ''}`}>
-              <div>
-                <div className="cart-line__name">{line.nameAr}</div>
-                <div>
-                  {lineTotal(line.unitPrice, line.quantity).toFixed(2)}
-                  {line.sizeLabelAr && (
-                    <span style={{ color: 'var(--color-muted)', marginInlineStart: 6 }}>
-                      ({line.sizeLabelAr})
-                    </span>
-                  )}
-                  {line.unitLabel && (
-                    <span style={{ color: 'var(--color-muted)', marginInlineStart: 6 }}>
-                      ({line.quantity.toFixed(3)} {line.unitLabel})
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="cart-line__controls">
-                {!line.parentKey && (
-                  <button type="button" className="qty-btn" onClick={() => changeQty(line.key, -1)}>
-                    -
-                  </button>
-                )}
-                <span>{line.unitLabel ? line.quantity.toFixed(2) : line.quantity}</span>
-                {!line.parentKey && (
-                  <button type="button" className="qty-btn" onClick={() => changeQty(line.key, 1)}>
-                    +
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Footer */}
-        <div className="pos-cart__footer">
-          <textarea
-            className="order-note"
-            placeholder="ملاحظة على الطلب..."
-            value={orderNote}
-            onChange={(e) => setOrderNote(e.target.value)}
-          />
-
-          {/* Cart totals summary */}
-          <div className="cart-summary">
-            {discountAmt > 0 && (
-              <div style={{ fontSize: '0.82rem', color: 'var(--color-muted)' }}>
-                <span>المجموع الفرعي</span>
-                <span style={{ marginInlineStart: 8 }}>{subtotal.toFixed(2)}</span>
-              </div>
-            )}
-            {discountAmt > 0 && (
-              <div style={{ fontSize: '0.82rem', color: 'var(--color-danger)' }}>
-                <span>خصم</span>
-                <span style={{ marginInlineStart: 8 }}>- {discountAmt.toFixed(2)}</span>
-              </div>
-            )}
-            {deliveryFeeNum > 0 && (
-              <div style={{ fontSize: '0.82rem', color: 'var(--color-muted)' }}>
-                <span>رسوم التوصيل</span>
-                <span style={{ marginInlineStart: 8 }}>{deliveryFeeNum.toFixed(2)}</span>
-              </div>
-            )}
-            <div>
-              <span>الإجمالي</span>
-              <strong>{total.toFixed(2)}</strong>
-            </div>
-          </div>
-
-          {message && (
-            <p className={`form-message ${message.includes('فشل') || message.includes('أقل') ? 'form-message--error' : 'form-message--ok'}`}>
-              {message}
-            </p>
-          )}
-
-          {/* Edit mode banner */}
-          {editingOrder && (
-            <div style={{
-              background: '#fef3c7',
-              border: '2px solid #f59e0b',
-              padding: '6px 10px',
-              marginBottom: 8,
-              fontSize: '0.82rem',
-              fontWeight: 700
-            }}>
-              وضع تعديل طلب #{orderReference(editingOrder)}
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                style={{ marginInlineStart: 8 }}
-                onClick={() => { setEditingOrder(null); setCart([]); setOrderNote('') }}
-              >
-                إلغاء
-              </button>
-            </div>
-          )}
-
-          {/* REQ-3: Hold Orders panel trigger — now in cart header */}
-
-          {/* Checkout actions */}
-          <div className="checkout-actions">
-            {editingOrder ? (
-              <button
-                type="button"
-                className="btn btn--primary"
-                disabled={loading || cart.length === 0}
-                onClick={() => void submitEditOrder()}
-              >
-                {loading ? 'جارٍ الحفظ...' : 'حفظ التعديلات'}
-              </button>
-            ) : orderType === 'takeaway' ? (
-              <>
-                {/* Hold button — secondary, above the payment row */}
-                {cart.length > 0 && (
-                  <button
-                    type="button"
-                    className="btn btn--secondary btn--sm"
-                    style={{ width: '100%', marginBottom: 6, opacity: 0.75, fontSize: '0.82rem' }}
-                    onClick={holdCurrentOrder}
-                    title="تعليق الطلب الحالي واستئنافه لاحقاً"
-                  >
-                    ⏸ تعليق الطلب
-                  </button>
-                )}
-                {/* Primary payment row */}
-                <div style={{ display: 'flex', gap: 6, width: '100%' }}>
-                  <button
-                    type="button"
-                    className="btn btn--primary"
-                    style={{ flex: 2 }}
-                    disabled={loading || cart.length === 0}
-                    onClick={() => void handleCheckout('cash')}
-                  >
-                    نقدي
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    style={{ flex: 1 }}
-                    disabled={loading || cart.length === 0}
-                    onClick={() => void handleCheckout('card')}
-                  >
-                    بطاقة
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    style={{ flex: 1 }}
-                    disabled={loading || cart.length === 0}
-                    onClick={() => {
-                      setCheckoutMethod('split')
-                      void handleCheckout()
-                    }}
-                  >
-                    تقسيم
-                  </button>
-                </div>
-              </>
-            ) : orderType === 'dine_in' ? (
-              <>
-                {cart.length > 0 && (
-                  <button
-                    type="button"
-                    className="btn btn--secondary btn--sm"
-                    style={{ width: '100%', marginBottom: 6, opacity: 0.75, fontSize: '0.82rem' }}
-                    onClick={holdCurrentOrder}
-                    title="تعليق الطلب الحالي"
-                  >
-                    ⏸ تعليق الطلب
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  style={{ width: '100%' }}
-                  disabled={loading || cart.length === 0 || !selectedTable}
-                  onClick={() => void handleCheckout()}
-                >
-                  {loading ? 'جارٍ...' : 'إنشاء طلب صالة'}
-                </button>
-              </>
-            ) : (
-              <>
-                {cart.length > 0 && (
-                  <button
-                    type="button"
-                    className="btn btn--secondary btn--sm"
-                    style={{ width: '100%', marginBottom: 6, opacity: 0.75, fontSize: '0.82rem' }}
-                    onClick={holdCurrentOrder}
-                    title="تعليق الطلب الحالي"
-                  >
-                    ⏸ تعليق الطلب
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  style={{ width: '100%' }}
-                  disabled={loading || cart.length === 0}
-                  onClick={() => void handleCheckout()}
-                >
-                  {loading ? 'جارٍ...' : 'إنشاء طلب دليفري'}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </aside>
+      {checkoutOpen && (
+        <CheckoutModal
+          orderType={orderType}
+          checkoutMethod={checkoutMethod}
+          setCheckoutMethod={setCheckoutMethod}
+          cashReceived={cashReceived}
+          setCashReceived={setCashReceived}
+          splitCash={splitCash}
+          setSplitCash={setSplitCash}
+          splitCard={splitCard}
+          setSplitCard={setSplitCard}
+          roundingAccess={roundingAccess}
+          roundedTotal={roundedTotal}
+          setRoundedTotal={setRoundedTotal}
+          roundingReason={roundingReason}
+          setRoundingReason={setRoundingReason}
+          roundingApplied={roundingApplied}
+          roundingInvalid={roundingInvalid}
+          roundingDifference={roundingDifference}
+          total={total}
+          checkoutTotal={checkoutTotal}
+          cashInsufficient={cashInsufficient}
+          changeDue={changeDue}
+          discountType={discountType}
+          setDiscountType={setDiscountType}
+          discountValue={discountValue}
+          setDiscountValue={setDiscountValue}
+          discountsEnabled={discountsEnabled}
+          discountOverLimit={discountOverLimit}
+          maxDiscountPct={discountLimitPct}
+          deliveryContacts={contactSearchResults}
+          contactSearch={contactSearch}
+          setContactSearch={setContactSearch}
+          selectedContactId={contactId}
+          onSelectContact={selectDeliveryContact}
+          onClearContact={() => setContactId(undefined)}
+          onCreateContact={createContactFromCheckout}
+          customerName={customerName}
+          customerPhone={customerPhone}
+          customerAddress={customerAddress}
+          deliveryFee={deliveryFee}
+          setDeliveryFee={setDeliveryFee}
+          subtotal={subtotal}
+          discountAmt={discountAmt}
+          deliveryFeeNum={deliveryFeeNum}
+          taxAmt={taxAmt}
+          serviceAmt={serviceAmt}
+          message={message}
+          loading={loading}
+          onSubmit={() => void submitCheckout()}
+          onSubmitUnpaid={orderType === 'delivery' ? () => void submitDeliveryUnpaid() : undefined}
+          onClose={() => setCheckoutOpen(false)}
+        />
+      )}
 
       {/* ── Checkout Modal ── */}
-      {checkoutOpen && (
+      {false && checkoutOpen && (
         <div className="modal-overlay" onClick={() => setCheckoutOpen(false)}>
           <div className="modal" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
             <div className="order-details__header">
@@ -1559,7 +1253,14 @@ export function PosPage(): React.ReactElement {
                       key={m}
                       type="button"
                       className={`order-type-toggle__btn${checkoutMethod === m ? ' order-type-toggle__btn--active' : ''}`}
-                      onClick={() => { setCheckoutMethod(m); setCashReceived('') }}
+                      onClick={() => {
+                        setCheckoutMethod(m)
+                        setCashReceived('')
+                        if (m !== 'cash') {
+                          setRoundedTotal('')
+                          setRoundingReason('')
+                        }
+                      }}
                     >
                       {m === 'cash' ? 'نقدي' : m === 'card' ? 'بطاقة' : 'تقسيم'}
                     </button>
@@ -1569,11 +1270,47 @@ export function PosPage(): React.ReactElement {
                 {/* REQ-1: Cash received + change calculator */}
                 {checkoutMethod === 'cash' && (
                   <div style={{ marginTop: 10 }}>
-                    <label className="field" style={{ margin: 0 }}>
+                    {roundingAccess.enabled && (
+                      <div style={{ border: '1.5px solid var(--color-border-light)', borderRadius: 4, padding: 10, marginBottom: 10 }}>
+                        <div style={{ fontWeight: 800, marginBottom: 6 }}>تقريب الدفع النقدي</div>
+                        {roundingAccess.allowed ? (
+                          <div className="settings-form-grid">
+                            <label className="field">
+                              <span>الإجمالي بعد التقريب</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max={total}
+                                step="0.01"
+                                value={roundedTotal}
+                                onChange={(event) => setRoundedTotal(event.target.value)}
+                                placeholder={total.toFixed(2)}
+                              />
+                            </label>
+                            <label className="field">
+                              <span>السبب</span>
+                              <input
+                                value={roundingReason}
+                                onChange={(event) => setRoundingReason(event.target.value)}
+                                disabled={!roundingApplied}
+                                placeholder="مثال: تسوية فكة"
+                              />
+                            </label>
+                            <div className="settings-form-grid__full" style={{ fontSize: '0.82rem', color: roundingInvalid ? 'var(--color-danger)' : 'var(--color-muted)' }}>
+                              الحد المسموح: {roundingAccess.maxDifference.toFixed(2)}
+                              {roundingApplied && ` — الفرق: ${roundingDisplay}`}
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="modal-hint m-0">{roundingAccess.reason}</p>
+                        )}
+                      </div>
+                    )}
+                    <label className="field m-0">
                       <span>المبلغ المستلم من العميل</span>
                       <input
                         type="number"
-                        min={total}
+                        min={checkoutTotal}
                         step="0.01"
                         value={cashReceived}
                         onChange={(e) => setCashReceived(e.target.value)}
@@ -1644,7 +1381,7 @@ export function PosPage(): React.ReactElement {
             {/* Discount */}
             <div style={{ marginBottom: 14 }}>
               <p style={{ fontWeight: 700, marginBottom: 6 }}>خصم (اختياري)</p>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div className="flex gap-8">
                 <select
                   value={discountType}
                   onChange={(e) => setDiscountType(e.target.value as DiscountType)}
@@ -1690,7 +1427,7 @@ export function PosPage(): React.ReactElement {
                   color: 'var(--color-danger)',
                   fontWeight: 700
                 }}>
-                  ⚠️ الخصم يتجاوز الحد المسموح به ({maxDiscountPct}%). يتطلب موافقة المدير.
+                  ⚠️ الخصم يتجاوز الحد المسموح به ({discountLimitPct}%).
                 </div>
               )}
             </div>
@@ -1741,6 +1478,21 @@ export function PosPage(): React.ReactElement {
                   <span>رسوم التوصيل</span><span>{deliveryFeeNum.toFixed(2)}</span>
                 </div>
               )}
+              {taxAmt > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                  <span>الضريبة</span><span>{taxAmt.toFixed(2)}</span>
+                </div>
+              )}
+              {serviceAmt > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                  <span>الخدمة</span><span>{serviceAmt.toFixed(2)}</span>
+                </div>
+              )}
+              {roundingApplied && !roundingInvalid && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--color-danger)' }}>
+                  <span>تسوية تقريب نقدي</span><span>{roundingDisplay}</span>
+                </div>
+              )}
               <div style={{
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -1751,7 +1503,7 @@ export function PosPage(): React.ReactElement {
                 paddingTop: 6
               }}>
                 <span>الإجمالي</span>
-                <span>{total.toFixed(2)}</span>
+                <span>{checkoutTotal.toFixed(2)}</span>
               </div>
             </div>
 
@@ -1761,7 +1513,7 @@ export function PosPage(): React.ReactElement {
               <button
                 type="button"
                 className="btn btn--primary"
-                disabled={loading || cashInsufficient || discountOverLimit}
+                disabled={loading || cashInsufficient || discountOverLimit || roundingInvalid}
                 onClick={() => void submitCheckout()}
               >
                 {loading ? 'جارٍ...' : 'تأكيد الطلب'}
@@ -1779,6 +1531,14 @@ export function PosPage(): React.ReactElement {
       )}
       {/* ── REQ-3: Held Orders panel ── */}
       {heldPanelOpen && (
+        <HeldOrdersPanel
+          heldOrders={heldOrders}
+          onResume={handleResumeHeldOrder}
+          onDiscard={discardHeldOrder}
+          onClose={() => setHeldPanelOpen(false)}
+        />
+      )}
+      {false && heldPanelOpen && (
         <div className="modal-overlay" onClick={() => setHeldPanelOpen(false)}>
           <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
             <div className="order-details__header">
@@ -1812,7 +1572,7 @@ export function PosPage(): React.ReactElement {
                     <button
                       type="button"
                       className="btn btn--primary btn--sm"
-                      onClick={() => resumeHeldOrder(held)}
+                      onClick={() => handleResumeHeldOrder(held)}
                     >
                       استعادة
                     </button>

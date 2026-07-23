@@ -3,6 +3,7 @@
  */
 import { useEffect, useState } from 'react'
 import type { Order, OrderItem } from '@shared/types'
+import { ConfirmDialog } from '@renderer/components/ui'
 import {
   cancelOrder,
   getOrderItems,
@@ -17,6 +18,12 @@ import {
 import { printReceipt } from '@renderer/features/receipt/receipt-builder'
 import { orderReference } from '@shared/services/order-reference'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
+import { getOpenShiftForCashier } from '@renderer/features/shifts/shift-service'
+import {
+  calculateAutomaticCashRounding,
+  getCashRoundingAccess,
+  type CashRoundingAccess
+} from '@renderer/features/rounding/cash-rounding-service'
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -60,57 +67,46 @@ function CancelModal({
   const [inventoryMode, setInventoryMode] = useState<'return' | 'waste'>('return')
 
   return (
-    <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
-        <div className="order-details__header">
-          <h2 className="order-details__title">إلغاء طلب #{orderReference(order)}</h2>
-          <button type="button" className="order-details__close" onClick={onCancel} aria-label="إغلاق">✕</button>
-        </div>
+    <ConfirmDialog
+      open
+      onCancel={onCancel}
+      onConfirm={() => onConfirm(inventoryMode, reason)}
+      title={`إلغاء طلب #${orderReference(order)}`}
+      message=""
+      confirmLabel="تأكيد الإلغاء"
+      cancelLabel="تراجع"
+      danger
+    >
+      <label className="field">
+        <span>سبب الإلغاء (اختياري)</span>
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="أدخل سبب الإلغاء..."
+          autoFocus
+        />
+      </label>
 
-        <label className="field">
-          <span>سبب الإلغاء (اختياري)</span>
-          <input
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="أدخل سبب الإلغاء..."
-            autoFocus
-          />
-        </label>
-
-        <div style={{ marginBottom: 16 }}>
-          <p style={{ fontWeight: 700, marginBottom: 8, fontSize: '0.9rem' }}>المخزون بعد الإلغاء:</p>
-          <div className="order-type-toggle">
-            <button
-              type="button"
-              className={`order-type-toggle__btn${inventoryMode === 'return' ? ' order-type-toggle__btn--active' : ''}`}
-              onClick={() => setInventoryMode('return')}
-            >
-              يرجع للمخزون
-            </button>
-            <button
-              type="button"
-              className={`order-type-toggle__btn${inventoryMode === 'waste' ? ' order-type-toggle__btn--active' : ''}`}
-              onClick={() => setInventoryMode('waste')}
-            >
-              هدر (لا يرجع)
-            </button>
-          </div>
-        </div>
-
-        <div className="modal-actions">
+      <div className="mb-16">
+        <p style={{ fontWeight: 700, marginBottom: 8, fontSize: '0.9rem' }}>المخزون بعد الإلغاء:</p>
+        <div className="order-type-toggle">
           <button
             type="button"
-            className="btn btn--danger"
-            onClick={() => onConfirm(inventoryMode, reason)}
+            className={`order-type-toggle__btn${inventoryMode === 'return' ? ' order-type-toggle__btn--active' : ''}`}
+            onClick={() => setInventoryMode('return')}
           >
-            تأكيد الإلغاء
+            يرجع للمخزون
           </button>
-          <button type="button" className="btn btn--secondary" onClick={onCancel}>
-            تراجع
+          <button
+            type="button"
+            className={`order-type-toggle__btn${inventoryMode === 'waste' ? ' order-type-toggle__btn--active' : ''}`}
+            onClick={() => setInventoryMode('waste')}
+          >
+            هدر (لا يرجع)
           </button>
         </div>
       </div>
-    </div>
+    </ConfirmDialog>
   )
 }
 
@@ -164,115 +160,100 @@ function RefundModal({
   }
 
   return (
-    <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
-        <div className="order-details__header">
-          <h2 className="order-details__title">استرداد طلب #{orderReference(order)}</h2>
-          <button type="button" className="order-details__close" onClick={onCancel} aria-label="إغلاق">✕</button>
-        </div>
-
-        <p style={{ fontSize: '0.85rem', color: 'var(--color-muted)', marginBottom: 12 }}>
-          اختر الأصناف المراد استردادها
-        </p>
-
-        <table className="data-table" style={{ marginBottom: 12 }}>
-          <thead>
-            <tr>
-              <th style={{ width: 36 }}></th>
-              <th>الصنف</th>
-              <th>الكمية</th>
-              <th>الإجمالي</th>
+    <ConfirmDialog
+      open
+      onCancel={onCancel}
+      onConfirm={handleConfirm}
+      title={`استرداد طلب #${orderReference(order)}`}
+      message="اختر الأصناف المراد استردادها"
+      confirmLabel={`تأكيد الاسترداد (${refundTotal.toFixed(2)})`}
+      cancelLabel="إلغاء"
+      danger
+      loading={saving || selected.size === 0 || !reason.trim()}
+    >
+      <table className="data-table mb-12">
+        <thead>
+          <tr>
+            <th style={{ width: 36 }}></th>
+            <th>الصنف</th>
+            <th>الكمية</th>
+            <th>الإجمالي</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={item.id} style={{ opacity: selected.has(item.id) ? 1 : 0.45 }}>
+              <td>
+                <input
+                  type="checkbox"
+                  checked={selected.has(item.id)}
+                  onChange={() => toggleItem(item.id)}
+                />
+              </td>
+              <td>
+                {item.nameAr}
+                {item.sizeLabelAr && (
+                  <span style={{ color: 'var(--color-muted)', fontSize: '0.78rem', marginInlineStart: 4 }}>
+                    ({item.sizeLabelAr})
+                  </span>
+                )}
+              </td>
+              <td>{item.quantity}</td>
+              <td>{item.lineTotal.toFixed(2)}</td>
             </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={item.id} style={{ opacity: selected.has(item.id) ? 1 : 0.45 }}>
-                <td>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(item.id)}
-                    onChange={() => toggleItem(item.id)}
-                  />
-                </td>
-                <td>
-                  {item.nameAr}
-                  {item.sizeLabelAr && (
-                    <span style={{ color: 'var(--color-muted)', fontSize: '0.78rem', marginInlineStart: 4 }}>
-                      ({item.sizeLabelAr})
-                    </span>
-                  )}
-                </td>
-                <td>{item.quantity}</td>
-                <td>{item.lineTotal.toFixed(2)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          ))}
+        </tbody>
+      </table>
 
-        {/* Refund amount summary */}
-        <div style={{
-          background: 'var(--color-bg)',
-          border: '1px solid var(--color-border-light)',
-          borderRadius: 4,
-          padding: '10px 14px',
-          marginBottom: 14,
-          fontSize: '0.88rem'
-        }}>
-          {refundDiscount > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--color-muted)' }}>
-              <span>خصم نسبي</span><span>-{refundDiscount.toFixed(2)}</span>
-            </div>
-          )}
-          {refundTax > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--color-muted)' }}>
-              <span>ضريبة نسبية</span><span>+{refundTax.toFixed(2)}</span>
-            </div>
-          )}
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            fontWeight: 900,
-            fontSize: '1.05rem',
-            borderTop: '2px solid var(--color-border)',
-            marginTop: 6,
-            paddingTop: 6,
-            color: 'var(--color-danger)'
-          }}>
-            <span>مبلغ الاسترداد</span>
-            <span>{refundTotal.toFixed(2)}</span>
+      {/* Refund amount summary */}
+      <div style={{
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border-light)',
+        borderRadius: 4,
+        padding: '10px 14px',
+        marginBottom: 14,
+        fontSize: '0.88rem'
+      }}>
+        {refundDiscount > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--color-muted)' }}>
+            <span>خصم نسبي</span><span>-{refundDiscount.toFixed(2)}</span>
           </div>
-        </div>
-
-        <label className="field">
-          <span>سبب الاسترداد <span style={{ color: 'var(--color-danger)' }}>*</span></span>
-          <input
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="أدخل سبب الاسترداد..."
-            autoFocus
-          />
-        </label>
-        {!reason.trim() && (
-          <p style={{ fontSize: '0.8rem', color: 'var(--color-danger)', marginBottom: 8 }}>
-            سبب الاسترداد مطلوب
-          </p>
         )}
-
-        <div className="modal-actions">
-          <button
-            type="button"
-            className="btn btn--danger"
-            onClick={handleConfirm}
-            disabled={saving || selected.size === 0 || !reason.trim()}
-          >
-            {saving ? 'جارٍ الاسترداد...' : `تأكيد الاسترداد (${refundTotal.toFixed(2)})`}
-          </button>
-          <button type="button" className="btn btn--secondary" onClick={onCancel}>
-            إلغاء
-          </button>
+        {refundTax > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--color-muted)' }}>
+            <span>ضريبة نسبية</span><span>+{refundTax.toFixed(2)}</span>
+          </div>
+        )}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          fontWeight: 900,
+          fontSize: '1.05rem',
+          borderTop: '2px solid var(--color-border)',
+          marginTop: 6,
+          paddingTop: 6,
+          color: 'var(--color-danger)'
+        }}>
+          <span>مبلغ الاسترداد</span>
+          <span>{refundTotal.toFixed(2)}</span>
         </div>
       </div>
-    </div>
+
+      <label className="field">
+        <span>سبب الاسترداد <span className="text-danger">*</span></span>
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="أدخل سبب الاسترداد..."
+          autoFocus
+        />
+      </label>
+      {!reason.trim() && (
+        <p style={{ fontSize: '0.8rem', color: 'var(--color-danger)', margin: '4px 0 0' }}>
+          سبب الاسترداد مطلوب
+        </p>
+      )}
+    </ConfirmDialog>
   )
 }
 
@@ -296,6 +277,14 @@ export function OrderHistoryPage(): React.ReactElement {
   const [splitModal, setSplitModal] = useState<Order | null>(null)
   const [splitCash, setSplitCash] = useState('')
   const [splitCard, setSplitCard] = useState('')
+  const [cashPaymentTarget, setCashPaymentTarget] = useState<Order | null>(null)
+  const [cashReceived, setCashReceived] = useState('')
+  const [cashRoundingAccess, setCashRoundingAccess] = useState<CashRoundingAccess>({
+    enabled: false,
+    allowed: false,
+    maxDifference: 0,
+    increment: 1
+  })
 
   // Edit order modal
   const [editModal, setEditModal] = useState<{ order: Order; items: OrderItem[] } | null>(null)
@@ -306,10 +295,11 @@ export function OrderHistoryPage(): React.ReactElement {
   const [refundSaving, setRefundSaving] = useState(false)
 
   const currency = 'ج.م'
+  const canVoidOrRefund = user.role === 'manager'
 
   async function load(): Promise<void> {
-    const loaded = await listOrders(300)
-    setOrders(loaded)
+    const [loaded, shift] = await Promise.all([listOrders(300), getOpenShiftForCashier(user.id)])
+    setOrders(shift ? loaded.filter((order) => order.shiftId === shift.id) : [])
     setLoading(false)
   }
 
@@ -366,6 +356,41 @@ export function OrderHistoryPage(): React.ReactElement {
     }
   }
 
+  async function openCashPayment(order: Order): Promise<void> {
+    setCashRoundingAccess(await getCashRoundingAccess(user))
+    setCashPaymentTarget(order)
+    setCashReceived('')
+  }
+
+  async function confirmCashPayment(): Promise<void> {
+    if (!cashPaymentTarget) return
+    const automaticRounding = calculateAutomaticCashRounding(cashPaymentTarget.total, cashRoundingAccess)
+    const target = automaticRounding?.finalAmount ?? cashPaymentTarget.total
+    const received = cashReceived.trim() ? Number(cashReceived) : target
+    if (!Number.isFinite(received) || received < target) {
+      showMsg('المبلغ المستلم أقل من إجمالي الطلب', 'error')
+      return
+    }
+    try {
+      const paid = await markOrderPaid({
+        orderId: cashPaymentTarget.id,
+        cashierId: user.id,
+        paymentMethod: 'cash',
+        cashReceived: received,
+        roundedTotal: automaticRounding ? target : undefined,
+        roundingReason: automaticRounding ? 'تقريب نقدي تلقائي' : undefined
+      })
+      if (!paid) return
+      const [items, settings] = await Promise.all([getOrderItems(paid.id), getSettings()])
+      setCashPaymentTarget(null)
+      showMsg('تم تسجيل الدفع النقدي')
+      await load()
+      printReceipt(paid, items, settings).catch(() => {})
+    } catch (cause) {
+      showMsg(cause instanceof Error ? cause.message : 'فشل تسجيل الدفع', 'error')
+    }
+  }
+
   async function handleSplitPay(): Promise<void> {
     if (!splitModal) return
     const cash = Number(splitCash) || 0
@@ -394,6 +419,11 @@ export function OrderHistoryPage(): React.ReactElement {
       showMsg(e instanceof Error ? e.message : 'فشل', 'error')
     }
   }
+
+  const cashPaymentRounding = cashPaymentTarget
+    ? calculateAutomaticCashRounding(cashPaymentTarget.total, cashRoundingAccess)
+    : null
+  const cashPaymentFinalTotal = cashPaymentRounding?.finalAmount ?? cashPaymentTarget?.total ?? 0
 
   async function openEditModal(order: Order): Promise<void> {
     const items = await getOrderItems(order.id)
@@ -525,6 +555,7 @@ export function OrderHistoryPage(): React.ReactElement {
                 const unpaid = isOrderUnpaid(order)
                 const canEdit = order.status === 'draft' && order.paymentStatus === 'unpaid'
                 const canRefund =
+                  canVoidOrRefund &&
                   order.status === 'completed' &&
                   (order.paymentStatus === 'paid' || order.paymentStatus === 'split') &&
                   !order.orderCode?.startsWith('RFD-')
@@ -595,7 +626,7 @@ export function OrderHistoryPage(): React.ReactElement {
                             <button
                               type="button"
                               className="btn btn--primary btn--sm"
-                              onClick={() => void handleMarkPaid(order, 'cash')}
+                              onClick={() => void openCashPayment(order)}
                             >
                               نقدي
                             </button>
@@ -620,8 +651,7 @@ export function OrderHistoryPage(): React.ReactElement {
                         {canRefund && (
                           <button
                             type="button"
-                            className="btn btn--secondary btn--sm"
-                            style={{ color: 'var(--color-danger)' }}
+                            className="btn btn--secondary btn--sm text-danger"
                             onClick={() => void openRefundModal(order)}
                           >
                             استرداد
@@ -629,7 +659,7 @@ export function OrderHistoryPage(): React.ReactElement {
                         )}
 
                         {/* Cancel button — REQ-13: opens modal, no window.confirm */}
-                        {order.status !== 'cancelled' && !isRefundRecord && (
+                        {canVoidOrRefund && order.status !== 'cancelled' && !isRefundRecord && (
                           <button
                             type="button"
                             className="btn btn--danger btn--sm"
@@ -690,11 +720,11 @@ export function OrderHistoryPage(): React.ReactElement {
               {details.order.cancelReasonAr && (
                 <div className="order-details__meta-row">
                   <span className="order-details__meta-label">سبب الإلغاء / الاسترداد</span>
-                  <span style={{ color: 'var(--color-danger)' }}>{details.order.cancelReasonAr}</span>
+                  <span className="text-danger">{details.order.cancelReasonAr}</span>
                 </div>
               )}
             </div>
-            <table className="data-table" style={{ marginTop: 12 }}>
+            <table className="data-table mt-12">
               <thead>
                 <tr><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr>
               </thead>
@@ -704,7 +734,7 @@ export function OrderHistoryPage(): React.ReactElement {
                     <td>
                       {item.nameAr}
                       {item.sizeLabelAr && (
-                        <div style={{ fontSize: '0.78rem', color: 'var(--color-muted)' }}>
+                        <div className="text-xs text-muted">
                           {item.sizeLabelAr}
                         </div>
                       )}
@@ -718,7 +748,7 @@ export function OrderHistoryPage(): React.ReactElement {
             </table>
             <div className="order-details__totals">
               {details.order.discountAmount ? (
-                <div className="order-details__total-row" style={{ color: 'var(--color-danger)' }}>
+                <div className="order-details__total-row text-danger">
                   <span>خصم</span>
                   <span>- {Math.abs(details.order.discountAmount).toFixed(2)} {currency}</span>
                 </div>
@@ -742,7 +772,7 @@ export function OrderHistoryPage(): React.ReactElement {
                 </strong>
               </div>
             </div>
-            <div className="modal-actions" style={{ marginTop: 16 }}>
+            <div className="modal-actions mt-16">
               <button
                 type="button"
                 className="btn btn--primary btn--sm"
@@ -793,6 +823,40 @@ export function OrderHistoryPage(): React.ReactElement {
         </div>
       )}
 
+      {cashPaymentTarget && (
+        <div className="modal-overlay" onClick={() => setCashPaymentTarget(null)}>
+          <div className="modal" style={{ maxWidth: 420 }} onClick={(event) => event.stopPropagation()}>
+            <div className="order-details__header">
+              <h2 className="order-details__title">دفع نقدي — #{orderReference(cashPaymentTarget)}</h2>
+              <button type="button" className="order-details__close" onClick={() => setCashPaymentTarget(null)}>×</button>
+            </div>
+            <p style={{ fontWeight: 800 }}>إجمالي الطلب: {cashPaymentTarget.total.toFixed(2)} {currency}</p>
+            <label className="field">
+              <span>المبلغ المستلم من العميل</span>
+              <input type="number" min="0" step="0.01" value={cashReceived} onChange={(event) => setCashReceived(event.target.value)} placeholder={cashPaymentTarget.total.toFixed(2)} autoFocus />
+            </label>
+            {cashReceived && Number(cashReceived) >= cashPaymentFinalTotal && (
+              <p className="form-message form-message--ok">
+                الباقي للعميل: {(Number(cashReceived) - cashPaymentFinalTotal).toFixed(2)} {currency}
+              </p>
+            )}
+            {cashRoundingAccess.enabled && (
+              cashPaymentRounding ? (
+                <div className="checkout-modal__readonly-summary">
+                  <div><span>الإجمالي قبل التقريب</span><strong>{cashPaymentTarget.total.toFixed(2)}</strong></div>
+                  <div><span>تقريب النقدية</span><strong>{cashPaymentRounding.differenceAmount > 0 ? '-' : '+'} {Math.abs(cashPaymentRounding.differenceAmount).toFixed(2)}</strong></div>
+                  <div><span>الإجمالي النهائي</span><strong>{cashPaymentFinalTotal.toFixed(2)}</strong></div>
+                </div>
+              ) : <p className="modal-hint">{cashRoundingAccess.allowed ? `لا يوجد تقريب قابل للتطبيق داخل الحد المسموح (${cashRoundingAccess.maxDifference.toFixed(2)})` : cashRoundingAccess.reason}</p>
+            )}
+            <div className="modal-actions">
+              <button type="button" className="btn btn--primary" onClick={() => void confirmCashPayment()}>تأكيد الدفع</button>
+              <button type="button" className="btn btn--secondary" onClick={() => setCashPaymentTarget(null)}>إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Edit order modal ── */}
       {editModal && (
         <div className="modal-overlay" onClick={() => setEditModal(null)}>
@@ -833,7 +897,7 @@ export function OrderHistoryPage(): React.ReactElement {
                 ))}
               </tbody>
             </table>
-            <div className="modal-actions" style={{ marginTop: 16 }}>
+            <div className="modal-actions mt-16">
               <button
                 type="button"
                 className="btn btn--primary"

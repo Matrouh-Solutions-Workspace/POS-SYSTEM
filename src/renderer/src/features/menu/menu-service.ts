@@ -1,12 +1,18 @@
 /**
  * Menu service — SQLite primary database.
- * All reads/writes go to SQLite first; Firebase receives changes via outbox.
+ * All reads/writes go to SQLite first; the master can mirror changes through the API outbox.
  */
 import type { MenuCategory, MenuItem, Recipe, RecipeLine } from '@shared/types'
 import { COLLECTIONS } from '@shared/constants/collections'
 import { cacheDocs, getCachedDoc, getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 import { dbDelete } from '@renderer/lib/db/sqlite-db'
 import { generateId } from '@renderer/lib/utils/id'
+import { actorAuditName, describePatch, type AuditActor } from '@renderer/features/audit/audit-service'
+
+function audit(actor: AuditActor | undefined, params: Parameters<typeof import('@renderer/features/audit/audit-service').logAudit>[0]): void {
+  if (!actor) return
+  void import('@renderer/features/audit/audit-service').then(({ logAudit }) => logAudit(params))
+}
 
 // ---------------------------------------------------------------------------
 // Categories
@@ -20,7 +26,8 @@ export async function listCategories(): Promise<MenuCategory[]> {
 export async function createCategory(
   nameAr: string,
   sortOrder: number,
-  parentId?: string
+  parentId?: string,
+  actor?: AuditActor
 ): Promise<MenuCategory> {
   const now = Date.now()
   const cat: MenuCategory = {
@@ -33,25 +40,51 @@ export async function createCategory(
     updatedAt: now
   }
   await cacheDocs(COLLECTIONS.menuCategories, [cat])
+  audit(actor, {
+    action: 'menu_category_created',
+    actorId: actor?.id ?? 'system',
+    actorName: actor ? actorAuditName(actor) : 'system',
+    targetId: cat.id,
+    targetType: 'menu_category',
+    detailAr: `إضافة تصنيف: ${cat.nameAr}${parentId ? ` داخل ${parentId}` : ''}`
+  })
   return cat
 }
 
 export async function updateCategory(
   id: string,
-  patch: Partial<Pick<MenuCategory, 'nameAr' | 'parentId' | 'sortOrder' | 'active'>>
+  patch: Partial<Pick<MenuCategory, 'nameAr' | 'parentId' | 'sortOrder' | 'active'>>,
+  actor?: AuditActor
 ): Promise<void> {
   const cached = await getCachedDoc<MenuCategory>(COLLECTIONS.menuCategories, id)
   if (!cached) return
   await cacheDocs(COLLECTIONS.menuCategories, [{ ...cached, ...patch, updatedAt: Date.now() }])
+  audit(actor, {
+    action: 'menu_category_updated',
+    actorId: actor?.id ?? 'system',
+    actorName: actor ? actorAuditName(actor) : 'system',
+    targetId: id,
+    targetType: 'menu_category',
+    detailAr: `تعديل تصنيف "${cached.nameAr}" — ${describePatch(patch)}`
+  })
 }
 
-export async function deleteCategory(id: string): Promise<void> {
+export async function deleteCategory(id: string, actor?: AuditActor): Promise<void> {
+  const cached = await getCachedDoc<MenuCategory>(COLLECTIONS.menuCategories, id)
   // Check if category has menu items
   const items = await getCachedDocs<MenuItem>(COLLECTIONS.menuItems)
   if (items.some((item) => item.categoryId === id)) {
     throw new Error('لا يمكن الحذف — التصنيف يحتوي أصنافاً. احذف الأصناف أولاً.')
   }
   await dbDelete(COLLECTIONS.menuCategories, id)
+  audit(actor, {
+    action: 'menu_category_deleted',
+    actorId: actor?.id ?? 'system',
+    actorName: actor ? actorAuditName(actor) : 'system',
+    targetId: id,
+    targetType: 'menu_category',
+    detailAr: `حذف تصنيف: ${cached?.nameAr ?? id}`
+  })
 }
 
 export async function reorderCategories(
@@ -98,13 +131,37 @@ export async function updateMenuItem(
       | 'allowCustomWeight'
       | 'customWeightUnitPrice'
       | 'kitchenPrinterIds'
+      | 'imageUrl'
       | 'active'
     >
-  >
+  >,
+  actor?: AuditActor
 ): Promise<void> {
   const cached = await getCachedDoc<MenuItem>(COLLECTIONS.menuItems, id)
   if (!cached) return
   await cacheDocs(COLLECTIONS.menuItems, [{ ...cached, ...patch, updatedAt: Date.now() }])
+  if ('imageUrl' in patch) {
+    if (patch.imageUrl) {
+      await cacheDocs(COLLECTIONS.productImages, [{
+        id,
+        productId: id,
+        imagePath: patch.imageUrl,
+        uploadedBy: actor?.id ?? 'system',
+        createdAt: cached.createdAt,
+        updatedAt: Date.now()
+      }])
+    } else {
+      await dbDelete(COLLECTIONS.productImages, id)
+    }
+  }
+  audit(actor, {
+    action: 'menu_item_updated',
+    actorId: actor?.id ?? 'system',
+    actorName: actor ? actorAuditName(actor) : 'system',
+    targetId: id,
+    targetType: 'menu_item',
+    detailAr: `تعديل صنف "${cached.nameAr}" — ${describePatch(patch)}`
+  })
 }
 
 export async function reorderMenuItems(
@@ -133,8 +190,10 @@ export async function createMenuItemWithRecipe(params: {
   allowCustomWeight?: boolean
   customWeightUnitPrice?: number
   kitchenPrinterIds?: string[]
+  imageUrl?: string
   lines: RecipeLine[]   // empty array = no inventory deduction
   sortOrder?: number
+  actor?: AuditActor
 }): Promise<{ item: MenuItem; recipe: Recipe }> {
   const now = Date.now()
   const recipeId = generateId()
@@ -167,6 +226,7 @@ export async function createMenuItemWithRecipe(params: {
     allowCustomWeight: params.isWeighted ? params.allowCustomWeight : undefined,
     customWeightUnitPrice: params.isWeighted ? params.customWeightUnitPrice : undefined,
     kitchenPrinterIds: params.kitchenPrinterIds ?? [],
+    imageUrl: params.imageUrl,
     active: true,
     recipeId,
     sortOrder: params.sortOrder ?? 9999,
@@ -176,16 +236,42 @@ export async function createMenuItemWithRecipe(params: {
 
   await Promise.all([
     cacheDocs(COLLECTIONS.menuItems, [item]),
-    cacheDocs(COLLECTIONS.recipes, [recipe])
+    cacheDocs(COLLECTIONS.recipes, [recipe]),
+    ...(params.imageUrl ? [cacheDocs(COLLECTIONS.productImages, [{
+      id: itemId,
+      productId: itemId,
+      imagePath: params.imageUrl,
+      uploadedBy: params.actor?.id ?? 'system',
+      createdAt: now,
+      updatedAt: now
+    }])] : [])
   ])
+  audit(params.actor, {
+    action: 'menu_item_created',
+    actorId: params.actor?.id ?? 'system',
+    actorName: params.actor ? actorAuditName(params.actor) : 'system',
+    targetId: item.id,
+    targetType: 'menu_item',
+    detailAr: `إضافة صنف: ${item.nameAr} — السعر ${item.price} — مكونات الوصفة: ${params.lines.length}`
+  })
   return { item, recipe }
 }
 
-export async function deleteMenuItem(id: string, recipeId: string): Promise<void> {
+export async function deleteMenuItem(id: string, recipeId: string, actor?: AuditActor): Promise<void> {
+  const cached = await getCachedDoc<MenuItem>(COLLECTIONS.menuItems, id)
   await Promise.all([
     dbDelete(COLLECTIONS.menuItems, id),
-    dbDelete(COLLECTIONS.recipes, recipeId)
+    dbDelete(COLLECTIONS.recipes, recipeId),
+    dbDelete(COLLECTIONS.productImages, id)
   ])
+  audit(actor, {
+    action: 'menu_item_deleted',
+    actorId: actor?.id ?? 'system',
+    actorName: actor ? actorAuditName(actor) : 'system',
+    targetId: id,
+    targetType: 'menu_item',
+    detailAr: `حذف صنف: ${cached?.nameAr ?? id}`
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -204,11 +290,20 @@ export async function getRecipe(recipeId: string): Promise<Recipe | null> {
 export async function updateRecipe(
   recipeId: string,
   lines: RecipeLine[],
-  nameAr?: string
+  nameAr?: string,
+  actor?: AuditActor
 ): Promise<void> {
   const cached = await getCachedDoc<Recipe>(COLLECTIONS.recipes, recipeId)
   if (!cached) return
   await cacheDocs(COLLECTIONS.recipes, [
     { ...cached, lines, ...(nameAr ? { nameAr } : {}), updatedAt: Date.now() }
   ])
+  audit(actor, {
+    action: 'menu_item_updated',
+    actorId: actor?.id ?? 'system',
+    actorName: actor ? actorAuditName(actor) : 'system',
+    targetId: cached.menuItemId,
+    targetType: 'menu_item',
+    detailAr: `تعديل وصفة "${cached.nameAr}" — عدد المكونات: ${lines.length}`
+  })
 }

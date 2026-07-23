@@ -1,4 +1,7 @@
 import { listOrders, getOrderItems } from '../orders/order-service'
+import type { InventoryTransaction, MenuItem, Payment, Recipe } from '@shared/types'
+import { COLLECTIONS } from '@shared/constants/collections'
+import { getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 
 export interface DailySalesReport {
   dateKey: string
@@ -14,15 +17,40 @@ export interface TopItem {
 }
 
 export interface CashierStat {
+  cashierId: string
   cashierName: string
   orderCount: number
   totalSales: number
+}
+
+export interface PaymentMethodReport {
+  method: 'cash' | 'card' | 'other'
+  transactionCount: number
+  salesAmount: number
+  paidAmount: number
+  changeAmount: number
+}
+
+export interface ProductProfitabilityReport {
+  menuItemId: string
+  nameAr: string
+  sellingPrice: number
+  cost: number
+  profit: number
+  marginPercent: number
+  ingredients: Array<{ ingredientId: string; nameAr: string; quantity: number; cost: number }>
 }
 
 export interface ReportData {
   daily: DailySalesReport[]
   topItems: TopItem[]
   cashiers: CashierStat[]
+  paymentMethods: PaymentMethodReport[]
+  profitability: ProductProfitabilityReport[]
+  filterOptions: {
+    shifts: Array<{ id: string; label: string }>
+    devices: string[]
+  }
   summary: {
     totalOrders: number
     totalRevenue: number
@@ -63,9 +91,21 @@ function dateKey(ts: number): string {
   return new Date(ts).toISOString().slice(0, 10)
 }
 
-export async function getFullReport(range: DateRange = 'all'): Promise<ReportData> {
+export async function getFullReport(
+  range: DateRange = 'all',
+  filters?: { employeeId?: string; shiftId?: string; paymentMethod?: string; deviceId?: string }
+): Promise<ReportData> {
   const orders = await listOrders(1000)
   const { from, to } = getRangeBounds(range)
+  const allPayments = await getCachedDocs<Payment>(COLLECTIONS.payments)
+  const paymentFilteredOrderIds = filters?.paymentMethod || filters?.deviceId
+    ? new Set(allPayments
+        .filter((payment) =>
+          (!filters?.paymentMethod || payment.method === filters.paymentMethod) &&
+          (!filters?.deviceId || payment.deviceId === filters.deviceId)
+        )
+        .map((payment) => payment.orderId))
+    : null
 
   // All completed orders (unfiltered) for summary cards like todayOrders / weekRevenue
   const allCompleted = orders.filter((o) => o.status === 'completed')
@@ -73,18 +113,31 @@ export async function getFullReport(range: DateRange = 'all'): Promise<ReportDat
   // Filtered completed orders for the selected range
   const completed = allCompleted.filter((o) => {
     const t = o.completedAt ?? o.createdAt
-    return t >= from && t <= to
+    return t >= from && t <= to &&
+      (!filters?.employeeId || o.cashierId === filters.employeeId) &&
+      (!filters?.shiftId || o.shiftId === filters.shiftId) &&
+      (!paymentFilteredOrderIds || paymentFilteredOrderIds.has(o.id))
   })
+  const completedIdsForRefunds = new Set(completed.map((order) => order.id))
+  const refundOrders = orders.filter((order) => {
+    if (!order.refundOfOrderId || !completedIdsForRefunds.has(order.refundOfOrderId)) return false
+    const t = order.completedAt ?? order.createdAt
+    return t >= from && t <= to &&
+      (!filters?.employeeId || order.cashierId === filters.employeeId) &&
+      (!filters?.shiftId || order.shiftId === filters.shiftId) &&
+      (!paymentFilteredOrderIds || paymentFilteredOrderIds.has(order.id))
+  })
+  const reportOrders = [...completed, ...refundOrders]
 
   const today = dateKey(Date.now())
   const weekAgo = Date.now() - 7 * 86400000
 
   // ── Daily breakdown ───────────────────────────────────────────────────
   const byDay = new Map<string, DailySalesReport>()
-  for (const o of completed) {
+  for (const o of reportOrders) {
     const key = dateKey(o.completedAt ?? o.createdAt)
     const existing = byDay.get(key) ?? { dateKey: key, orderCount: 0, totalSales: 0, avgOrder: 0 }
-    existing.orderCount += 1
+    if (!o.refundOfOrderId) existing.orderCount += 1
     existing.totalSales += o.total
     byDay.set(key, existing)
   }
@@ -94,13 +147,14 @@ export async function getFullReport(range: DateRange = 'all'): Promise<ReportDat
 
   // ── Cashier breakdown ─────────────────────────────────────────────────
   const byCashier = new Map<string, CashierStat>()
-  for (const o of completed) {
+  for (const o of reportOrders) {
     const existing = byCashier.get(o.cashierId) ?? {
+      cashierId: o.cashierId,
       cashierName: o.cashierName,
       orderCount: 0,
       totalSales: 0
     }
-    existing.orderCount += 1
+    if (!o.refundOfOrderId) existing.orderCount += 1
     existing.totalSales += o.total
     byCashier.set(o.cashierId, existing)
   }
@@ -110,7 +164,7 @@ export async function getFullReport(range: DateRange = 'all'): Promise<ReportDat
   // ── Top items ─────────────────────────────────────────────────────────
   const itemMap = new Map<string, TopItem>()
   await Promise.all(
-    completed.slice(0, 200).map(async (o) => {
+    reportOrders.map(async (o) => {
       const items = await getOrderItems(o.id)
       for (const item of items) {
         const existing = itemMap.get(item.menuItemId) ?? {
@@ -118,7 +172,7 @@ export async function getFullReport(range: DateRange = 'all'): Promise<ReportDat
           quantity: 0,
           revenue: 0
         }
-        existing.quantity += item.quantity
+        existing.quantity += o.refundOfOrderId ? -Math.abs(item.quantity) : item.quantity
         existing.revenue += item.lineTotal
         itemMap.set(item.menuItemId, existing)
       }
@@ -128,8 +182,103 @@ export async function getFullReport(range: DateRange = 'all'): Promise<ReportDat
     .sort((a, b) => b.quantity - a.quantity)
     .slice(0, 10)
 
+  const orderIds = new Set(reportOrders.map((order) => order.id))
+  const payments = allPayments
+    .filter((payment) =>
+      orderIds.has(payment.orderId) &&
+      (!filters?.paymentMethod || payment.method === filters.paymentMethod) &&
+      (!filters?.deviceId || payment.deviceId === filters.deviceId)
+    )
+  const paymentMap = new Map<string, PaymentMethodReport>()
+  for (const payment of payments) {
+    const method = payment.method === 'cash' || payment.method === 'card' ? payment.method : 'other'
+    const current = paymentMap.get(method) ?? {
+      method,
+      transactionCount: 0,
+      salesAmount: 0,
+      paidAmount: 0,
+      changeAmount: 0
+    }
+    current.transactionCount += 1
+    current.salesAmount += payment.amount
+    current.paidAmount += payment.paidAmount ?? payment.amount
+    current.changeAmount += payment.changeAmount ?? 0
+    paymentMap.set(method, current)
+  }
+  const paymentMethods = Array.from(paymentMap.values())
+
+  const [menuItems, recipes, inventoryTransactions, ingredients] = await Promise.all([
+    getCachedDocs<MenuItem>(COLLECTIONS.menuItems),
+    getCachedDocs<Recipe>(COLLECTIONS.recipes),
+    getCachedDocs<InventoryTransaction>(COLLECTIONS.inventoryTransactions),
+    getCachedDocs<{ id: string; nameAr: string }>(COLLECTIONS.ingredients)
+  ])
+  const ingredientName = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient.nameAr]))
+  const recipeById = new Map(recipes.map((recipe) => [recipe.id, recipe]))
+  const salesByMenuItem = new Map<string, { quantity: number; revenue: number; cost: number }>()
+  for (const order of reportOrders) {
+    const items = await getOrderItems(order.id)
+    for (const item of items) {
+      const current = salesByMenuItem.get(item.menuItemId) ?? { quantity: 0, revenue: 0, cost: 0 }
+      current.quantity += order.refundOfOrderId ? -item.quantity : item.quantity
+      current.revenue += item.lineTotal
+      salesByMenuItem.set(item.menuItemId, current)
+    }
+  }
+  const completedOrderIds = new Set(reportOrders.map((order) => order.id))
+  for (const tx of inventoryTransactions.filter((transaction) =>
+    (transaction.type === 'sale' || transaction.type === 'sale_reversal') &&
+    transaction.menuItemId &&
+    transaction.referenceId &&
+    completedOrderIds.has(transaction.referenceId)
+  )) {
+    const current = salesByMenuItem.get(tx.menuItemId!) ?? { quantity: 0, revenue: 0, cost: 0 }
+    const signedCost = tx.type === 'sale_reversal'
+      ? -(tx.totalCost ?? Math.abs(tx.quantity) * (tx.unitCost ?? 0))
+      : (tx.totalCost ?? Math.abs(tx.quantity) * (tx.unitCost ?? 0))
+    current.cost += signedCost
+    salesByMenuItem.set(tx.menuItemId!, current)
+  }
+  const profitability = menuItems.filter((item) => item.active || salesByMenuItem.has(item.id)).map((item) => {
+    const recipe = recipeById.get(item.recipeId)
+    const lines = item.linkedIngredientId
+      ? [{ ingredientId: item.linkedIngredientId, quantity: 1 }]
+      : (recipe?.lines ?? [])
+    const actual = salesByMenuItem.get(item.id)
+    const cost = actual?.cost ?? 0
+    const breakdown = lines.map((line) => ({
+      ingredientId: line.ingredientId,
+      nameAr: ingredientName.get(line.ingredientId) ?? line.ingredientId,
+      quantity: line.quantity,
+      cost: inventoryTransactions
+        .filter((tx) =>
+          tx.menuItemId === item.id &&
+          tx.ingredientId === line.ingredientId &&
+          tx.referenceId &&
+          completedOrderIds.has(tx.referenceId) &&
+          (tx.type === 'sale' || tx.type === 'sale_reversal')
+        )
+        .reduce((sum, tx) => sum + (
+          tx.type === 'sale_reversal'
+            ? -(tx.totalCost ?? Math.abs(tx.quantity) * (tx.unitCost ?? 0))
+            : (tx.totalCost ?? Math.abs(tx.quantity) * (tx.unitCost ?? 0))
+        ), 0)
+    }))
+    const revenue = actual?.revenue ?? item.price
+    const profit = revenue - cost
+    return {
+      menuItemId: item.id,
+      nameAr: item.nameAr,
+      sellingPrice: revenue,
+      cost,
+      profit,
+      marginPercent: revenue > 0 ? profit / revenue * 100 : 0,
+      ingredients: breakdown
+    }
+  }).sort((a, b) => b.profit - a.profit)
+
   // ── Summary stats (always based on filtered range) ────────────────────
-  const totalRevenue = completed.reduce((s, o) => s + o.total, 0)
+  const totalRevenue = reportOrders.reduce((s, o) => s + o.total, 0)
   const todayOrders = allCompleted.filter((o) => dateKey(o.completedAt ?? o.createdAt) === today).length
   const todayRevenue = allCompleted
     .filter((o) => dateKey(o.completedAt ?? o.createdAt) === today)
@@ -145,6 +294,15 @@ export async function getFullReport(range: DateRange = 'all'): Promise<ReportDat
     daily,
     topItems,
     cashiers,
+    paymentMethods,
+    profitability,
+    filterOptions: {
+      shifts: Array.from(new Map(allCompleted.filter((order) => order.shiftId).map((order) => [
+        order.shiftId!,
+        { id: order.shiftId!, label: `${new Date(order.createdAt).toLocaleDateString('ar-EG')} - ${order.cashierName}` }
+      ])).values()),
+      devices: Array.from(new Set((await getCachedDocs<Payment>(COLLECTIONS.payments)).map((payment) => payment.deviceId).filter((value): value is string => Boolean(value))))
+    },
     summary: {
       totalOrders: completed.length,
       totalRevenue,

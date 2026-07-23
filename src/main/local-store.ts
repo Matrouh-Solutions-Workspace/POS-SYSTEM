@@ -9,6 +9,7 @@ import {
   statSync,
   unlinkSync
 } from 'node:fs'
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 const require = createRequire(import.meta.url)
 
 type DatabaseSync = {
@@ -44,6 +45,9 @@ export interface BackupSettings {
 const SETTINGS_COLLECTION = 'settings'
 const SETTINGS_DOC_ID = 'app'
 const DAY_MS = 86_400_000
+const SCHEMA_VERSION = 2
+const PASSWORD_HASH_VERSION = 'scrypt$v1'
+const SCRYPT_PARAMS = { N: 16_384, r: 8, p: 1, keyLength: 64 }
 
 function dbPath(): string {
   return join(app.getPath('userData'), 'offline-pos.sqlite')
@@ -102,7 +106,69 @@ function openDatabase(): DatabaseSync {
       updated_at INTEGER NOT NULL
     );
   `)
+
+  runMigrations(db)
+
   return db
+}
+
+function readSchemaVersion(database: DatabaseSync): number {
+  const row = database.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value?: string } | undefined
+  return Number(row?.value ?? 0) || 0
+}
+
+function writeSchemaVersion(database: DatabaseSync, version: number): void {
+  database.prepare(`
+    INSERT INTO meta (key, value)
+    VALUES ('schema_version', ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run(String(version))
+}
+
+function runMigrations(database: DatabaseSync): void {
+  const current = readSchemaVersion(database)
+  try {
+    database.exec('BEGIN IMMEDIATE')
+    if (current < 1) migrateIngredientStock(database)
+    if (current < 2) migratePasswordHashMetadata(database)
+    writeSchemaVersion(database, SCHEMA_VERSION)
+    database.exec('COMMIT')
+  } catch (e) {
+    try { database.exec('ROLLBACK') } catch { /* ignore */ }
+    console.error('Schema migration failed:', e)
+    throw e
+  }
+}
+
+function migrateIngredientStock(database: DatabaseSync): void {
+  const stockCountRow = database.prepare('SELECT COUNT(*) as c FROM ingredient_stock').get() as { c: number }
+  if (stockCountRow.c !== 0) return
+  const txRows = database.prepare(`SELECT payload_json FROM cached_documents WHERE collection_name = 'inventoryTransactions'`).all() as { payload_json: string }[]
+  const stockMap = new Map<string, number>()
+  for (const row of txRows) {
+    try {
+      const tx = JSON.parse(row.payload_json) as { ingredientId?: string; quantity?: number }
+      if (tx.ingredientId && typeof tx.quantity === 'number') {
+        stockMap.set(tx.ingredientId, (stockMap.get(tx.ingredientId) ?? 0) + tx.quantity)
+      }
+    } catch {
+      // Ignore malformed legacy transaction rows.
+    }
+  }
+  if (stockMap.size === 0) return
+  const insertStmt = database.prepare('INSERT INTO ingredient_stock (ingredient_id, quantity, updated_at) VALUES (?, ?, ?)')
+  const now = Date.now()
+  for (const [ingredientId, quantity] of stockMap.entries()) {
+    insertStmt.run(ingredientId, quantity, now)
+  }
+}
+
+function migratePasswordHashMetadata(database: DatabaseSync): void {
+  database.prepare(`
+    INSERT INTO meta (key, value)
+    VALUES ('password_hash_scheme', ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run(PASSWORD_HASH_VERSION)
 }
 
 function readSettingsNetworkMode(): string {
@@ -121,8 +187,12 @@ function readSettingsNetworkMode(): string {
   }
 }
 
+export function isMasterStoreMode(): boolean {
+  return readSettingsNetworkMode() === 'master'
+}
+
 function shouldEnqueueOutbox(): boolean {
-  return readSettingsNetworkMode() !== 'master'
+  return isMasterStoreMode()
 }
 
 function readSettingsDocument(): Record<string, unknown> | null {
@@ -193,7 +263,7 @@ export function initLocalStore(): LocalStoreStatus {
   try {
     const database = openDatabase()
     const row = database.prepare(
-      "SELECT COUNT(*) AS count FROM sync_outbox WHERE status = 'pending'"
+      "SELECT COUNT(*) AS count FROM sync_outbox WHERE status = 'pending' OR (status = 'failed' AND attempts < 10)"
     ).get() as { count?: number } | undefined
     return { ok: true, path: dbPath(), pendingOutbox: Number(row?.count ?? 0) }
   } catch (e) {
@@ -262,7 +332,7 @@ export function deleteCachedDocument(collectionName: string, documentId: string)
 }
 
 // ---------------------------------------------------------------------------
-// Sync outbox — queue writes that need to be uploaded to Firebase
+// Sync outbox — queue master-device writes for the configured HTTP API
 // ---------------------------------------------------------------------------
 
 export interface OutboxEntry {
@@ -278,7 +348,7 @@ export interface OutboxEntry {
   synced_at: number | null
 }
 
-/** Enqueue a document write for Firebase upload */
+/** Enqueue a document write for master-device API sync */
 export function enqueueOutbox(
   entityType: string,
   entityId: string,
@@ -352,7 +422,7 @@ export function resetFailedOutbox(): void {
 export function countPendingOutbox(): number {
   const database = openDatabase()
   const row = database.prepare(
-    "SELECT COUNT(*) AS count FROM sync_outbox WHERE status = 'pending'"
+    "SELECT COUNT(*) AS count FROM sync_outbox WHERE status = 'pending' OR (status = 'failed' AND attempts < 10)"
   ).get() as { count?: number } | undefined
   return Number(row?.count ?? 0)
 }
@@ -401,7 +471,7 @@ export interface BatchOperation {
 /**
  * Execute an array of document operations atomically.
  * All writes succeed together or all are rolled back.
- * Also enqueues every operation in the outbox for Firebase sync.
+ * Also enqueues every operation in the outbox for API sync on the master device.
  */
 export function executeBatch(operations: BatchOperation[]): { ok: boolean; error?: string } {
   if (!operations.length) return { ok: true }
@@ -468,13 +538,69 @@ export function executeBatch(operations: BatchOperation[]): { ok: boolean; error
   }
 }
 
+function normalizeUsername(username: string): string {
+  return username.toLowerCase().trim()
+}
+
+function legacyPasswordHash(username: string, password: string): string {
+  return createHash('sha256').update(`${normalizeUsername(username)}:${password}`).digest('hex')
+}
+
+function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString('base64url')
+  const derived = scryptSync(password, salt, SCRYPT_PARAMS.keyLength, {
+    N: SCRYPT_PARAMS.N,
+    r: SCRYPT_PARAMS.r,
+    p: SCRYPT_PARAMS.p,
+    maxmem: 64 * 1024 * 1024
+  }).toString('base64url')
+  return [
+    PASSWORD_HASH_VERSION,
+    SCRYPT_PARAMS.N,
+    SCRYPT_PARAMS.r,
+    SCRYPT_PARAMS.p,
+    salt,
+    derived
+  ].join('$')
+}
+
+function verifyPassword(storedHash: string, username: string, password: string): { ok: boolean; legacy: boolean } {
+  if (storedHash.startsWith(`${PASSWORD_HASH_VERSION}$`)) {
+    const [, , nRaw, rRaw, pRaw, salt, expectedRaw] = storedHash.split('$')
+    if (!salt || !expectedRaw) return { ok: false, legacy: false }
+    const expected = Buffer.from(expectedRaw, 'base64url')
+    const actual = scryptSync(password, salt, expected.length, {
+      N: Number(nRaw) || SCRYPT_PARAMS.N,
+      r: Number(rRaw) || SCRYPT_PARAMS.r,
+      p: Number(pRaw) || SCRYPT_PARAMS.p,
+      maxmem: 64 * 1024 * 1024
+    })
+    if (actual.length !== expected.length) return { ok: false, legacy: false }
+    return { ok: timingSafeEqual(actual, expected), legacy: false }
+  }
+
+  const stored = Buffer.from(storedHash)
+  const actual = Buffer.from(legacyPasswordHash(username, password))
+  return {
+    ok: stored.length === actual.length && timingSafeEqual(stored, actual),
+    legacy: true
+  }
+}
+
+export function hasAuthCredentials(): boolean {
+  const database = openDatabase()
+  const row = database.prepare('SELECT COUNT(*) AS count FROM seed_auth').get() as { count?: number } | undefined
+  return Number(row?.count ?? 0) > 0
+}
+
 export function storeAuthCredential(
   username: string,
-  passwordHash: string,
+  password: string,
   user: unknown
 ): { ok: boolean; error?: string } {
   try {
-    const normalized = username.toLowerCase().trim()
+    const normalized = normalizeUsername(username)
+    if (!normalized || !password) return { ok: false, error: 'Username and password are required' }
     const database = openDatabase()
     database.prepare(`
       INSERT INTO seed_auth (username, password_hash, user_json, updated_at)
@@ -483,8 +609,67 @@ export function storeAuthCredential(
       DO UPDATE SET password_hash = excluded.password_hash,
                     user_json = excluded.user_json,
                     updated_at = excluded.updated_at
-    `).run(normalized, passwordHash, JSON.stringify(user), Date.now())
+    `).run(normalized, hashPassword(password), JSON.stringify(user), Date.now())
     return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export function resetManagerLoginForDev(): {
+  ok: boolean
+  username?: string
+  password?: string
+  user?: unknown
+  error?: string
+} {
+  try {
+    const now = Date.now()
+    const username = 'manager'
+    const password = 'Manager123'
+    const users = readCachedDocuments('users') as Array<{
+      id?: string
+      email?: string
+      username?: string
+      displayName?: string
+      role?: string
+      active?: boolean
+      createdAt?: number
+      updatedAt?: number
+      permissions?: string[]
+      allowCashRounding?: boolean
+      maxCashRoundingDifference?: number
+      [key: string]: unknown
+    }>
+    const existing = users.find((user) => user.role === 'manager' && normalizeUsername(user.username ?? '') === username)
+      ?? users.find((user) => user.role === 'manager' && normalizeUsername(user.username ?? '') === 'admin')
+      ?? users.find((user) => user.role === 'manager')
+
+    const user = {
+      ...(existing ?? {}),
+      id: existing?.id ?? 'local_manager',
+      email: `${username}@abdokofta.local`,
+      username,
+      displayName: existing?.displayName || 'المدير',
+      role: 'manager',
+      permissions: existing?.permissions ?? [
+        'pos', 'order_history', 'cashier_inventory',
+        'view_reports', 'manage_shifts', 'manage_menu',
+        'manage_purchases', 'manage_suppliers',
+        'manage_accounts', 'manage_settings'
+      ],
+      allowCashRounding: existing?.allowCashRounding ?? true,
+      maxCashRoundingDifference: existing?.maxCashRoundingDifference ?? 5,
+      active: true,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now
+    }
+
+    cacheDocuments('users', [{ id: user.id, data: user }])
+    deleteAuthCredentialForUser(user.id)
+    const credential = storeAuthCredential(username, password, user)
+    if (!credential.ok) return { ok: false, error: credential.error }
+    return { ok: true, username, password, user }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
@@ -492,23 +677,33 @@ export function storeAuthCredential(
 
 export function verifyAuthCredential(
   username: string,
-  passwordHash: string
+  password: string
 ): { ok: boolean; user?: unknown; error?: string } {
   try {
-    const normalized = username.toLowerCase().trim()
+    const normalized = normalizeUsername(username)
     const database = openDatabase()
     const row = database.prepare(`
-      SELECT user_json
+      SELECT password_hash, user_json
       FROM seed_auth
-      WHERE username = ? AND password_hash = ?
-    `).get(normalized, passwordHash) as { user_json?: string } | undefined
+      WHERE username = ?
+    `).get(normalized) as { password_hash?: string; user_json?: string } | undefined
     if (!row?.user_json) return { ok: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' }
+    if (!row.password_hash) return { ok: false, error: 'Invalid credential record' }
+    const passwordResult = verifyPassword(row.password_hash, normalized, password)
+    if (!passwordResult.ok) return { ok: false, error: 'Ø§Ø³Ù… Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… Ø£Ùˆ ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± ØºÙŠØ± ØµØ­ÙŠØ­Ø©' }
     const storedUser = JSON.parse(row.user_json) as { id?: string; active?: boolean }
     const current = storedUser.id
       ? readCachedDocument('users', storedUser.id) as ({ active?: boolean } | null)
       : null
     const user = current ?? storedUser
     if (user && user.active === false) return { ok: false, error: 'الحساب غير نشط' }
+    if (passwordResult.legacy) {
+      database.prepare(`
+        UPDATE seed_auth
+        SET password_hash = ?, user_json = ?, updated_at = ?
+        WHERE username = ?
+      `).run(hashPassword(password), JSON.stringify(user), Date.now(), normalized)
+    }
     return { ok: true, user }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -659,12 +854,45 @@ export function restoreDatabase(sourcePath: string): { ok: boolean; error?: stri
   if (!existsSync(sourcePath)) {
     return { ok: false, error: 'ملف النسخ الاحتياطي غير موجود' }
   }
+  
+  const targetPath = dbPath()
+  const tempPath = targetPath + '.temp_restore'
+  const bakPath = targetPath + '.bak'
+
   try {
-    // Close the connection so we can replace the file
-    db = null
-    copyFileSync(sourcePath, dbPath())
+    // 1. Copy to temp and verify integrity
+    copyFileSync(sourcePath, tempPath)
+    const sqlite = require('node:sqlite') as { DatabaseSync: new (path: string) => { exec: (s: string) => void; prepare: (s: string) => { get: () => unknown } } }
+    let tempDb: any
+    try {
+      tempDb = new sqlite.DatabaseSync(tempPath)
+      const integrity = tempDb.prepare('PRAGMA integrity_check').get() as { integrity_check: string }
+      if (integrity?.integrity_check !== 'ok') {
+        throw new Error('فشل فحص سلامة الملف (Corrupted database)')
+      }
+    } finally {
+      if (tempDb) tempDb = null // node:sqlite closes when GC'd or explicit close not available in this simplified wrapper
+    }
+
+    // 2. Backup current production DB just in case
+    if (existsSync(targetPath)) {
+      db = null // close current connection
+      copyFileSync(targetPath, bakPath)
+    }
+
+    // 3. Move temp to target
+    copyFileSync(tempPath, targetPath)
+    unlinkSync(tempPath)
+
     return { ok: true }
   } catch (e) {
+    // Rollback if something failed
+    try {
+      if (existsSync(bakPath)) copyFileSync(bakPath, targetPath)
+      if (existsSync(tempPath)) unlinkSync(tempPath)
+    } catch (rollbackErr) {
+      // ignore rollback errors
+    }
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }

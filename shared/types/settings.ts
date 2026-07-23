@@ -10,8 +10,28 @@ export interface AppSettings {
   nextOrderNumber: number
   /** VAT/tax percentage — 0 means no tax. e.g. 14 = 14% */
   taxRate?: number
+  taxApplicationMode?: 'all' | 'selected'
+  taxOrderTypes?: Array<'takeaway' | 'dine_in' | 'delivery'>
+  /** Service percentage — 0 means disabled. */
+  serviceRate?: number
+  serviceApplicationMode?: 'all' | 'selected'
+  serviceOrderTypes?: Array<'takeaway' | 'dine_in' | 'delivery'>
   /** Default delivery fee added to delivery orders */
   defaultDeliveryFee?: number
+  /** Enforce employee work schedules for cashier login and POS activity. */
+  shiftManagementEnabled?: boolean
+  /** Collect employee activity and expose performance/accuracy reports. */
+  employeePerformanceTrackingEnabled?: boolean
+  /** Earliest timestamp included in performance collection after enabling. */
+  employeePerformanceTrackingStartedAt?: number
+  /** Enables discounts in POS checkout. When false, no user can apply discounts. */
+  discountsEnabled?: boolean
+  /** Allow controlled reductions to cash transaction totals. */
+  cashRoundingEnabled?: boolean
+  /** Global maximum amount that may be removed from a cash total. */
+  maxCashRoundingDifference?: number
+  /** Nearest cash step used by automatic cash rounding, e.g. 1, 5, or 10. */
+  cashRoundingIncrement?: number
   /**
    * Maximum discount % a cashier can apply without manager override.
    * undefined or 100 means no limit.

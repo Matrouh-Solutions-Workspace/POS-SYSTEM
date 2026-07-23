@@ -17,6 +17,7 @@ const PurchasesPage  = lazy(() => import('@renderer/features/manager/PurchasesPa
 const AccountsPage         = lazy(() => import('@renderer/features/manager/AccountsPage').then((m) => ({ default: m.AccountsPage })))
 const ShiftsPage           = lazy(() => import('@renderer/features/manager/ShiftsPage').then((m) => ({ default: m.ShiftsPage })))
 const SuppliersPage        = lazy(() => import('@renderer/features/manager/SuppliersPage').then((m) => ({ default: m.SuppliersPage })))
+const ContactsPage         = lazy(() => import('@renderer/features/manager/ContactsPage').then((m) => ({ default: m.ContactsPage })))
 const ReportsPage          = lazy(() => import('@renderer/features/manager/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const SettingsPage         = lazy(() => import('@renderer/features/manager/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 const CashierHistoryPage   = lazy(() => import('@renderer/features/manager/CashierHistoryPage').then((m) => ({ default: m.CashierHistoryPage })))
@@ -31,6 +32,7 @@ const PAGE_MAP: Record<string, React.ComponentType> = {
   '/manager/cashiers':        AccountsPage,
   '/manager/shifts':          ShiftsPage,
   '/manager/suppliers':       SuppliersPage,
+  '/manager/contacts':        ContactsPage,
   '/manager/reports':         ReportsPage,
   '/manager/settings':        SettingsPage,
   '/manager/cashier-history': CashierHistoryPage,

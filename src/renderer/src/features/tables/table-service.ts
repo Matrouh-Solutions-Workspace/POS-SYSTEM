@@ -50,10 +50,23 @@ export async function listTablesByFloor(floorId: string): Promise<DiningTable[]>
   return all.filter((t) => t.floorId === floorId && t.active)
 }
 
+function normalizeTableName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('ar-EG')
+}
+
 export async function saveDiningTable(
   input: Partial<DiningTable> & Pick<DiningTable, 'nameAr'>
 ): Promise<DiningTable> {
   const now = Date.now()
+  const normalizedName = normalizeTableName(input.nameAr)
+  if (!normalizedName) throw new Error('اسم الترابيزة مطلوب')
+  const existing = await getCachedDocs<DiningTable>(COLLECTIONS.diningTables)
+  const duplicate = existing.find((table) =>
+    table.id !== input.id &&
+    table.active !== false &&
+    normalizeTableName(table.nameAr) === normalizedName
+  )
+  if (duplicate) throw new Error('يوجد ترابيزة بنفس الاسم بالفعل')
   const table: DiningTable = {
     id: input.id ?? generateId(),
     nameAr: input.nameAr.trim(),

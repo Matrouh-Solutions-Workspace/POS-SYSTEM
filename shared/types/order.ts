@@ -24,10 +24,18 @@ export interface Order {
   discountAmount?: number  // computed discount amount stored for receipts
   taxRate?: number         // percentage e.g. 14 for 14% VAT
   taxAmount?: number       // computed tax amount stored for receipts
+  serviceRate?: number     // percentage e.g. 12 for service charge
+  serviceAmount?: number   // computed service amount stored for receipts
   deliveryFee?: number
-  total: number            // subtotal - discountAmount + taxAmount + deliveryFee
+  total: number            // subtotal - discountAmount + taxAmount + serviceAmount + deliveryFee
+  originalTotal?: number
+  roundingDifference?: number
+  roundingReason?: string
+  cashPaidAmount?: number
+  cashChangeAmount?: number
   noteAr?: string
   // Delivery customer info
+  contactId?: string
   customerName?: string
   customerPhone?: string
   customerAddress?: string
@@ -40,6 +48,21 @@ export interface Order {
   cancelledBy?: string
   cancelReasonAr?: string
   cancelInventoryMode?: 'return' | 'waste'
+  /** Original order for full or partial refund records. */
+  refundOfOrderId?: string
+}
+
+export interface DeliveryContact {
+  id: string
+  name: string
+  phone: string
+  normalizedPhone: string
+  address?: string
+  notes?: string
+  createdAt: number
+  updatedAt: number
+  lastOrderId?: string
+  lastOrderAt?: number
 }
 
 export interface OrderItem {
@@ -61,6 +84,11 @@ export interface Payment {
   id: string
   orderId: string
   amount: number
+  paidAmount?: number
+  changeAmount?: number
+  employeeId?: string
+  shiftId?: string
+  deviceId?: string
   method: 'cash' | 'card'
   createdAt: number
 }

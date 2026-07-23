@@ -2,7 +2,7 @@
  * SQLite primary database layer.
  *
  * All reads and writes go through these helpers first.
- * Firebase is only used for background upload via the sync outbox.
+ * Optional cloud replication is handled through the master-device API outbox.
  */
 
 // ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@ export async function dbGet<T>(collectionName: string, id: string): Promise<T | 
 // ---------------------------------------------------------------------------
 
 /**
- * Upsert one or more documents into SQLite **and** enqueue them for Firebase upload.
+ * Upsert one or more documents into SQLite and enqueue them for API sync when applicable.
  */
 export async function dbSave<T extends { id: string }>(
   collectionName: string,
@@ -39,20 +39,20 @@ export async function dbSave<T extends { id: string }>(
     arr.map((d) => ({ id: d.id, data: d }))
   )
 
-  // 2. Enqueue for Firebase background upload (fire-and-forget)
+  // 2. Enqueue for background API sync (fire-and-forget)
   for (const doc of arr) {
     void window.electronAPI.outboxEnqueue(collectionName, doc.id, 'set', doc)
   }
 }
 
 /**
- * Delete a document from SQLite **and** enqueue the deletion for Firebase.
+ * Delete a document from SQLite and enqueue the deletion for API sync.
  */
 export async function dbDelete(collectionName: string, id: string): Promise<void> {
   // 1. Delete from SQLite (primary)
   await window.electronAPI.deleteCachedDocument(collectionName, id)
 
-  // 2. Enqueue deletion for Firebase background upload (fire-and-forget)
+  // 2. Enqueue deletion for background API sync (fire-and-forget)
   void window.electronAPI.outboxEnqueue(collectionName, id, 'delete', { id })
 }
 
@@ -70,7 +70,7 @@ export interface DbBatchOp {
 /**
  * Execute multiple document operations atomically in a single SQLite transaction.
  * If any operation fails the entire batch is rolled back.
- * Also enqueues all operations to the Firebase outbox inside the same transaction.
+ * Also enqueues all operations to the API outbox inside the same transaction.
  *
  * Use this for any multi-table write (order + items + payments + inventory + cash drawer).
  */

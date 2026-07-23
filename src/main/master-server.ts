@@ -12,13 +12,15 @@ import {
 import {
   cacheDocuments,
   deleteCachedDocument,
+  enqueueOutbox,
   executeBatch,
   readCachedDocument,
   readCachedDocuments,
   readIngredientStocks,
   verifyAuthCredential,
   storeAuthCredential,
-  deleteAuthCredentialForUser
+  deleteAuthCredentialForUser,
+  hasAuthCredentials
 } from './local-store'
 import { getLicenseStatus } from './license'
 import { readLatestUpdateYml, resolveUpdateArtifact } from './master-update-artifacts'
@@ -190,6 +192,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
     if (!requireDevice(req, res)) return
 
+    if (req.method === 'GET' && url.pathname === '/pairing-status') {
+      ok(res, { paired: true, serverTime: Date.now() })
+      return
+    }
+
     if (req.method === 'GET' && (url.pathname === '/updates' || url.pathname === '/updates/latest.yml')) {
       const latest = readLatestUpdateYml()
       if (!latest) {
@@ -206,15 +213,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return
     }
 
+    if (req.method === 'POST' && url.pathname === '/auth/has-users') {
+      ok(res, { ok: true, hasUsers: hasAuthCredentials() })
+      return
+    }
+
     if (req.method === 'POST' && url.pathname === '/auth/login') {
-      const body = await readBody(req) as { username?: string; passwordHash?: string }
-      ok(res, verifyAuthCredential(body.username ?? '', body.passwordHash ?? ''))
+      const body = await readBody(req) as { username?: string; password?: string; passwordHash?: string }
+      ok(res, verifyAuthCredential(body.username ?? '', body.password ?? body.passwordHash ?? ''))
       return
     }
 
     if (req.method === 'POST' && url.pathname === '/auth/store-credential') {
-      const body = await readBody(req) as { username?: string; passwordHash?: string; user?: unknown }
-      ok(res, storeAuthCredential(body.username ?? '', body.passwordHash ?? '', body.user))
+      const body = await readBody(req) as { username?: string; password?: string; passwordHash?: string; user?: unknown }
+      ok(res, storeAuthCredential(body.username ?? '', body.password ?? body.passwordHash ?? '', body.user))
       return
     }
 
@@ -235,14 +247,22 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         collectionName?: string
         documents?: Array<{ id: string; data: unknown }>
       }
-      cacheDocuments(body.collectionName ?? '', body.documents ?? [])
+      const collectionName = body.collectionName ?? ''
+      const documents = body.documents ?? []
+      cacheDocuments(collectionName, documents)
+      for (const document of documents) {
+        enqueueOutbox(collectionName, document.id, 'set', document.data)
+      }
       ok(res, { ok: true })
       return
     }
 
     if (req.method === 'POST' && url.pathname === '/db/delete') {
       const body = await readBody(req) as { collectionName?: string; documentId?: string }
-      const deleted = deleteCachedDocument(body.collectionName ?? '', body.documentId ?? '')
+      const collectionName = body.collectionName ?? ''
+      const documentId = body.documentId ?? ''
+      const deleted = deleteCachedDocument(collectionName, documentId)
+      if (documentId) enqueueOutbox(collectionName, documentId, 'delete', { id: documentId })
       if (body.collectionName === 'users' && body.documentId) deleteAuthCredentialForUser(body.documentId)
       ok(res, { ok: true, deleted })
       return

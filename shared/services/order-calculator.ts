@@ -1,4 +1,4 @@
-import type { DiscountType } from '../types/order'
+import type { DiscountType, OrderType } from '../types/order'
 
 export interface CartLineInput {
   unitPrice: number
@@ -38,12 +38,57 @@ export function computeTax(afterDiscount: number, taxRate?: number): number {
   return Math.round(afterDiscount * taxRate) / 100
 }
 
-/** Full order total: subtotal − discount + tax + deliveryFee */
+export function taxAppliesToOrderType(
+  orderType: OrderType,
+  taxApplicationMode?: 'all' | 'selected',
+  taxOrderTypes?: OrderType[]
+): boolean {
+  if (taxApplicationMode !== 'selected') return true
+  return (taxOrderTypes ?? []).includes(orderType)
+}
+
+export function effectiveTaxRate(
+  taxRate: number | undefined,
+  orderType: OrderType,
+  taxApplicationMode?: 'all' | 'selected',
+  taxOrderTypes?: OrderType[]
+): number {
+  if (!taxRate || taxRate <= 0) return 0
+  return taxAppliesToOrderType(orderType, taxApplicationMode, taxOrderTypes) ? taxRate : 0
+}
+
+export function serviceAppliesToOrderType(
+  orderType: OrderType,
+  serviceApplicationMode?: 'all' | 'selected',
+  serviceOrderTypes?: OrderType[]
+): boolean {
+  if (serviceApplicationMode !== 'selected') return true
+  return (serviceOrderTypes ?? []).includes(orderType)
+}
+
+export function effectiveServiceRate(
+  serviceRate: number | undefined,
+  orderType: OrderType,
+  serviceApplicationMode?: 'all' | 'selected',
+  serviceOrderTypes?: OrderType[]
+): number {
+  if (!serviceRate || serviceRate <= 0) return 0
+  return serviceAppliesToOrderType(orderType, serviceApplicationMode, serviceOrderTypes) ? serviceRate : 0
+}
+
+/** Compute service amount from (subtotal - discount) */
+export function computeService(afterDiscount: number, serviceRate?: number): number {
+  if (!serviceRate || serviceRate <= 0) return 0
+  return Math.round(afterDiscount * serviceRate) / 100
+}
+
+/** Full order total: subtotal − discount + tax + service + deliveryFee */
 export function orderTotal(
   subtotal: number,
   discountAmount = 0,
   taxAmount = 0,
-  deliveryFee = 0
+  deliveryFee = 0,
+  serviceAmount = 0
 ): number {
-  return Math.round((subtotal - discountAmount + taxAmount + deliveryFee) * 100) / 100
+  return Math.round((subtotal - discountAmount + taxAmount + serviceAmount + deliveryFee) * 100) / 100
 }

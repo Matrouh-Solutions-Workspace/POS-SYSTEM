@@ -5,16 +5,20 @@ node_modules
 dist
 out
 .next
+.release-notes
 
 # Electron build output
 release
 
 # Secrets & local config
+.env
 .env.local
 service-account.json
 **/service-account*.json
 license-private-key.pem
 license-public-key.pem.tmp
+build/updater-token.generated.nsh
+build/updater-auth.generated.json
 activation_request.dat
 license.dat
 
@@ -36,6 +40,9 @@ Thumbs.db
 
 # Kiro AI
 .kiro
+
+# Activation-Site is its own separate repo
+Activation-Site/
 
 # TypeScript build cache
 *.tsbuildinfo

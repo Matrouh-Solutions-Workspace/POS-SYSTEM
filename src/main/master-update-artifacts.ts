@@ -88,7 +88,7 @@ function quoteYaml(value: string): string {
 function buildLatestYml(info: UpdateInfo, fileName: string, size: number): string {
   const fileInfo = info.files?.[0]
   const sha512 = fileInfo?.sha512 ?? info.sha512
-  if (!sha512) throw new Error('Downloaded update is missing sha512 metadata')
+  if (!sha512) throw new Error('ملف التحديث لا يحتوي على بيانات التحقق المطلوبة')
 
   return [
     `version: ${quoteYaml(info.version)}`,
@@ -106,7 +106,7 @@ function buildLatestYml(info: UpdateInfo, fileName: string, size: number): strin
 export function publishDownloadedUpdateForMaster(event: UpdateDownloadedEvent): void {
   const source = event.downloadedFile
   if (!source || !existsSync(source)) {
-    throw new Error('Downloaded update file is not available for LAN publishing')
+    throw new Error('ملف التحديث الذي تم تنزيله غير متاح للنشر على الشبكة المحلية')
   }
 
   const targetDir = getMasterUpdatesDirectory()

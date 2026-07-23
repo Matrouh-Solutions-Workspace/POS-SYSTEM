@@ -22,7 +22,7 @@ import {
   deleteAccount
 } from '@renderer/features/auth/auth-service'
 import { useAuthStore } from '@renderer/features/auth/auth-store'
-import { ConfirmDeleteButton } from '@renderer/components/ConfirmDeleteButton'
+import { ConfirmDialog, FormModal, FormField } from '@renderer/components/ui'
 import { PasswordInput } from '@renderer/components/PasswordInput'
 import { hashPin } from '@renderer/features/auth/pin-store'
 import { MdEdit, MdCheck, MdClose, MdLock, MdPeople, MdShield, MdAdd, MdPerson, MdExpandMore, MdExpandLess } from 'react-icons/md'
@@ -48,7 +48,6 @@ function PermissionPicker({
 
   function setAll(perms: Permission[]): void {
     if (disabled) return
-    // Toggle group: if all checked → uncheck all, else check all
     const allChecked = perms.every((p) => value.includes(p))
     if (allChecked) {
       onChange(value.filter((p) => !perms.includes(p)))
@@ -131,100 +130,110 @@ function PresetBar({ onSelect }: { onSelect: (perms: Permission[]) => void }): R
   )
 }
 
-// ── Create account form ─────────────────────────────────────────────────────
+// ── Create account modal ─────────────────────────────────────────────────────
 
-function CreateAccountForm({ currentUser, onCreated, onCancel }: {
+function CreateAccountModal({ open, currentUser, onCreated, onClose }: {
+  open: boolean
   currentUser: AppUser
   onCreated: (msg: string) => Promise<void>
-  onCancel: () => void
+  onClose: () => void
 }): React.ReactElement {
   const [form, setForm] = useState({
     username: '', displayName: '', cashierCode: '', password: '',
     role: 'cashier' as UserRole
   })
   const [perms, setPerms] = useState<Permission[]>([...ROLE_PRESET_PERMISSIONS.cashier])
-  const [error, setError] = useState('')
-  const [saving, setSaving] = useState(false)
+  const [allowCashRounding, setAllowCashRounding] = useState(false)
+  const [maxCashRoundingDifference, setMaxCashRoundingDifference] = useState('')
+
+  // reset on open
+  useEffect(() => {
+    if (open) {
+      setForm({ username: '', displayName: '', cashierCode: '', password: '', role: 'cashier' })
+      setPerms([...ROLE_PRESET_PERMISSIONS.cashier])
+      setAllowCashRounding(false)
+      setMaxCashRoundingDifference('')
+    }
+  }, [open])
 
   function handleRoleChange(role: UserRole): void {
     setForm((f) => ({ ...f, role }))
-    // Auto-fill permissions from preset, but keep it editable
     setPerms([...ROLE_PRESET_PERMISSIONS[role]])
   }
 
-  async function handleSubmit(e: FormEvent): Promise<void> {
-    e.preventDefault()
-    setError('')
+  async function handleSubmit(): Promise<void> {
     if (form.username.includes('@') || form.username.includes(' ')) {
-      setError('اسم المستخدم لا يمكن أن يحتوي على @ أو مسافات')
-      return
+      throw new Error('اسم المستخدم لا يمكن أن يحتوي على @ أو مسافات')
     }
-    if (form.password.length < 6) { setError('كلمة المرور يجب أن تكون 6 أحرف على الأقل'); return }
-    if (perms.length === 0) { setError('اختر صلاحية واحدة على الأقل'); return }
-    setSaving(true)
-    try {
-      await createAccount(
-        {
-          username: form.username.trim(),
-          displayName: form.displayName.trim(),
-          cashierCode: form.cashierCode.trim().toUpperCase() || undefined,
-          role: form.role,
-          permissions: perms,
-          password: form.password
-        },
-        currentUser.id
-      )
-      await onCreated(`تم إنشاء حساب "${form.displayName}" بنجاح`)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'فشل إنشاء الحساب')
-    } finally {
-      setSaving(false)
-    }
+    if (form.password.length < 6) { throw new Error('كلمة المرور يجب أن تكون 6 أحرف على الأقل') }
+    if (perms.length === 0) { throw new Error('اختر صلاحية واحدة على الأقل') }
+    
+    await createAccount(
+      {
+        username: form.username.trim(),
+        displayName: form.displayName.trim(),
+        cashierCode: form.cashierCode.trim().toUpperCase() || undefined,
+        role: form.role,
+        permissions: perms,
+        allowCashRounding,
+        maxCashRoundingDifference: allowCashRounding && maxCashRoundingDifference
+          ? Number(maxCashRoundingDifference)
+          : undefined,
+        password: form.password
+      },
+      currentUser.id
+    )
+    await onCreated(`تم إنشاء حساب "${form.displayName}" بنجاح`)
   }
 
   return (
-    <div className="card accounts-form-card">
-      <h2 className="card__title"><MdAdd /> إنشاء حساب جديد</h2>
-      <form onSubmit={(e) => void handleSubmit(e)}>
-        {/* Basic info */}
-        <div className="settings-form-grid" style={{ marginBottom: 16 }}>
-          <label className="field">
-            <span>الاسم الكامل</span>
-            <input value={form.displayName} onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))} placeholder="مثال: أحمد محمد" required />
-          </label>
-          <label className="field">
-            <span>اسم المستخدم (للدخول)</span>
-            <input dir="ltr" value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} placeholder="ahmed" required autoComplete="off" />
-          </label>
-          <label className="field">
-            <span>كود الإيصال (2 حرف/رقم — اختياري)</span>
-            <input value={form.cashierCode} onChange={(e) => setForm((f) => ({ ...f, cashierCode: e.target.value.toUpperCase().slice(0, 2) }))} placeholder="AA" dir="ltr" maxLength={2} />
-          </label>
-          <label className="field">
-            <span>كلمة المرور</span>
-            <PasswordInput value={form.password} onChange={(v) => setForm((f) => ({ ...f, password: v }))} autoComplete="new-password" required />
-          </label>
-        </div>
+    <FormModal
+      open={open}
+      onClose={onClose}
+      entityName="حساب"
+      onSubmit={handleSubmit}
+      maxWidth={700}
+    >
+      <div className="settings-form-grid mb-16">
+        <FormField label="الاسم الكامل" required>
+          <input value={form.displayName} onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))} placeholder="مثال: أحمد محمد" required autoFocus />
+        </FormField>
+        <FormField label="اسم المستخدم (للدخول)" required>
+          <input dir="ltr" value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} placeholder="ahmed" required autoComplete="off" />
+        </FormField>
+        <FormField label="كود الإيصال (2 حرف/رقم — اختياري)">
+          <input value={form.cashierCode} onChange={(e) => setForm((f) => ({ ...f, cashierCode: e.target.value.toUpperCase().slice(0, 2) }))} placeholder="AA" dir="ltr" maxLength={2} />
+        </FormField>
+        <FormField label="الدور" required>
+          <select value={form.role} onChange={(e) => handleRoleChange(e.target.value as UserRole)}>
+            {(Object.entries(ROLE_LABELS) as [UserRole, string][]).map(([role, label]) => (
+              <option key={role} value={role}>{label}</option>
+            ))}
+          </select>
+        </FormField>
+        <FormField label="كلمة المرور" required>
+          <PasswordInput value={form.password} onChange={(v) => setForm((f) => ({ ...f, password: v }))} autoComplete="new-password" required />
+        </FormField>
+      </div>
 
-        {/* Permissions */}
-        <div className="perm-section">
-          <div className="perm-section__header">
-            <strong>الصلاحيات</strong>
-            <span className="perm-count">{perms.length} من {Object.keys(PERMISSION_LABELS).length}</span>
-          </div>
-          <PresetBar onSelect={setPerms} />
-          <PermissionPicker value={perms} onChange={setPerms} />
+      <div className="perm-section">
+        <div className="perm-section__header">
+          <strong>الصلاحيات</strong>
+          <span className="perm-count">{perms.length} من {Object.keys(PERMISSION_LABELS).length}</span>
         </div>
-
-        {error && <p className="form-error">{error}</p>}
-        <div className="form-actions">
-          <button type="submit" className="btn btn--primary" disabled={saving}>
-            {saving ? 'جارٍ الإنشاء...' : 'إنشاء الحساب'}
-          </button>
-          <button type="button" className="btn btn--secondary" onClick={onCancel}>إلغاء</button>
+        <PresetBar onSelect={setPerms} />
+        <PermissionPicker value={perms} onChange={setPerms} />
+        <div className="settings-form-grid mt-12">
+          <label className="field field--checkbox">
+            <input type="checkbox" checked={allowCashRounding} onChange={(event) => setAllowCashRounding(event.target.checked)} />
+            <span>السماح بتقريب الدفع النقدي</span>
+          </label>
+          <FormField label="حد الموظف (فارغ = الحد العام)">
+            <input type="number" min="0" step="0.01" disabled={!allowCashRounding} value={maxCashRoundingDifference} onChange={(event) => setMaxCashRoundingDifference(event.target.value)} placeholder="مثال: 5.00" />
+          </FormField>
         </div>
-      </form>
-    </div>
+      </div>
+    </FormModal>
   )
 }
 
@@ -247,19 +256,21 @@ function AccountCard({ account, currentUser, onRefresh, setMessage }: {
   const isMe = account.id === currentUser.id
   const [editMode, setEditMode] = useState<EditMode>(null)
   const [expanded, setExpanded] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
 
   // Profile edit state
   const [editName, setEditName] = useState(account.displayName)
   const [editCode, setEditCode] = useState(account.cashierCode ?? '')
   const [editPerms, setEditPerms] = useState<Permission[]>(getUserPermissions(account))
+  const [editAllowCashRounding, setEditAllowCashRounding] = useState(account.allowCashRounding ?? false)
+  const [editMaxCashRoundingDifference, setEditMaxCashRoundingDifference] = useState(
+    account.maxCashRoundingDifference != null ? String(account.maxCashRoundingDifference) : ''
+  )
 
   // Password edit
   const [editPassword, setEditPassword] = useState('')
   // PIN edit
   const [editPin, setEditPin] = useState('')
-
-  const [editError, setEditError] = useState('')
-  const [editSaving, setEditSaving] = useState(false)
 
   function startEdit(mode: EditMode): void {
     setEditMode(mode)
@@ -267,68 +278,51 @@ function AccountCard({ account, currentUser, onRefresh, setMessage }: {
       setEditName(account.displayName)
       setEditCode(account.cashierCode ?? '')
       setEditPerms(getUserPermissions(account))
+      setEditAllowCashRounding(account.allowCashRounding ?? false)
+      setEditMaxCashRoundingDifference(account.maxCashRoundingDifference != null ? String(account.maxCashRoundingDifference) : '')
     }
     setEditPassword('')
     setEditPin('')
-    setEditError('')
   }
 
   function cancelEdit(): void {
     setEditMode(null)
-    setEditError('')
   }
 
   async function saveProfile(): Promise<void> {
-    if (!editName.trim()) return
-    if (editPerms.length === 0) { setEditError('اختر صلاحية واحدة على الأقل'); return }
-    setEditSaving(true)
-    try {
-      await updateUserProfile(account.id, {
-        displayName: editName.trim(),
-        cashierCode: editCode.trim().toUpperCase() || undefined,
-        permissions: account.role === 'manager' ? undefined : editPerms
-      })
-      setMessage('تم تعديل بيانات الحساب')
-      cancelEdit()
-      await onRefresh()
-    } catch (e) {
-      setEditError(e instanceof Error ? e.message : 'فشل')
-    } finally {
-      setEditSaving(false)
-    }
+    if (!editName.trim()) throw new Error('الاسم مطلوب')
+    if (editPerms.length === 0) { throw new Error('اختر صلاحية واحدة على الأقل') }
+    
+    await updateUserProfile(account.id, {
+      displayName: editName.trim(),
+      cashierCode: editCode.trim().toUpperCase() || undefined,
+      permissions: account.role === 'manager' ? undefined : editPerms,
+      allowCashRounding: account.role === 'manager' ? true : editAllowCashRounding,
+      maxCashRoundingDifference: editAllowCashRounding && editMaxCashRoundingDifference
+        ? Number(editMaxCashRoundingDifference)
+        : undefined
+    }, currentUser)
+    setMessage('تم تعديل بيانات الحساب')
+    cancelEdit()
+    await onRefresh()
   }
 
   async function savePassword(): Promise<void> {
-    if (editPassword.length < 6) { setEditError('كلمة المرور يجب أن تكون 6 أحرف على الأقل'); return }
-    setEditSaving(true)
-    try {
-      await resetCashierPassword(account.id, editPassword)
-      setMessage('تم تغيير كلمة المرور')
-      cancelEdit()
-    } catch (e) {
-      setEditError(e instanceof Error ? e.message : 'فشل')
-    } finally {
-      setEditSaving(false)
-    }
+    if (editPassword.length < 6) { throw new Error('كلمة المرور يجب أن تكون 6 أحرف على الأقل') }
+    await resetCashierPassword(account.id, editPassword, currentUser)
+    setMessage('تم تغيير كلمة المرور')
+    cancelEdit()
   }
 
   async function savePin(): Promise<void> {
     if (editPin && (editPin.length !== 4 || !/^\d{4}$/.test(editPin))) {
-      setEditError('رمز PIN يجب أن يكون 4 أرقام')
-      return
+      throw new Error('رمز PIN يجب أن يكون 4 أرقام')
     }
-    setEditSaving(true)
-    try {
-      const pinHash = editPin ? await hashPin(editPin) : undefined
-      await updateUserProfile(account.id, { pinHash })
-      setMessage(editPin ? 'تم تعيين PIN' : 'تم حذف PIN')
-      cancelEdit()
-      await onRefresh()
-    } catch (e) {
-      setEditError(e instanceof Error ? e.message : 'فشل')
-    } finally {
-      setEditSaving(false)
-    }
+    const pinHash = editPin ? await hashPin(editPin) : undefined
+    await updateUserProfile(account.id, { pinHash }, currentUser)
+    setMessage(editPin ? 'تم تعيين PIN' : 'تم حذف PIN')
+    cancelEdit()
+    await onRefresh()
   }
 
   const effectivePerms = getUserPermissions(account)
@@ -349,23 +343,24 @@ function AccountCard({ account, currentUser, onRefresh, setMessage }: {
           <span className={ROLE_BADGE_CLASS[account.role]}>{ROLE_LABELS[account.role]}</span>
           {account.cashierCode && <span className="code-badge" dir="ltr">{account.cashierCode}</span>}
           {account.pinHash && <span className="pin-badge">PIN ✓</span>}
+          {(account.role === 'manager' || account.allowCashRounding) && (
+            <span className="code-badge">تقريب نقدي{account.maxCashRoundingDifference != null ? ` ≤ ${account.maxCashRoundingDifference}` : ''}</span>
+          )}
           <span className="perm-count-badge">{effectivePerms.length} صلاحية</span>
         </div>
       </div>
 
       {/* Permissions summary (collapsed/expanded) */}
-      {!editMode && (
-        <button
-          type="button"
-          className="perm-summary-toggle"
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? <MdExpandLess /> : <MdExpandMore />}
-          {expanded ? 'إخفاء الصلاحيات' : 'عرض الصلاحيات'}
-        </button>
-      )}
+      <button
+        type="button"
+        className="perm-summary-toggle"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        {expanded ? <MdExpandLess /> : <MdExpandMore />}
+        {expanded ? 'إخفاء الصلاحيات' : 'عرض الصلاحيات'}
+      </button>
 
-      {!editMode && expanded && (
+      {expanded && (
         <div className="perm-summary">
           {PERMISSION_GROUPS.map((group) => {
             const granted = group.perms.filter((p) => effectivePerms.includes(p))
@@ -384,96 +379,121 @@ function AccountCard({ account, currentUser, onRefresh, setMessage }: {
         </div>
       )}
 
-      {/* Edit mode: profile + permissions */}
-      {editMode === 'profile' && (
-        <div className="account-edit-section">
-          <div className="settings-form-grid" style={{ marginBottom: 12 }}>
-            <label className="field">
-              <span>الاسم الكامل</span>
-              <input className="inline-edit-input" value={editName} onChange={(e) => setEditName(e.target.value)} autoFocus />
-            </label>
-            <label className="field">
-              <span>كود الإيصال</span>
-              <input className="inline-edit-input" value={editCode} maxLength={2} onChange={(e) => setEditCode(e.target.value.toUpperCase().slice(0, 2))} dir="ltr" style={{ width: 80 }} />
-            </label>
-          </div>
-          {account.role !== 'manager' && (
-            <div className="perm-section">
-              <div className="perm-section__header">
-                <strong>الصلاحيات</strong>
-                <span className="perm-count">{editPerms.length} من {Object.keys(PERMISSION_LABELS).length}</span>
-              </div>
-              <PresetBar onSelect={setEditPerms} />
-              <PermissionPicker value={editPerms} onChange={setEditPerms} />
+      {/* Modals for edit modes */}
+      <FormModal
+        open={editMode === 'profile'}
+        onClose={cancelEdit}
+        entityName="بيانات الحساب"
+        isEdit
+        onSubmit={saveProfile}
+        maxWidth={700}
+      >
+        <div className="settings-form-grid mb-12">
+          <FormField label="الاسم الكامل" required>
+            <input value={editName} onChange={(e) => setEditName(e.target.value)} autoFocus required />
+          </FormField>
+          <FormField label="كود الإيصال">
+            <input value={editCode} maxLength={2} onChange={(e) => setEditCode(e.target.value.toUpperCase().slice(0, 2))} dir="ltr" style={{ width: 80 }} />
+          </FormField>
+        </div>
+        {account.role !== 'manager' && (
+          <div className="perm-section">
+            <div className="perm-section__header">
+              <strong>الصلاحيات</strong>
+              <span className="perm-count">{editPerms.length} من {Object.keys(PERMISSION_LABELS).length}</span>
             </div>
-          )}
-          {account.role === 'manager' && (
-            <p style={{ fontSize: '0.82rem', color: 'var(--color-muted)', marginBottom: 8 }}>
-              حساب المدير يملك صلاحيات كاملة دائماً ولا يمكن تقييدها
-            </p>
-          )}
-          {editError && <p className="form-error">{editError}</p>}
-          <div className="table-actions" style={{ marginTop: 8 }}>
-            <button type="button" className="btn btn--primary btn--sm" onClick={() => void saveProfile()} disabled={editSaving}><MdCheck /> {editSaving ? '...' : 'حفظ'}</button>
-            <button type="button" className="btn btn--secondary btn--sm" onClick={cancelEdit}><MdClose /></button>
+            <PresetBar onSelect={setEditPerms} />
+            <PermissionPicker value={editPerms} onChange={setEditPerms} />
+            <div className="settings-form-grid mt-12">
+              <label className="field field--checkbox">
+                <input type="checkbox" checked={editAllowCashRounding} onChange={(event) => setEditAllowCashRounding(event.target.checked)} />
+                <span>السماح بتقريب الدفع النقدي</span>
+              </label>
+              <FormField label="حد الموظف (فارغ = الحد العام)">
+                <input type="number" min="0" step="0.01" disabled={!editAllowCashRounding} value={editMaxCashRoundingDifference} onChange={(event) => setEditMaxCashRoundingDifference(event.target.value)} placeholder="مثال: 5.00" />
+              </FormField>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+        {account.role === 'manager' && (
+          <p style={{ fontSize: '0.82rem', color: 'var(--color-muted)', marginBottom: 8 }}>
+            حساب المدير يملك صلاحيات كاملة دائماً ولا يمكن تقييدها
+          </p>
+        )}
+      </FormModal>
 
-      {editMode === 'password' && (
-        <div className="account-edit-inline">
+      <FormModal
+        open={editMode === 'password'}
+        onClose={cancelEdit}
+        entityName="كلمة المرور"
+        title="تغيير كلمة المرور"
+        onSubmit={savePassword}
+        maxWidth={400}
+      >
+        <FormField label="كلمة المرور الجديدة" required>
           <PasswordInput value={editPassword} onChange={setEditPassword} autoComplete="new-password" />
-          {editError && <p className="form-error">{editError}</p>}
-          <div className="table-actions">
-            <button type="button" className="btn btn--primary btn--sm" onClick={() => void savePassword()} disabled={editSaving}><MdCheck /> {editSaving ? '...' : 'حفظ'}</button>
-            <button type="button" className="btn btn--secondary btn--sm" onClick={cancelEdit}><MdClose /></button>
-          </div>
-        </div>
-      )}
+        </FormField>
+      </FormModal>
 
-      {editMode === 'pin' && (
-        <div className="account-edit-inline">
+      <FormModal
+        open={editMode === 'pin'}
+        onClose={cancelEdit}
+        entityName="رمز PIN"
+        title="تعديل PIN"
+        onSubmit={savePin}
+        maxWidth={400}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <p style={{ fontSize: '0.9rem', marginBottom: 16 }}>أدخل 4 أرقام، أو اترك الحقل فارغاً لحذف الـ PIN</p>
           <input
             type="password" inputMode="numeric" maxLength={4}
             value={editPin} onChange={(e) => setEditPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-            placeholder="4 أرقام — اتركه فارغاً لحذف PIN"
-            style={{ width: 200, textAlign: 'center', letterSpacing: '0.4em' }}
+            placeholder="****"
+            style={{ width: 120, textAlign: 'center', letterSpacing: '0.4em', fontSize: '1.5rem', padding: '12px' }}
             autoFocus
           />
-          {editError && <p className="form-error">{editError}</p>}
-          <div className="table-actions">
-            <button type="button" className="btn btn--primary btn--sm" onClick={() => void savePin()} disabled={editSaving}><MdCheck /> حفظ PIN</button>
-            <button type="button" className="btn btn--secondary btn--sm" onClick={cancelEdit}><MdClose /></button>
-          </div>
         </div>
-      )}
+      </FormModal>
 
       {/* Action row */}
-      {!editMode && (
-        <div className="account-card__actions">
-          <button type="button" className="btn btn--secondary btn--sm" onClick={() => startEdit('profile')}><MdEdit /> تعديل</button>
-          <button type="button" className="btn btn--secondary btn--sm" onClick={() => startEdit('password')}><MdLock /> كلمة المرور</button>
-          <button type="button" className="btn btn--secondary btn--sm" onClick={() => startEdit('pin')}><MdShield /> PIN</button>
+      <div className="account-card__actions">
+        <button type="button" className="btn btn--secondary btn--sm" onClick={() => startEdit('profile')}><MdEdit /> تعديل</button>
+        <button type="button" className="btn btn--secondary btn--sm" onClick={() => startEdit('password')}><MdLock /> كلمة المرور</button>
+        <button type="button" className="btn btn--secondary btn--sm" onClick={() => startEdit('pin')}><MdShield /> PIN</button>
+        <button
+          type="button"
+          className={`btn btn--sm ${account.active ? 'btn--secondary' : 'btn--danger'}`}
+          onClick={() => void updateUserActive(account.id, !account.active, currentUser.id, currentUser.username).then(onRefresh)}
+          disabled={isMe}
+        >
+          {account.active ? 'مفعّل' : 'معطّل'}
+        </button>
+        {!isMe && (
+          <ConfirmDialog
+            open={deleteConfirmOpen}
+            onCancel={() => setDeleteConfirmOpen(false)}
+            onConfirm={async () => {
+              await deleteAccount(account.id, currentUser.id)
+              setMessage(`تم حذف حساب "${account.displayName}"`)
+              setDeleteConfirmOpen(false)
+              await onRefresh()
+            }}
+            title="تأكيد الحذف"
+            message={`حذف حساب "${account.displayName}"؟`}
+            confirmLabel="حذف"
+            danger
+          />
+        )}
+        {!isMe && (
           <button
             type="button"
-            className={`btn btn--sm ${account.active ? 'btn--secondary' : 'btn--danger'}`}
-            onClick={() => void updateUserActive(account.id, !account.active).then(onRefresh)}
-            disabled={isMe}
+            className="btn btn--danger btn--sm"
+            onClick={() => setDeleteConfirmOpen(true)}
           >
-            {account.active ? 'مفعّل' : 'معطّل'}
+            حذف
           </button>
-          {!isMe && (
-            <ConfirmDeleteButton
-              confirmMessage={`حذف حساب "${account.displayName}"؟`}
-              onConfirm={async () => {
-                await deleteAccount(account.id, currentUser.id)
-                setMessage(`تم حذف حساب "${account.displayName}"`)
-                await onRefresh()
-              }}
-            />
-          )}
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
@@ -553,19 +573,18 @@ export function AccountsPage(): React.ReactElement {
       {activeTab === 'accounts' && (
         <div className="tab-content">
           <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
-            <button type="button" className="btn btn--primary" onClick={() => setShowCreate((v) => !v)}>
+            <button type="button" className="btn btn--primary" onClick={() => setShowCreate(true)}>
               <MdAdd aria-hidden="true" />
-              {showCreate ? 'إلغاء' : 'إضافة حساب جديد'}
+              إضافة حساب جديد
             </button>
           </div>
 
-          {showCreate && (
-            <CreateAccountForm
-              currentUser={currentUser}
-              onCreated={handleCreated}
-              onCancel={() => setShowCreate(false)}
-            />
-          )}
+          <CreateAccountModal
+            open={showCreate}
+            currentUser={currentUser}
+            onCreated={handleCreated}
+            onClose={() => setShowCreate(false)}
+          />
 
           <div className="accounts-list">
             {accounts.length === 0 && <p className="report-empty">لا توجد حسابات بعد</p>}

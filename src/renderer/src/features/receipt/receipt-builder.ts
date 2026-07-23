@@ -1,5 +1,7 @@
-import type { Order, OrderItem, AppSettings, ReceiptSectionId } from '@shared/types'
+import type { Order, OrderItem, AppSettings, ReceiptSectionId, Payment } from '@shared/types'
 import { orderReference } from '@shared/services/order-reference'
+import { COLLECTIONS } from '@shared/constants/collections'
+import { getCachedDocs } from '@renderer/lib/offline/sqlite-cache'
 
 const RECEIPT_PAPER_WIDTH_MM = 80
 const RECEIPT_PAGE_HEIGHT_MM = 297
@@ -60,7 +62,7 @@ export function buildReceiptHtml(
   order: Order,
   items: OrderItem[],
   settings: AppSettings,
-  options?: { isCopy?: boolean; label?: string }
+  options?: { isCopy?: boolean; label?: string; payments?: Payment[] }
 ): string {
   const cur = settings.currencySymbol
   const hidden = new Set(settings.receiptHiddenSections ?? [])
@@ -125,7 +127,7 @@ function renderSection(
   items: OrderItem[],
   settings: AppSettings,
   cur: string,
-  options?: { isCopy?: boolean; label?: string }
+  options?: { isCopy?: boolean; label?: string; payments?: Payment[] }
 ): string {
   if (section === 'logo') return renderLogo(settings)
   if (section === 'restaurant') {
@@ -146,7 +148,7 @@ function renderSection(
   if (section === 'customer') return renderCustomer(order)
   if (section === 'items') return renderItems(items, settings, cur)
   if (section === 'totals') return `<div class="totals">${renderTotals(order, cur)}</div>`
-  if (section === 'payment') return renderPayment(order)
+  if (section === 'payment') return renderPayment(order, options?.payments)
   if (section === 'footer') return settings.receiptFooterAr ? `<hr/><p class="footer">${escapeHtml(settings.receiptFooterAr)}</p>` : ''
   return ''
 }
@@ -217,14 +219,60 @@ function renderTotals(order: Order, cur: string): string {
   if (order.taxAmount && order.taxAmount > 0) {
     rows.push(`<div><span>ضريبة القيمة المضافة (${order.taxRate}%)</span><span>${fm(order.taxAmount, cur)}</span></div>`)
   }
+  if (order.serviceAmount && order.serviceAmount > 0) {
+    rows.push(`<div><span>خدمة (${order.serviceRate}%)</span><span>${fm(order.serviceAmount, cur)}</span></div>`)
+  }
   if (order.deliveryFee && order.deliveryFee > 0) {
     rows.push(`<div><span>رسوم التوصيل</span><span>${fm(order.deliveryFee, cur)}</span></div>`)
+  }
+  if (order.roundingDifference && Math.abs(order.roundingDifference) > 0.001) {
+    const roundingDisplay = order.roundingDifference > 0
+      ? `- ${fm(order.roundingDifference, cur)}`
+      : `+ ${fm(Math.abs(order.roundingDifference), cur)}`
+    rows.push(`<div><span>الإجمالي قبل التقريب</span><span>${fm(order.originalTotal ?? (order.total + order.roundingDifference), cur)}</span></div>`)
+    rows.push(`<div><span>تقريب النقدية</span><span>${roundingDisplay}</span></div>`)
+    rows.push(`<div class="grand-total"><strong>الإجمالي النهائي</strong><strong>${fm(order.total, cur)}</strong></div>`)
+    return rows.join('')
   }
   rows.push(`<div class="grand-total"><strong>الإجمالي</strong><strong>${fm(order.total, cur)}</strong></div>`)
   return rows.join('')
 }
 
-function renderPayment(order: Order): string {
+function renderPayment(order: Order, payments: Payment[] = []): string {
+  const positivePayments = payments.filter((payment) => payment.amount > 0)
+  if (positivePayments.length) {
+    const cashAmount = positivePayments
+      .filter((payment) => payment.method === 'cash')
+      .reduce((sum, payment) => sum + payment.amount, 0)
+    const cardAmount = positivePayments
+      .filter((payment) => payment.method === 'card')
+      .reduce((sum, payment) => sum + payment.amount, 0)
+    const paidAmount = positivePayments.reduce((sum, payment) => sum + (payment.paidAmount ?? payment.amount), 0)
+    const changeAmount = positivePayments.reduce((sum, payment) => sum + (payment.changeAmount ?? 0), 0)
+    const paymentLabel = cashAmount > 0 && cardAmount > 0
+      ? 'نقدي + بطاقة'
+      : cashAmount > 0
+        ? 'نقدي'
+        : 'بطاقة'
+    return `<div class="totals">
+      <div><span>الدفع</span><span>${paymentLabel}</span></div>
+      ${cashAmount > 0 ? `<div><span>نقدي</span><span>${cashAmount.toFixed(2)}</span></div>` : ''}
+      ${cardAmount > 0 ? `<div><span>بطاقة</span><span>${cardAmount.toFixed(2)}</span></div>` : ''}
+      <div><span>المبلغ المستلم</span><span>${paidAmount.toFixed(2)}</span></div>
+      <div><span>الباقي للعميل</span><span>${changeAmount.toFixed(2)}</span></div>
+    </div>`
+  }
+  if (order.paymentStatus === 'paid' && order.cashPaidAmount != null) {
+    return `<div class="totals">
+      <div><span>الدفع</span><span>نقدي</span></div>
+      <div><span>المبلغ المستلم</span><span>${order.cashPaidAmount.toFixed(2)}</span></div>
+      <div><span>الباقي للعميل</span><span>${(order.cashChangeAmount ?? 0).toFixed(2)}</span></div>
+    </div>`
+  }
+  return renderPaymentLegacy(order)
+}
+
+function renderPaymentLegacy(order: Order): string {
   if (order.paymentStatus === 'split') return `<div class="totals"><div><span>الدفع</span><span>نقدي + بطاقة</span></div></div>`
   if (order.paymentStatus === 'paid') return `<div class="totals"><div><span>الدفع</span><span>مدفوع</span></div></div>`
   return ''
@@ -258,11 +306,19 @@ export async function printReceipt(
   settings: AppSettings,
   options?: { isCopy?: boolean; label?: string }
 ): Promise<boolean> {
-  const html = buildReceiptHtml(order, items, settings, options)
+  const payments = await getCachedDocs<Payment>(COLLECTIONS.payments)
+    .then((records) => records.filter((payment) => payment.orderId === order.id))
+    .catch(() => [])
+  const html = buildReceiptHtml(order, items, settings, { ...options, payments })
   if (window.electronAPI?.printReceipt) {
     const result = await window.electronAPI.printReceipt(html)
     if (!result.ok) {
-      window.alert(result.error ?? 'فشلت الطباعة. راجع إعدادات الطابعة في إعدادات المدير.')
+      window.dispatchEvent(new CustomEvent('pos:notification', {
+        detail: {
+          message: result.error ?? 'فشلت الطباعة. راجع إعدادات الطابعة في إعدادات المدير.',
+          restoreFocus: true
+        }
+      }))
     }
     return result.ok
   }

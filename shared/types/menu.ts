@@ -52,6 +52,15 @@ export interface MenuItem {
   updatedAt: number
 }
 
+export interface ProductImage {
+  id: string
+  productId: string
+  imagePath: string
+  uploadedBy: string
+  createdAt: number
+  updatedAt: number
+}
+
 export interface MenuItemSizeOption {
   id: string
   /** Master size id — references ItemSize.id */
@@ -84,6 +93,8 @@ export interface ItemAddon {
   nameAr: string
   /** Default price suggestion (can be overridden per product) */
   defaultPrice: number
+  /** Optional inventory stock/component consumed when this add-on is sold */
+  linkedIngredientId?: string
   sortOrder: number
   active: boolean
   createdAt: number

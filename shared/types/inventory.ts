@@ -3,6 +3,8 @@ export type InventoryTransactionType =
   | 'sale'
   | 'waste'
   | 'sale_reversal'
+  | 'supplier_return'
+  | 'production'
   | 'adjustment'
 
 export interface Ingredient {
@@ -27,13 +29,49 @@ export interface InventoryTransaction {
   /** Signed quantity in base unit (positive = in, negative = out) */
   quantity: number
   unit: string
-  referenceType?: 'order' | 'purchase' | 'manual' | 'shift' | 'supplier'
+  referenceType?: 'order' | 'purchase' | 'manual' | 'shift' | 'supplier' | 'production'
   referenceId?: string
   shiftId?: string
   supplierId?: string
+  batchId?: string
+  unitCost?: number
+  totalCost?: number
   noteAr?: string
   createdBy: string
   createdAt: number
+}
+
+export interface InventoryBatch {
+  id: string
+  ingredientId: string
+  supplierId?: string
+  purchaseTransactionId: string
+  quantity: number
+  remainingQuantity: number
+  unit: string
+  unitCost: number
+  receivedAt: number
+  createdBy: string
+}
+
+export interface SupplierReturn {
+  id: string
+  supplierId: string
+  userId: string
+  totalAmount: number
+  reason: string
+  createdAt: number
+}
+
+export interface SupplierReturnItem {
+  id: string
+  returnId: string
+  ingredientId: string
+  quantity: number
+  unit: string
+  unitCost: number
+  totalCost: number
+  batchId: string
 }
 
 export interface IngredientStock {
