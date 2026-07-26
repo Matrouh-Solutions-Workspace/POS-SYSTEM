@@ -374,9 +374,14 @@ import { pushOutboxToApi } from './api-sync'
 import { initAutoUpdater } from './auto-updater'
 import {
   activateWithDevCode,
+  activateWithLicenseKey,
   createActivationRequestFile,
+  deactivateLicense,
   getLicenseStatus,
-  importLicenseFile
+  importLicenseFile,
+  startPeriodicValidation,
+  validateOnStartup,
+  validateWithServer
 } from './license'
 import {
   cacheDocuments,
@@ -413,6 +418,17 @@ app.whenReady().then(() => {
   if (!isSideMode() && getLicenseStatus().valid) {
     initLocalStore()
     startBackupScheduler()
+    startPeriodicValidation()
+
+    // Validate with server on every startup — catches revoked licenses immediately
+    void validateOnStartup().then((result) => {
+      if (result === 'revoked') {
+        // License was revoked — reload renderer to show activation screen
+        console.warn('[license] License revoked by server at startup — reloading')
+        mainWindow?.webContents.reload()
+      }
+    })
+
     void syncMasterServerWithSettings({ printReceiptHtml: async (html) => (await printReceiptUsingDefault(html)).ok, printKitchenBatch }).catch((e) => {
       console.error('[master-server]', e)
     })
@@ -423,6 +439,9 @@ app.whenReady().then(() => {
   ipcMain.handle('license:create-activation-request', () => createActivationRequestFile())
   ipcMain.handle('license:import-license', () => importLicenseFile())
   ipcMain.handle('license:activate-with-dev-code', (_, code: string) => activateWithDevCode(code))
+  ipcMain.handle('license:deactivate', () => deactivateLicense())
+  ipcMain.handle('license:activate-with-key', (_, key: string) => activateWithLicenseKey(key))
+  ipcMain.handle('license:validate-server', () => validateWithServer())
   ipcMain.handle('network:get-status', async () => {
     const side = readSideConnection()
     if (side) {

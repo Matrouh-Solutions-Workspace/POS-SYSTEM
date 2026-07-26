@@ -37,6 +37,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('license:import-license'),
   activateWithDevCode: (code: string): Promise<{ ok: boolean; status?: unknown; error?: string }> =>
     ipcRenderer.invoke('license:activate-with-dev-code', code),
+  deactivateLicense: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('license:deactivate'),
+  activateWithLicenseKey: (key: string): Promise<{ ok: boolean; status?: unknown; error?: string }> =>
+    ipcRenderer.invoke('license:activate-with-key', key),
+  validateWithServer: (): Promise<{ ok: boolean; inGrace?: boolean; error?: string }> =>
+    ipcRenderer.invoke('license:validate-server'),
+  onLicenseRevoked: (cb: (reason: string) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, reason: string): void => cb(reason)
+    ipcRenderer.on('license:revoked', handler)
+    return () => ipcRenderer.removeListener('license:revoked', handler)
+  },
   getNetworkStatus: (): Promise<unknown> =>
     ipcRenderer.invoke('network:get-status'),
   pairSideDevice: (params: { masterUrl: string; deviceName: string; code: string }): Promise<{ ok: boolean; error?: string }> =>

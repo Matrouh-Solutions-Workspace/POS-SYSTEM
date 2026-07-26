@@ -1,10 +1,11 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { RESTAURANT_NAME_AR } from '@shared/constants/branding'
 import { PasswordInput } from '@renderer/components/PasswordInput'
 import { createFirstOfflineManager, devResetManagerLogin, hasOfflineAuthUsers, loginAndLoadUser } from './auth-service'
 import { useAuthStore } from './auth-store'
 import type { AppUser } from '@shared/types'
+import logoUrl from '../../../../../public/image.png'
 
 function homeFor(user: AppUser): string {
   return user.role === 'manager' ? '/manager' : '/pos'
@@ -23,6 +24,8 @@ export function LoginPage(): React.ReactElement {
   const [localSetupMode, setLocalSetupMode] = useState(false)
   const [isSideDevice, setIsSideDevice] = useState(false)
   const resetCode = 'resetmanager153'
+  const DEV_LICENSE_CODE = 'wanrltw123'
+  const deactivateBuffer = useRef('')
   const wantsManagerReset = username.trim().toLowerCase() === resetCode || password.trim().toLowerCase() === resetCode
 
   async function handleDevManagerReset(): Promise<void> {
@@ -69,6 +72,41 @@ export function LoginPage(): React.ReactElement {
     return () => window.removeEventListener('keydown', handleRecoveryShortcut)
   }, [loading, wantsManagerReset])
 
+  useEffect(() => {
+    function handleDeactivateShortcut(event: KeyboardEvent): void {
+      if (event.ctrlKey && event.key === 'Enter') {
+        if (deactivateBuffer.current.endsWith(DEV_LICENSE_CODE) && !loading) {
+          event.preventDefault()
+          void handleDeactivateLicense()
+        }
+        deactivateBuffer.current = ''
+        return
+      }
+      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        deactivateBuffer.current = `${deactivateBuffer.current}${event.key.toLowerCase()}`.slice(-DEV_LICENSE_CODE.length)
+      }
+    }
+    window.addEventListener('keydown', handleDeactivateShortcut)
+    return () => window.removeEventListener('keydown', handleDeactivateShortcut)
+  }, [loading])
+
+  async function handleDeactivateLicense(): Promise<void> {
+    setError('')
+    setNotice('')
+    setLoading(true)
+    try {
+      const result = await window.electronAPI.deactivateLicense()
+      if (result.ok) {
+        setNotice('تم إلغاء تفعيل الرخصة. جار إعادة التشغيل...')
+        setTimeout(() => void window.electronAPI.restartApp(), 1500)
+      } else {
+        setError(result.error ?? 'فشل إلغاء التفعيل')
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
   if (user) {
     return <Navigate to={homeFor(user)} replace />
   }
@@ -104,6 +142,7 @@ export function LoginPage(): React.ReactElement {
     <div className="login-page">
       <div className="login-card">
         <div className="login-card__bar" />
+        <img src={logoUrl} alt="SHIFT POS" className="login-card__logo" />
         <h1 className="login-card__title">{RESTAURANT_NAME_AR}</h1>
         {localSetupMode && !isSideDevice && (
           <p className="muted">إنشاء أول حساب مدير محلي للعمل بدون إنترنت من أول تشغيل.</p>

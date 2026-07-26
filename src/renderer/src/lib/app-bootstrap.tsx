@@ -21,6 +21,13 @@ export async function bootstrapApp(): Promise<void> {
     return
   }
 
+  // Listen for server-side revocation during the session
+  const unsubRevoke = window.electronAPI.onLicenseRevoked((reason) => {
+    unsubRevoke()
+    console.warn('[license] Revoked mid-session:', reason)
+    window.location.reload()
+  })
+
   // SQLite is primary; optional cloud sync starts in the background.
   root.render(
     <StrictMode>

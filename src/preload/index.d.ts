@@ -102,6 +102,13 @@ export interface ElectronAPI {
     status?: { valid: boolean; reason?: string }
     error?: string
   }>
+  activateWithLicenseKey: (key: string) => Promise<{
+    ok: boolean
+    status?: { valid: boolean; reason?: string }
+    error?: string
+  }>
+  deactivateLicense: () => Promise<{ ok: boolean; error?: string }>
+  onLicenseRevoked: (callback: (reason: string) => void) => () => void
   getNetworkStatus: () => Promise<unknown>
   pairSideDevice: (params: { masterUrl: string; deviceName: string; code: string }) => Promise<{ ok: boolean; error?: string }>
   clearSideConnection: () => Promise<{ ok: boolean }>

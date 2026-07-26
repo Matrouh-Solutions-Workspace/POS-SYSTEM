@@ -4531,55 +4531,279 @@ textarea {
   cursor: pointer;
 }
 
+/* Login card logo */
+.login-card__logo {
+  display: block;
+  width: 80px;
+  height: 80px;
+  object-fit: contain;
+  margin: 0 auto 16px;
+  border: 3px solid var(--color-border);
+  padding: 6px;
+  background: var(--color-bg);
+}
+
+.license-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.license-panel__logo {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.license-panel__header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
 .license-page {
   min-height: 100vh;
   display: grid;
   place-items: center;
   padding: 24px;
-  background: var(--color-bg);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.03), transparent 38%),
+    #1a1a1a;
 }
 
 .license-panel {
-  width: min(680px, 100%);
-  padding: 24px;
-  border: 2px solid var(--color-border);
+  width: min(560px, 100%);
   background: var(--color-surface);
+  border: 3px solid var(--color-border);
+  box-shadow: 0 18px 42px rgba(0,0,0,0.32);
+  overflow: hidden;
+}
+
+.license-panel__bar {
+  height: 5px;
+  background: var(--color-primary);
+  border-bottom: 2px solid var(--color-border);
+}
+
+.license-panel__inner {
+  padding: 28px 32px 32px;
 }
 
 .license-panel h1 {
-  margin: 0 0 12px;
-  font-size: 1.35rem;
+  margin: 0 0 4px;
+  font-size: 1.5rem;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
+.license-panel__subtitle {
+  margin: 0 0 20px;
+  color: var(--color-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
 .license-panel__message {
-  margin: 0 0 16px;
-  color: var(--color-muted);
+  margin: 0 0 20px;
+  padding: 10px 14px;
+  background: #fff8e1;
+  border: 1.5px solid #f2c94c;
+  border-right: 4px solid #f2c94c;
+  color: #7a5800;
+  font-size: 0.88rem;
   font-weight: 700;
+  line-height: 1.5;
 }
 
+.license-panel__message--error {
+  background: #fef2f2;
+  border-color: var(--color-danger);
+  border-right-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.license-panel__message--success {
+  background: #f0fdf4;
+  border-color: #22c55e;
+  border-right-color: #22c55e;
+  color: #166534;
+}
+
+/* Tabs: key vs file */
+.license-panel__tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border: 2px solid var(--color-border);
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+
+.license-tab {
+  min-height: 44px;
+  padding: 10px 16px;
+  border: none;
+  background: var(--color-bg);
+  color: var(--color-muted);
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background var(--t-mid) var(--ease-out), color var(--t-mid) var(--ease-out);
+  border-left: 1px solid var(--color-border);
+}
+
+.license-tab:first-child {
+  border-left: none;
+}
+
+.license-tab--active {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+@media (hover: hover) {
+  .license-tab:not(.license-tab--active):hover {
+    background: var(--color-primary-soft);
+    color: var(--color-primary);
+  }
+}
+
+/* HWID meta row */
 .license-panel__meta {
   display: grid;
-  gap: 6px;
-  margin: 12px 0;
+  gap: 5px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  background: var(--color-bg);
+  border: 1.5px solid var(--color-border-light);
 }
 
 .license-panel__meta span {
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-muted);
 }
 
 .license-panel__meta code {
-  padding: 8px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg);
-  overflow-wrap: anywhere;
+  font-family: 'Courier New', monospace;
+  font-size: 0.82rem;
+  color: var(--color-primary-dark);
+  word-break: break-all;
+  line-height: 1.5;
 }
 
+/* Online key input */
+.license-panel__key-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.license-panel__hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-muted);
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.license-key-input {
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 16px;
+  border: 2px solid var(--color-border);
+  background: var(--color-bg);
+  font-family: 'Courier New', monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: center;
+  color: var(--color-text);
+  transition: border-color var(--t-mid) var(--ease-out), background var(--t-mid) var(--ease-out), box-shadow var(--t-mid) var(--ease-out);
+}
+
+.license-key-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(14, 116, 144, 0.15);
+}
+
+@media (hover: hover) {
+  .license-key-input:hover:not(:focus) {
+    border-color: var(--color-primary);
+    background: var(--color-primary-soft);
+  }
+}
+
+/* Action buttons */
 .license-panel__actions {
   display: flex;
+  flex-direction: column;
   gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 18px;
+  margin-top: 20px;
+}
+
+.license-panel__actions .btn {
+  width: 100%;
+  min-height: 50px;
+  font-size: 0.95rem;
+}
+
+/* Divider between file actions */
+.license-panel__divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin: 4px 0;
+}
+
+.license-panel__divider::before,
+.license-panel__divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-border-light);
+}
+
+/* Device ID badge */
+.license-panel__hwid {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--color-bg);
+  border: 1.5px solid var(--color-border-light);
+  margin-bottom: 20px;
+}
+
+.license-panel__hwid-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-muted);
+  flex-shrink: 0;
+}
+
+.license-panel__hwid-value {
+  font-family: 'Courier New', monospace;
+  font-size: 0.78rem;
+  color: var(--color-primary-dark);
+  word-break: break-all;
+  text-align: left;
+  direction: ltr;
 }
 
 .weighted-pricing-editor {
