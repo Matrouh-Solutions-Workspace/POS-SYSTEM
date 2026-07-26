@@ -22,6 +22,15 @@ export interface VersionLog {
 
 export const CHANGELOG: VersionLog[] = [
   {
+    version: '2.2.12',
+    date: '23 يوليو 2026',
+    changes: [
+      { type: 'fix', text: 'إصلاح مشكلة في تفعيل الرخصة عند بعض الأجهزة' },
+      { type: 'fix', text: 'إصلاح مشكلة في تحديث التطبيق تلقائياً' },
+      { type: 'fix', text: 'إصلاح بعض المشاكل العامة في الأداء والاستقرار' },
+    ]
+  },
+  {
     version: '2.2.11',
     date: '23 يوليو 2026',
     changes: [
