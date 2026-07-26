@@ -1,6 +1,6 @@
 {
   "name": "shift-pos",
-  "version": "2.2.10",
+  "version": "2.2.11",
   "description": "Restaurant Management and POS - Arabic RTL",
   "main": "./out/main/index.js",
   "private": true,
@@ -47,7 +47,7 @@
     "publish": {
       "provider": "github",
       "owner": "xlargetomato",
-      "repo": "AbdoKoftaDesktop",
+      "repo": "POS-SYSTEM",
       "releaseType": "release",
       "private": true
     },
